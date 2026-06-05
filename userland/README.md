@@ -11,6 +11,12 @@ Pages in this section:
 |------|-------|
 | [SDK](sdk.md) | Syscall bindings, runtime crates, and capsule structure. |
 | [Desktop](desktop.md) | GUI capsules, desktop IPC, window state, and input routing. |
+| [GUI Contracts](gui-contracts.md) | Window placement, move, resize, close, focus, cursor, and input delivery contracts. |
+| [Capsule Inventory](capsules.md) | Complete userland capsule inventory with handles, endpoints, caps, entrypoints, and protocol refs. |
+| [Applications](apps.md) | App skeleton contract, app manifests, deterministic window geometry, input masks, and direct GUI apps. |
+| [Services](services.md) | Core, security, storage, desktop service, proof, policy, market, login, clipboard, image, and toolkit capsules. |
+| [Drivers](drivers.md) | User-mode hardware driver capsules, boot group, endpoint, capability, and protocol surface. |
+| [Network Capsules](network-capsules.md) | L2, IPv4, UDP, DHCP, TCP, DNS, sockets, and Nym capsule contracts. |
 
 ---
 
