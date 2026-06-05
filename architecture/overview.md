@@ -282,7 +282,7 @@ for every capsule live under `nonos-data/trust/capsules/`.
     namespace            [u8; 96]    plus length
     version              Version
     target_triple        [u8; 64]    plus length
-    payload_hash         [u8; 32]    SHA3-256 of the ELF
+    payload_hash         [u8; 32]    BLAKE3 of the ELF
     required_caps        u64         capability bits that must be granted
     optional_caps        u64         capability bits that may be granted
     endpoints            Vec<EndpointDecl>          up to 16
@@ -548,10 +548,20 @@ wake it.
 
 The scheduler is cooperative and preemptive at once. Capsules yield voluntarily
 at natural wait points, and a 100 Hz timer preempts a capsule that overruns its
-slice. Three tiers, checked in order: deadline, realtime, then the main
-runqueue (`process/scheduler/core.rs:36`). The main runqueue is a `VecDeque`
-drained from the front and appended at the back, so ready entities run in
-arrival order and no pid is structurally starved.
+slice. Selection walks five priority classes in a fixed order and takes the
+first class that has a runnable process
+(`process/scheduler/selection/select.rs`):
+
+```
+  RealTime  >  High  >  Normal  >  Low  >  Idle
+```
+
+Within a class, selection is round-robin: it remembers the last pid it scheduled
+(`LAST_SCHEDULED_PID`) and picks the next runnable pid after it, so no process in
+a class is starved by its neighbours. The runnable set is backed by a `VecDeque`
+(`scheduler/dispatch/run_queue.rs`), appended at the back as processes become
+ready. A separate deadline module exists in the tree but is not wired into this
+selection path today; the live policy is the five-class priority walk above.
 
 ```
   every 10 ms:  timer IRQ -> tick()        scheduler/preemption/tick.rs:21
@@ -562,8 +572,8 @@ arrival order and no pid is structurally starved.
 
   yield_now()                               scheduler/preemption/yield_impl.rs:22
     disable interrupts
-    save context, move current Running -> Ready, push to runqueue
-    select_next_process from the front of the runqueue
+    save context, move current Running -> Ready, back onto the runqueue
+    select_next_process: the priority walk above
     switch, or stay if it is the same pid
 ```
 
@@ -611,7 +621,7 @@ gated by first claiming the device, which establishes an ownership epoch.
 ### Interrupts
 
 For a line-based (INTx) interrupt the broker allocates a vector from its pool
-(`0x60..0xFF`), programs the IO-APIC redirection entry to deliver that vector to
+(`0x81..0xC0`), programs the IO-APIC redirection entry to deliver that vector to
 the current CPU, and masks the line. Programming the route claims the GSI for
 the capsule (`arch/x86_64/interrupt/ioapic/ops_route.rs:94`,
 `program_route_external`). GSI ownership is a per-line atomic state machine,
@@ -727,8 +737,8 @@ what each primitive is actually used for, not just what exists
 ```
   Ed25519           classical half of capsule signatures
   ML-DSA-65         post-quantum half of capsule signatures (FIPS 204)
-  BLAKE3            NONOS-ID derivation, keyed MAC for capability tokens
-  SHA3-256          capsule payload (ELF) hashing in the manifest
+  BLAKE3            NONOS-ID derivation, capsule payload (ELF) hash,
+                      keyed MAC for capability tokens
   secp256k1         Ethereum-compatible signing, application layer
   Keccak256         Ethereum hashing, application layer
   Groth16 / BN254   zero knowledge proofs, application layer
@@ -738,7 +748,7 @@ what each primitive is actually used for, not just what exists
 ```
 
 The split worth remembering: capsule admission and capability tokens are the
-critical path and use Ed25519, ML-DSA-65, BLAKE3, and SHA3-256. The secp256k1,
+critical path and use Ed25519, ML-DSA-65, and BLAKE3. The secp256k1,
 Keccak256, and zero-knowledge machinery target the application layer and the
 chain-facing work; they are not in the boot or spawn trust path. BN254 is the
 same pairing-friendly curve used by Ethereum's alt_bn128 precompiles, so proofs

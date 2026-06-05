@@ -28,12 +28,24 @@ nonos-docs/
 
 ## Start here
 
+Read the architecture overview first. It is the map the rest of the
+documentation hangs off.
+
 | Page | What it covers |
 |------|----------------|
-| [architecture/overview.md](architecture/overview.md) | The full system: privilege model, boot order, memory, capsules, verified spawn, capabilities, syscalls, IPC, scheduling, the hardware broker, and the input and graphics paths. Read this first. |
+| [architecture/overview.md](architecture/overview.md) | The full system in one document: the arch boundary, privilege model, boot order, memory, capsules, verified spawn, capabilities, syscalls, IPC, scheduling, the hardware broker, and the input and graphics paths. |
 
-The remaining sections are built out subsystem by subsystem. Each page follows
-the same rule as the overview: code-accurate, cross-referenced, and verifiable.
+### Reference
+
+| Section | Page | What it covers |
+|---------|------|----------------|
+| ABI | [abi/syscalls.md](abi/syscalls.md) | Every syscall: calling convention, numbers, capability, and semantics. |
+| Security | [security/capsules-and-trust.md](security/capsules-and-trust.md) | Capsule format, signing, the trust anchor, and the verified-spawn gate. |
+| Security | [security/capabilities-and-tokens.md](security/capabilities-and-tokens.md) | The capability bits, their enforcement, and the capability token. |
+| Subsystems | [subsystems/](subsystems/) | Per-subsystem deep dives, expanded from the overview one at a time. |
+
+Each page follows the same rule as the overview: code-accurate, cross
+referenced, and verifiable against the tree.
 
 ## Conventions
 
@@ -44,6 +56,8 @@ pager, a code review, and a browser.
 
 ## License
 
-Documentation for the NØNOS project. The kernel is distributed under the GNU
-Affero General Public License v3. This documentation is part of the same
-project and carries the same terms.
+This documentation is part of the NØNOS project and is licensed under the GNU
+Affero General Public License, version 3. The full text is in [LICENSE](LICENSE).
+The documentation carries the same terms as the kernel it describes: the right
+to use, study, share, and modify it, with the obligation to pass those same
+rights on.
