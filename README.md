@@ -40,9 +40,13 @@ documentation hangs off.
 | Section | Page | What it covers |
 |---------|------|----------------|
 | ABI | [abi/syscalls.md](abi/syscalls.md) | Every syscall: calling convention, numbers, capability, and semantics. |
+| ABI | [abi/errors.md](abi/errors.md) | The error codes, the return convention, and what causes each. |
 | Security | [security/capsules-and-trust.md](security/capsules-and-trust.md) | Capsule format, signing, the trust anchor, and the verified-spawn gate. |
 | Security | [security/capabilities-and-tokens.md](security/capabilities-and-tokens.md) | The capability bits, their enforcement, and the capability token. |
-| Subsystems | [subsystems/](subsystems/) | Per-subsystem deep dives, expanded from the overview one at a time. |
+| Subsystems | [subsystems/](subsystems/) | Per-subsystem deep dives: boot, memory, process model, ELF loader, scheduler, SMP, IPC, broker, interrupts, input, graphics, networking, storage, time, crypto. |
+| Userland | [userland/](userland/) | The capsule userland model, the nonos_libc SDK, and the desktop stack. |
+| Build | [build/](build/) | The toolchain, the cargo and Make build, and the capsule signing pipeline. |
+| Architecture | [arch/](arch/) | The x86_64, aarch64, and riscv64 backends behind the arch boundary. |
 
 Each page follows the same rule as the overview: code-accurate, cross
 referenced, and verifiable against the tree.

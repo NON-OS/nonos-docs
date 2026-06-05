@@ -22,6 +22,8 @@ source.
 | [interrupts.md](interrupts.md) | IO-APIC routing, GSI ownership, vector pool | 12 |
 | [input.md](input.md) | The input ring and the driver to shell path | 13 |
 | [graphics.md](graphics.md) | Surfaces, sharing, presentation, vsync | 14 |
+| [networking.md](networking.md) | The L2 to sockets network capsule stack | 9 |
+| [storage.md](storage.md) | Block drivers, ramfs, and the vfs capsules | 9 |
 | [time-and-clock.md](time-and-clock.md) | TSC calibration, the two time bases, entropy | 11 |
 | [crypto.md](crypto.md) | The in-tree crypto stack and what uses each primitive | 15 |
 
