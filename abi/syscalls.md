@@ -75,8 +75,8 @@ not, independent of the capability bit.
 | MEXT | MkExit | valid token | Terminate the calling capsule. Does not return. |
 | MPAL | MkPidAlive | valid token | Report whether a given pid is still alive. |
 | MYLD | MkYield | valid token | Voluntarily yield the CPU to the scheduler. |
-| MTMS | MkTimeMillis | valid token | Monotonic milliseconds since boot, as an `i64`. |
-| MTRT | MkTimeRtc | valid token | Wall-clock time from the real-time clock. |
+| MTMS | MkTimeMillis | valid token | Unix-epoch milliseconds, derived from the RTC boot time plus elapsed TSC. Monotonic, returned as an `i64`. |
+| MTRT | MkTimeRtc | valid token | Broken-down wall-clock time read from the RTC, written to a caller-supplied struct. |
 | MBAT | MkBatteryStatus | valid token | Battery state, where the platform reports one. |
 
 `MkTimeMillis` returns a signed value; clients that store it must use `i64`, not

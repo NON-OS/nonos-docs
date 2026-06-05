@@ -6,6 +6,7 @@ arguments and return values are passed, and what every call does.
 | Page | What it covers |
 |------|----------------|
 | [syscalls.md](syscalls.md) | The full syscall reference. Calling convention, number encoding, capability gating, and a per-call table for every family: process and time, memory, capabilities, IPC, the device broker, port IO, surfaces, input, crypto, and admin. |
+| [errors.md](errors.md) | The error codes. The negative-i64 return convention, the full errno table with values, and what causes the common ones. |
 
 The authoritative sources behind this section are `src/syscall/numbers/defs.rs`
 for the numbers and `src/syscall/contract/cap_table/mk.rs` for the capability
