@@ -1,0 +1,46 @@
+name: ci
+
+# Production gate for the documentation repo: the house style is enforced.
+# No em-dashes or en-dashes, no AI-pattern phrasing, and every page is valid
+# non-empty UTF-8.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  discipline:
+    name: docs discipline
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: No em-dashes or en-dashes
+        run: |
+          if grep -rnP "[—–]" --include='*.md' . | grep -v '^./LICENSE'; then
+            echo "::error::em-dash or en-dash found in documentation"
+            exit 1
+          fi
+          echo "no em/en dashes"
+      - name: No AI-pattern phrasing
+        run: |
+          if grep -rniE "as an ai|delve|tapestry|in conclusion|it's worth noting|leverage|seamless|cutting-edge|in today's world" --include='*.md' . | grep -v '^./LICENSE'; then
+            echo "::error::AI-pattern phrase found in documentation"
+            exit 1
+          fi
+          echo "no AI-pattern phrasing"
+      - name: Pages are valid non-empty UTF-8
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' f; do
+            [ -s "$f" ] || { echo "::error file=$f::empty markdown file"; exit 1; }
+            iconv -f UTF-8 -t UTF-8 "$f" >/dev/null || { echo "::error file=$f::invalid UTF-8"; exit 1; }
+          done < <(find . -name '*.md' -not -path './.git/*' -print0)
