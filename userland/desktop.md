@@ -4,6 +4,10 @@ This page describes the userland GUI stack: compositor, WM, input_router, and
 desktop_shell. Read [Userland Model](README.md), then
 [Graphics](../subsystems/graphics.md) and [Input](../subsystems/input.md).
 
+Audit the desktop in two passes: first follow drawing into the compositor, then
+follow input through the router and WM. Keeping those paths separate makes GUI
+failures much easier to isolate.
+
 ---
 
 ## 1. Boot shape
@@ -29,6 +33,46 @@ GUI core is only input_router and compositor (`src/userspace/init/spawn_plan/des
   | apps and shell  |-------| compositor      |
   | event handlers  | scene | scene, scanout  |
   +-----------------+       +-----------------+
+```
+
+```
++--------------------------+
+| render plane             |
++------------+-------------+
+             |
++------------+-------------+
+| app or shell surface     |
++------------+-------------+
+             |
++------------+-------------+
+| compositor scene table   |
++------------+-------------+
+             |
++------------+-------------+
+| damage and scanout       |
++--------------------------+
+```
+
+```
++--------------------------+
+| input plane              |
++------------+-------------+
+             |
++------------+-------------+
+| kernel input ring        |
++------------+-------------+
+             |
++------------+-------------+
+| input_router routing     |
++------------+-------------+
+             |
++------------+-------------+
+| WM focus topmost query   |
++------------+-------------+
+             |
++------------+-------------+
+| shell or app delivery    |
++--------------------------+
 ```
 
 ## 2. Compositor

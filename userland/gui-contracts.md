@@ -2,8 +2,8 @@
 
 This page documents the concrete GUI behavior implemented by the userland
 desktop stack: boot order, deterministic app window requests, non-overlap
-rules, move and resize validation, close teardown, focus, cursor state, and
-keyboard and pointer delivery. Read [Desktop](desktop.md),
+rules, on-demand app launch, move and resize validation, close teardown,
+focus, cursor state, and keyboard and pointer delivery. Read [Desktop](desktop.md),
 [Applications](apps.md), and [Capsule Inventory](capsules.md) first.
 
 ---
@@ -13,10 +13,17 @@ keyboard and pointer delivery. Read [Desktop](desktop.md),
 The default desktop boot path starts GUI core, then WM, wallpaper catalog,
 wallpaper, desktop shell, and desktop services
 (`src/userspace/init/spawn_plan/desktop_fleet.rs:17`). GUI core is input router
-and compositor (`src/userspace/init/spawn_plan/desktop_fleet.rs:26`). App
-capsules are then spawned from the app fleet and app tools plan
-(`src/userspace/init/spawn_plan/apps.rs:17`,
-`src/userspace/init/spawn_plan/apps_tools.rs:17`).
+and compositor (`src/userspace/init/spawn_plan/desktop_fleet.rs:26`). The init
+entry path calls desktop and market after network
+(`src/userspace/init/entry.rs:35`, `src/userspace/init/entry.rs:36`). App
+fleet source files exist, but the current spawn plan module does not wire them
+into `run_init` (`src/userspace/init/spawn_plan/mod.rs:17`,
+`src/userspace/init/spawn_plan/mod.rs:41`).
+Init registers the kernel-owned `desktop.launcher` service before desktop
+startup (`src/userspace/init/entry.rs:34`). The residual init loop drains that
+launcher inbox once per loop after the lifecycle tick
+(`src/userspace/init/supervisor/loop_impl.rs:25`,
+`src/userspace/init/supervisor/loop_impl.rs:29`).
 
 ```
   +----------------+
@@ -41,7 +48,52 @@ capsules are then spawned from the app fleet and app tools plan
   +----------------+
 ```
 
-## 2. Window open
+## 2. App launch
+
+Desktop launcher entries carry a fixed launch id next to the visible label and
+service name (`userland/capsule_desktop_shell/src/state/apps.rs:28`,
+`userland/capsule_desktop_shell/src/state/apps.rs:35`). A launcher request
+first looks up the app service and sends the app focus control frame if the app
+is already alive. If the service lookup fails, it sends an eight-byte launch
+frame to `desktop.launcher`
+(`userland/capsule_desktop_shell/src/server/handlers/launcher_request/request.rs:19`,
+`userland/capsule_desktop_shell/src/server/handlers/launcher_request/launch.rs:19`,
+`userland/capsule_desktop_shell/src/server/handlers/launcher_request/launch_frame.rs:17`).
+
+The init launcher registers a kernel-owned inbox and service endpoint named
+`desktop.launcher`, using endpoint port `4700` and requiring the IPC
+capability (`src/userspace/init/launcher/register.rs:19`). The broker only
+accepts messages whose source pid matches the current `desktop_shell` service
+owner (`src/userspace/init/launcher/authorize.rs:19`). It decodes only the
+`NLAU` versioned eight-byte frame and extracts the launch id from bytes six and
+seven (`src/userspace/init/launcher/decode.rs:17`). The allowlist maps ids
+`1` through `7` to terminal, file manager, text editor, settings, process
+manager, about, and calculator, checking each capsule liveness state before
+calling its verified spawn wrapper (`src/userspace/init/launcher/spawn.rs:17`).
+
+```
+  +------------------+
+  | desktop_shell    |
+  | launcher click   |
+  +--------+---------+
+           |
+  +--------+---------+
+  | service lookup   |
+  | focus if alive   |
+  +--------+---------+
+           |
+  +--------+---------+
+  | desktop.launcher |
+  | NLAU id          |
+  +--------+---------+
+           |
+  +--------+---------+
+  | init broker      |
+  | verified spawn   |
+  +------------------+
+```
+
+## 3. Window open
 
 Apps using `nonos_app_skeleton` send the manifest window id, kind, requested
 initial position, requested width, and requested height to `wm::window_open`
@@ -61,7 +113,7 @@ and returns the first non-colliding rectangle
 checks only consider visible normal windows
 (`userland/capsule_wm/src/server/handlers/window_open/collides.rs:21`).
 
-## 3. Move and resize
+## 4. Move and resize
 
 Window move validates request length, window id, x, and y, looks up the
 sender-owned window, clamps the candidate rectangle to the display, rejects the
@@ -85,7 +137,7 @@ The shared resize collision rule ignores the window being changed and rejects
 overlap with visible normal windows
 (`userland/capsule_wm/src/server/handlers/window_resize/collides.rs:20`).
 
-## 4. Close and teardown
+## 5. Close and teardown
 
 The app skeleton maps a button-down event on the toolkit close button to
 `EventOutcome::Close` (`userland/app_skeleton/src/runner/decorations.rs:28`).
@@ -103,7 +155,7 @@ closed lifecycle notification, and replies success
 `userland/capsule_wm/src/server/handlers/window_close.rs:58`,
 `userland/capsule_wm/src/server/handlers/window_close.rs:64`).
 
-## 5. Focus
+## 6. Focus
 
 Button-down inside an app asks the WM to raise and focus that app window
 (`userland/app_skeleton/src/runner/click_focus.rs:20`). The app skeleton also
@@ -114,7 +166,7 @@ sender pid resolves to `desktop_shell`
 WM for the focused pid and falls back to the shell pid when there is no focus
 (`userland/capsule_input_router/src/route/keyboard.rs:25`).
 
-## 6. Cursor and pointer delivery
+## 7. Cursor and pointer delivery
 
 The compositor context owns a cursor tracker alongside scene, damage, focus,
 and attach state (`userland/compositor/src/state/context.rs:19`). The input
@@ -134,7 +186,7 @@ Keyboard routing issues a WM focus query, checks that the destination
 subscription allows the event kind, delivers one event, forgets a dead target,
 and records delivery count (`userland/capsule_input_router/src/route/keyboard.rs:25`).
 
-## 7. App-side delivery contract
+## 8. App-side delivery contract
 
 The app skeleton parses input deliveries with the `NINP` magic and a fixed
 delivery length before converting bytes to an `InputEvent`
@@ -144,4 +196,3 @@ drains IPC, handles close, repaints when requested, and waits for display vsync
 (`userland/app_skeleton/src/runner/service_frame.rs:28`). This means input,
 paint, close, and teardown are part of the shared app runtime, not duplicated
 inside each app capsule.
-

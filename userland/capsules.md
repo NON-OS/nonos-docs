@@ -103,10 +103,13 @@ grouped as virtio, bus, input, NIC, USB, and storage
 IP, UDP, DHCP, TCP, DNS, Nym, and sockets in that order
 (`src/userspace/init/spawn_plan/network.rs:17`). The default desktop path runs
 GUI core, WM, wallpaper catalog, wallpaper, desktop shell, and desktop services
-(`src/userspace/init/spawn_plan/desktop_fleet.rs:17`). The app fleet starts
-input proof, about, calculator, terminal, file manager, then tool apps
-(`src/userspace/init/spawn_plan/apps.rs:17`,
-`src/userspace/init/spawn_plan/apps_tools.rs:17`).
+(`src/userspace/init/spawn_plan/desktop_fleet.rs:17`). The init entry path
+registers the launcher broker, then calls desktop and market after network
+(`src/userspace/init/entry.rs:33`, `src/userspace/init/entry.rs:34`,
+`src/userspace/init/entry.rs:35`, `src/userspace/init/entry.rs:36`). The app
+fleet source exists, but the current spawn plan module does not import it or
+export an app spawn entry (`src/userspace/init/spawn_plan/mod.rs:17`,
+`src/userspace/init/spawn_plan/mod.rs:41`).
 
 | Boot class | Capsules | Source |
 |------------|----------|--------|
@@ -123,6 +126,7 @@ input proof, about, calculator, terminal, file manager, then tool apps
 | Desktop GUI core | `input_router`, `compositor` | `src/userspace/init/spawn_plan/desktop_fleet.rs:26` |
 | Desktop fleet | `wm`, `wallpaper_catalog`, `wallpaper`, `desktop_shell`, desktop services | `src/userspace/init/spawn_plan/desktop_fleet.rs:17` |
 | Desktop services | `image_codec`, `clipboard`, `attest`, `login`, `toolkit` | `src/userspace/init/spawn_plan/desktop_services.rs:17` |
+| Desktop launch broker | kernel-owned `desktop.launcher` endpoint for allowlisted first-party app launch | `src/userspace/init/entry.rs:34`, `src/userspace/init/launcher/register.rs:19`, `src/userspace/init/launcher/spawn.rs:17` |
 | Input probe mode | `input_router`, `compositor`, `app.input_probe` | `src/userspace/init/spawn_plan/input_probe_fleet.rs:17` |
 | Setup wizard mode | GUI core plus `app.setup_wizard`, then full desktop after wizard exit | `src/userspace/init/spawn_plan/orchestrator.rs:51`, `src/userspace/init/spawn_plan/orchestrator.rs:63` |
-
+| App fleet source | `input_proof`, `about`, `calculator`, `terminal`, `file_manager`, then tool apps, present in source but not wired by `spawn_plan/mod.rs` | `src/userspace/init/spawn_plan/apps.rs:17`, `src/userspace/init/spawn_plan/apps_tools.rs:17`, `src/userspace/init/spawn_plan/mod.rs:17` |

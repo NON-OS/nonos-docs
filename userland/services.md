@@ -6,6 +6,10 @@ proof, power, login, clipboard, image codec, and toolkit. Read
 [Capsule Inventory](capsules.md), then [Desktop](desktop.md) and
 [Storage](../subsystems/storage.md).
 
+Service docs should answer two questions before listing operations: where the
+request loop lives, and which state survives from one request to the next. That
+is the difference between an API list and an audit trail.
+
 ---
 
 ## 1. Service loop shape
@@ -48,7 +52,47 @@ handlers (`userland/capsule_clipboard/src/server/runner.rs:27`,
   +------------------+
 ```
 
-## 2. Core, storage, and security services
+## 2. State custody
+
+Service protocols are only half of the audit surface. The other half is the
+state each service owns. The table below records the current state holders and
+the mutation points that are visible in source.
+
+```
++--------------------------+
+| request frame            |
++------------+-------------+
+             |
++------------+-------------+
+| decode and dispatch      |
++------------+-------------+
+             |
++------------+-------------+
+| service state holder     |
++------------+-------------+
+             |
++------------+-------------+
+| mutation or read         |
++------------+-------------+
+             |
++------------+-------------+
+| response frame           |
++--------------------------+
+```
+
+| Capsule | State holder | Mutation and exposure points |
+|---------|--------------|------------------------------|
+| `ramfs` | `Store` owns a `BTreeMap<String, File>`. Each `File` stores a per-file key, nonce, and ciphertext buffer (`userland/capsule_ramfs/src/store/types.rs:23`, `userland/capsule_ramfs/src/store/types.rs:29`). | `Store::ensure` creates files by generating a fresh key and nonce, then inserts a file with an empty ciphertext buffer (`userland/capsule_ramfs/src/store/state.rs:33`, `userland/capsule_ramfs/src/store/state.rs:37`, `userland/capsule_ramfs/src/store/state.rs:39`). |
+| `vfs` | `Store` owns file entries and open fd slots. Files carry name, data, and directory flag. Open fd slots carry file index, owner pid, position, append flag, and writable flag (`userland/capsule_vfs/src/store/fdtable/types.rs:37`, `userland/capsule_vfs/src/store/fdtable/types.rs:43`, `userland/capsule_vfs/src/store/fdtable/types.rs:51`). | `open` resolves or creates a file, rejects directories, applies truncate, allocates an empty fd slot, and records owner pid and append state (`userland/capsule_vfs/src/store/fdtable/open.rs:23`, `userland/capsule_vfs/src/store/fdtable/open.rs:31`, `userland/capsule_vfs/src/store/fdtable/open.rs:35`, `userland/capsule_vfs/src/store/fdtable/open.rs:38`, `userland/capsule_vfs/src/store/fdtable/open.rs:41`, `userland/capsule_vfs/src/store/fdtable/open.rs:43`). |
+| `keyring` | `Store` owns a `BTreeMap<u32, KeyEntry>` and a monotonically advanced `next_id` counter (`userland/capsule_keyring/src/store/types/store.rs:20`). | `store` rejects empty or oversized key material, rejects a full store, assigns the current id, advances `next_id`, and records key type, data, owner pid, creation time, expiry, use count, and locked state (`userland/capsule_keyring/src/store/store_key.rs:20`, `userland/capsule_keyring/src/store/store_key.rs:28`, `userland/capsule_keyring/src/store/store_key.rs:31`, `userland/capsule_keyring/src/store/store_key.rs:34`, `userland/capsule_keyring/src/store/store_key.rs:36`). |
+| `entropy` | `Pool` owns atomic counters for requests, bytes served, last reseed request, and source failures (`userland/capsule_entropy/src/pool/types.rs:26`). | `fill` clamps request size to `MAX_RANDOM_BYTES`, calls `crypto_random`, increments request count, records source failures, and records served bytes on success (`userland/capsule_entropy/src/pool/fill.rs:25`, `userland/capsule_entropy/src/pool/fill.rs:26`, `userland/capsule_entropy/src/pool/fill.rs:31`, `userland/capsule_entropy/src/pool/fill.rs:32`, `userland/capsule_entropy/src/pool/fill.rs:34`, `userland/capsule_entropy/src/pool/fill.rs:37`). |
+| `policy` | A static `spin::Mutex<Store>` wraps the default policy store (`userland/capsule_policy/src/store/state.rs:17`, `userland/capsule_policy/src/store/state.rs:22`). | Defaults include desktop values, privacy values, hardware and attestation toggles, cursor size, wallpaper, kernel hardening booleans, hostname, and domain name (`userland/capsule_policy/src/store/defaults/store.rs:21`, `userland/capsule_policy/src/store/defaults/store.rs:23`, `userland/capsule_policy/src/store/defaults/store.rs:35`, `userland/capsule_policy/src/store/defaults/store.rs:44`, `userland/capsule_policy/src/store/defaults/store.rs:46`, `userland/capsule_policy/src/store/defaults/store.rs:58`). |
+| `clipboard` | `Clipboard` owns a deque of entries, total byte count, max depth, max total bytes, last activity timestamp, and idle timeout (`userland/capsule_clipboard/src/state/clipboard/types.rs:21`). | `copy` pushes the newest entry to the front, increments total bytes, trims tail entries until depth and byte caps fit, and updates activity time. `clear` removes all items and resets total bytes (`userland/capsule_clipboard/src/state/clipboard/storage.rs:21`, `userland/capsule_clipboard/src/state/clipboard/storage.rs:22`, `userland/capsule_clipboard/src/state/clipboard/storage.rs:24`, `userland/capsule_clipboard/src/state/clipboard/storage.rs:31`, `userland/capsule_clipboard/src/state/clipboard/storage.rs:45`). |
+| `market` | `Store` holds an optional accepted marketplace index. `Accepted` stores the decoded index, top-level signature result, and per-publisher signature results (`userland/capsule_market/src/store/state/store_type.rs:19`, `userland/capsule_market/src/store/state/accepted.rs:22`). | `install` replaces the accepted index with a new `Accepted` record after verification paths provide the index and signature flags (`userland/capsule_market/src/store/state/install.rs:24`, `userland/capsule_market/src/store/state/install.rs:25`, `userland/capsule_market/src/store/state/install.rs:31`). |
+| `login` | `Context` owns keyring, desktop shell, and compositor ports, display backing, serial, and session state. Session state is either locked or unlocked with owner pid, key id, and serial (`userland/capsule_login/src/state/context/types.rs:16`, `userland/capsule_login/src/state/context/types.rs:28`). | `start_session` rejects an already unlocked session with `E_BUSY`, increments serial, and stores the unlocked owner pid and key id (`userland/capsule_login/src/state/context/start_session.rs:21`, `userland/capsule_login/src/state/context/start_session.rs:22`, `userland/capsule_login/src/state/context/start_session.rs:25`, `userland/capsule_login/src/state/context/start_session.rs:27`). |
+| `wallpaper` | `Context` owns compositor port, display size, backing VA, current ARGB and alpha, policy, fade timeline, request id, optional policy and catalog ports, applied wallpaper, and subscriber tick count (`userland/capsule_wallpaper/src/state/context.rs:19`). | `issue_request_id` advances request ids, `set_argb` updates color and alpha, `set_policy` replaces policy, and `current_argb` rebuilds the current color from alpha and RGB (`userland/capsule_wallpaper/src/state/context.rs:36`, `userland/capsule_wallpaper/src/state/context.rs:43`, `userland/capsule_wallpaper/src/state/context.rs:48`, `userland/capsule_wallpaper/src/state/context.rs:52`). |
+
+## 3. Core, storage, and security services
 
 | Capsule | Service contract | Protocol ops | Runner |
 |---------|------------------|--------------|--------|
@@ -65,7 +109,7 @@ handlers (`userland/capsule_clipboard/src/server/runner.rs:27`,
 | `power` | Power service with healthcheck, reboot, and shutdown operations. | `userland/capsule_power/src/protocol/ops.rs:17` to `userland/capsule_power/src/protocol/ops.rs:19` | `userland/capsule_power/src/server/runner.rs:28`, router at `userland/capsule_power/src/server/handlers/router.rs:27` |
 | `proof_io` | Direct syscall proof capsule that checks time calls, invalid syscall number handling, invalid pointer handling, invalid size handling, retired syscall rejection, then emits a pass or fail debug line. | direct syscall calls | `userland/capsule_proof_io/src/main.rs:37`, retired syscall list at `userland/capsule_proof_io/src/main.rs:24` |
 
-## 3. Desktop service capsules
+## 4. Desktop service capsules
 
 | Capsule | Service contract | Protocol ops | Runner |
 |---------|------------------|--------------|--------|
@@ -80,7 +124,7 @@ handlers (`userland/capsule_clipboard/src/server/runner.rs:27`,
 | `login` | Login session service with healthcheck, start session, end session, and get state operations. | `userland/capsule_login/src/protocol/ops.rs:1` to `userland/capsule_login/src/protocol/ops.rs:4` | `userland/capsule_login/src/server/runner.rs:16` |
 | `toolkit` | Toolkit service with healthcheck, theme apply, animation tick, component render, and theme get operations. | `userland/toolkit/src/protocol/ops.rs:19` to `userland/toolkit/src/protocol/ops.rs:23` | `userland/toolkit/src/server/runner.rs:29`, dispatch at `userland/toolkit/src/server/dispatch.rs:25` |
 
-## 4. Policy fields
+## 5. Policy fields
 
 Policy requests use a 12-byte header with op, field, kind, status, and payload
 length (`userland/policy_proto/src/hdr.rs:17`). The supported fields include
@@ -92,7 +136,7 @@ hostname and domain name (`userland/policy_proto/src/field.rs:20`). The policy
 runner decodes the header, validates payload length, decodes the field, and
 dispatches `OP_GET` or `OP_SET` (`userland/capsule_policy/src/server/runner.rs:36`).
 
-## 5. Boot inclusion
+## 6. Boot inclusion
 
 Core after RAMFS starts keyring, entropy, crypto, and policy
 (`src/userspace/init/spawn_plan/core.rs:22`). VFS starts as its own phase
@@ -101,4 +145,3 @@ codec, clipboard, attest, login, and toolkit
 (`src/userspace/init/spawn_plan/desktop_services.rs:17`). The market service is
 feature gated and is spawned from the core plan
 (`src/userspace/init/spawn_plan/core.rs:35`).
-

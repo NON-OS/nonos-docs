@@ -5,6 +5,10 @@ This page documents the user-mode hardware driver capsules. Read
 [Input](../subsystems/input.md), [Graphics](../subsystems/graphics.md), and
 [Storage](../subsystems/storage.md) first.
 
+Read each driver as two contracts. The first contract is its service surface:
+which port, capability set, and protocol operations it exposes. The second is
+its side effect on the system: packets, blocks, display state, or input events.
+
 ---
 
 ## 1. Boot group
@@ -21,21 +25,33 @@ and storage groups each call their capsule spawn functions in fixed order
 `src/userspace/init/spawn_plan/drivers_storage.rs:17`).
 
 ```
-  +----------------+
-  | init drivers   |
-  +-------+--------+
-          |
-  +-------+--------+
-  | virtio         |
-  +-------+--------+
-          |
-  +-------+--------+
-  | bus input nic  |
-  +-------+--------+
-          |
-  +-------+--------+
-  | usb storage    |
-  +----------------+
++----------------+
+| init drivers   |
++-------+--------+
+        |
++-------+--------+
+| virtio group   |
++-------+--------+
+        |
++-------+--------+
+| bus group      |
++-------+--------+
+        |
++-------+--------+
+| input group    |
++-------+--------+
+        |
++-------+--------+
+| nic group      |
++-------+--------+
+        |
++-------+--------+
+| usb group      |
++-------+--------+
+        |
++-------+--------+
+| storage group  |
++----------------+
 ```
 
 ## 2. Driver contract table
@@ -77,3 +93,109 @@ USB HID, and I2C HID event/configuration protocols
 `userland/capsule_driver_usb_hid/src/protocol/ops.rs:17`,
 `userland/capsule_driver_i2c_hid/src/protocol/ops.rs:1`).
 
+## 4. Input driver event path
+
+Input drivers do not send GUI events directly to apps. They normalize hardware
+events into `InputEvent` and post them into the kernel input ring. The
+`input_router` capsule drains that ring in bounded batches, applies grabs,
+routes pointer events through WM hit testing, routes key events through WM focus,
+and delivers `NINP` frames to subscribers
+(`userland/capsule_input_router/src/sources/kernel_ring.rs:17`,
+`userland/capsule_input_router/src/sources/kernel_ring.rs:25`,
+`userland/capsule_input_router/src/sources/kernel_ring.rs:27`,
+`userland/capsule_input_router/src/server/runner.rs:30`,
+`userland/capsule_input_router/src/server/runner.rs:43`,
+`userland/capsule_input_router/src/server/runner.rs:44`,
+`userland/capsule_input_router/src/server/runner.rs:49`).
+
+```
++----------------+
+| PS/2 driver    |
+| USB HID driver |
+| I2C HID driver |
++-------+--------+
+        |
++-------+--------+
+| mk_input_event |
+| post           |
++-------+--------+
+        |
++-------+--------+
+| kernel ring    |
++-------+--------+
+        |
++-------+--------+
+| input_router   |
+| drain batch    |
++-------+--------+
+        |
++-------+--------+
+| WM focus and   |
+| topmost query  |
++-------+--------+
+        |
++-------+--------+
+| NINP delivery  |
+| app or shell   |
++----------------+
+```
+
+The router dispatches grabbed event kinds to the grab holder before normal
+routing. Pointer kinds are routed through the pointer path, keyboard kinds
+through the keyboard path, and other subscribed kinds are fanned out by
+subscription match
+(`userland/capsule_input_router/src/route/dispatch.rs:28`,
+`userland/capsule_input_router/src/route/dispatch.rs:29`,
+`userland/capsule_input_router/src/route/dispatch.rs:37`,
+`userland/capsule_input_router/src/route/dispatch.rs:40`,
+`userland/capsule_input_router/src/route/dispatch.rs:43`,
+`userland/capsule_input_router/src/route/dispatch.rs:61`,
+`userland/capsule_input_router/src/route/dispatch.rs:65`). Keyboard routing asks
+WM for focus and falls back to the shell pid when WM has no focused owner
+(`userland/capsule_input_router/src/route/keyboard.rs:25`,
+`userland/capsule_input_router/src/route/keyboard.rs:27`). Pointer routing
+refreshes display bounds, applies cursor state, mirrors pointer events to the
+shell, queries the topmost target, and routes to the shell or target window
+(`userland/capsule_input_router/src/route/pointer/route_pointer.rs:28`,
+`userland/capsule_input_router/src/route/pointer/route_pointer.rs:29`,
+`userland/capsule_input_router/src/route/pointer/route_pointer.rs:30`,
+`userland/capsule_input_router/src/route/pointer/route_pointer.rs:31`,
+`userland/capsule_input_router/src/route/pointer/route_pointer.rs:32`,
+`userland/capsule_input_router/src/route/pointer/route_pointer.rs:35`). Delivery
+encodes the event into the fixed input envelope and sends it to the target pid
+(`userland/capsule_input_router/src/route/deliver.rs:24`,
+`userland/capsule_input_router/src/route/deliver.rs:28`,
+`userland/capsule_input_router/src/route/deliver.rs:29`,
+`userland/capsule_input_router/src/route/deliver.rs:30`).
+
+The producer table is written left to right: hardware work, normalized event
+kinds, and the exact post or poll point. That is the chain to inspect when a key
+or mouse event is missing from the desktop.
+
+```
++--------------------------+
+| ps2 pump                 |
++------------+-------------+
+             |
++------------+-------------+
+| usb hid poll             |
++------------+-------------+
+             |
++------------+-------------+
+| i2c hid poll             |
++------------+-------------+
+             |
++------------+-------------+
+| normalized InputEvent    |
++------------+-------------+
+             |
++------------+-------------+
+| kernel input ring        |
++--------------------------+
+```
+
+| Producer | Hardware path | Posted event kinds | Source |
+|----------|---------------|--------------------|--------|
+| `driver.ps2_kbd0` | Startup retries setup until a driver object is returned, then enters the server loop. Each loop pumps IRQ sequence state, drains PS/2 data, acknowledges keyboard and auxiliary IRQ grants, then services IPC. | Keyboard translation posts key-down and key-up. Mouse publishing posts relative pointer movement, wheel, button-down, and button-up. | Startup at `userland/capsule_driver_ps2_input/src/main.rs:31` to `userland/capsule_driver_ps2_input/src/main.rs:45`, pump at `userland/capsule_driver_ps2_input/src/server/pump.rs:24` to `userland/capsule_driver_ps2_input/src/server/pump.rs:45`, server loop at `userland/capsule_driver_ps2_input/src/server/runner.rs:32` to `userland/capsule_driver_ps2_input/src/server/runner.rs:73`, keyboard post at `userland/capsule_driver_ps2_input/src/keymap/post.rs:18` to `userland/capsule_driver_ps2_input/src/keymap/post.rs:31`, mouse post at `userland/capsule_driver_ps2_input/src/mouse/post.rs:24` to `userland/capsule_driver_ps2_input/src/mouse/post.rs:52`. |
+| `driver.usb_hid0` | Startup initializes heap, waits until the xHCI service can be resolved, enumerates connected xHCI ports, then polls HID endpoints and rescans when no endpoints are present for the rescan interval. | Keyboard publishing posts key-down and key-up with modifier flags and mapped special keys. Mouse publishing posts relative pointer movement, wheel, button-down, and button-up. | Startup at `userland/capsule_driver_usb_hid/src/main.rs:32` to `userland/capsule_driver_usb_hid/src/main.rs:37`, xHCI lookup at `userland/capsule_driver_usb_hid/src/orchestrator/run.rs:19` to `userland/capsule_driver_usb_hid/src/orchestrator/run.rs:28`, enumeration at `userland/capsule_driver_usb_hid/src/orchestrator/enumerate/run.rs:25` to `userland/capsule_driver_usb_hid/src/orchestrator/enumerate/run.rs:36`, poll loop at `userland/capsule_driver_usb_hid/src/orchestrator/poll/run.rs:26` to `userland/capsule_driver_usb_hid/src/orchestrator/poll/run.rs:44`, keyboard post at `userland/capsule_driver_usb_hid/src/hid/post_key.rs:32` to `userland/capsule_driver_usb_hid/src/hid/post_key.rs:66`, mouse post at `userland/capsule_driver_usb_hid/src/hid/post_mouse.rs:24` to `userland/capsule_driver_usb_hid/src/hid/post_mouse.rs:49`, shared post at `userland/capsule_driver_usb_hid/src/hid/post_wire.rs:19` to `userland/capsule_driver_usb_hid/src/hid/post_wire.rs:22`. |
+| `driver.i2c_hid0` | Startup resolves the I2C controller, probes the bus for a HID descriptor, records address, descriptor length, input register, and input report length, then the server loop polls input after every receive timeout. | Parsed mouse samples post relative pointer movement, wheel, button-down, and button-up. | Startup at `userland/capsule_driver_i2c_hid/src/main.rs:31` to `userland/capsule_driver_i2c_hid/src/main.rs:39`, setup at `userland/capsule_driver_i2c_hid/src/setup.rs:5` to `userland/capsule_driver_i2c_hid/src/setup.rs:19`, server poll point at `userland/capsule_driver_i2c_hid/src/server/runner.rs:15` to `userland/capsule_driver_i2c_hid/src/server/runner.rs:33`, I2C read and report parse at `userland/capsule_driver_i2c_hid/src/input/poll.rs:22` to `userland/capsule_driver_i2c_hid/src/input/poll.rs:34`, event publishing at `userland/capsule_driver_i2c_hid/src/input/publish.rs:25` to `userland/capsule_driver_i2c_hid/src/input/publish.rs:45`, shared post at `userland/capsule_driver_i2c_hid/src/input/post.rs:19` to `userland/capsule_driver_i2c_hid/src/input/post.rs:30`. |

@@ -4,6 +4,11 @@ This page describes the userland SDK surface: `nonos_libc`, `nonos_abi`,
 runtime crates, and the app skeleton used by GUI applications. Read
 [Userland Model](README.md) first, then [Syscall ABI Reference](../abi/syscalls.md).
 
+Read this page bottom-up when debugging a crash and top-down when writing a
+capsule. Bottom-up follows raw syscall entry to the kernel dispatcher. Top-down
+starts with `_start`, runtime setup, the service loop or app skeleton, and then
+the binding calls.
+
 ---
 
 ## 1. Crate layers
@@ -64,6 +69,31 @@ probes compositor health, queries display info, and builds a context with
 window table, focus model, z stack, subscriptions, and request id state
 (`userland/capsule_wm/src/setup/run.rs:36`).
 
+```
++--------------------------+
+| service _start           |
++------------+-------------+
+             |
++------------+-------------+
+| heap setup               |
+| capsule setup            |
++------------+-------------+
+             |
++------------+-------------+
+| service registration     |
+| server run               |
++------------+-------------+
+             |
++------------+-------------+
+| recv frame               |
+| dispatch handler         |
++------------+-------------+
+             |
++------------+-------------+
+| reply or wait            |
++--------------------------+
+```
+
 ## 3. GUI app skeleton
 
 `nonos_app_skeleton` is no_std and exports the app trait, manifest, input
@@ -76,10 +106,24 @@ position, width, height, and input kind mask
 (`userland/app_skeleton/src/app/manifest.rs:19`).
 
 ```
-  App
-    manifest()  -> title, window id, position, size, input mask
-    on_event()  -> event outcome
-    paint()     -> pixels in PaintBuffer
++--------------------------+
+| App implementation       |
++------------+-------------+
+             |
++------------+-------------+
+| manifest                 |
+| title id geometry input  |
++------------+-------------+
+             |
++------------+-------------+
+| on_event                 |
+| event outcome            |
++------------+-------------+
+             |
++------------+-------------+
+| paint                    |
+| pixels in PaintBuffer    |
++--------------------------+
 ```
 
 The runner initializes the heap, resolves required peers, builds the app,

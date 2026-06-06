@@ -12,11 +12,18 @@ Pages in this section:
 | [SDK](sdk.md) | Syscall bindings, runtime crates, and capsule structure. |
 | [Desktop](desktop.md) | GUI capsules, desktop IPC, window state, and input routing. |
 | [GUI Contracts](gui-contracts.md) | Window placement, move, resize, close, focus, cursor, and input delivery contracts. |
+| [Protocol Atlas](protocols.md) | IPC op tables, app control frames, launch frames, and per-family protocol surfaces. |
+| [Lifecycle and Launch](lifecycle.md) | Init spawn order, verified spawn, lifecycle tracking, supervisor loop, and desktop launch broker. |
+| [Runtime Workflows](workflows.md) | End-to-end boot, launch, render, input, window, storage, network, and debug workflows. |
 | [Capsule Inventory](capsules.md) | Complete userland capsule inventory with handles, endpoints, caps, entrypoints, and protocol refs. |
 | [Applications](apps.md) | App skeleton contract, app manifests, deterministic window geometry, input masks, and direct GUI apps. |
 | [Services](services.md) | Core, security, storage, desktop service, proof, policy, market, login, clipboard, image, and toolkit capsules. |
 | [Drivers](drivers.md) | User-mode hardware driver capsules, boot group, endpoint, capability, and protocol surface. |
 | [Network Capsules](network-capsules.md) | L2, IPv4, UDP, DHCP, TCP, DNS, sockets, and Nym capsule contracts. |
+
+This section is organized as an audit path. Start with source layout, confirm how
+a capsule becomes embedded bytes, follow init into verified spawn, then move into
+the desktop, app, service, driver, and network pages for subsystem detail.
 
 ---
 
@@ -76,11 +83,13 @@ payloads, and requested capability bits, then calls `spawn_verified`
 ## 2. Init sequence
 
 The init capsule starts in `run_init`. Its ordered spawn sequence is RAMFS,
-RAMFS smoke, core services, drivers, VFS, network, desktop, market, smoke
-tests, then the supervisor loop (`src/userspace/init/entry.rs:20`). The source
+RAMFS smoke, core services, drivers, VFS, network, launcher registration,
+desktop, market, smoke tests, then the supervisor loop
+(`src/userspace/init/entry.rs:25`). The source
 spells the sequence directly: `spawn_ramfs`, `spawn_core_after_ramfs`,
-`spawn_drivers`, `spawn_vfs`, `spawn_network`, `spawn_desktop`, and
-`spawn_market` are called before `init_loop` (`src/userspace/init/entry.rs:23`).
+`spawn_drivers`, `spawn_vfs`, `spawn_network`, `launcher::register`,
+`spawn_desktop`, and `spawn_market` are called before `init_loop`
+(`src/userspace/init/entry.rs:28`).
 
 The orchestrator splits those phases into small entry points. Drivers are
 grouped as virtio, bus, input, NIC, USB, and storage
@@ -90,22 +99,56 @@ IP, UDP, DHCP, TCP, DNS, Nym, and sockets in that order
 input_router and compositor as GUI core, then WM, wallpaper catalog, wallpaper,
 desktop shell, and desktop services (`src/userspace/init/spawn_plan/desktop_fleet.rs:17`).
 
+```
++--------------------------+
+| run_init                 |
++------------+-------------+
+             |
++------------+-------------+
+| ramfs and core services  |
++------------+-------------+
+             |
++------------+-------------+
+| driver groups            |
++------------+-------------+
+             |
++------------+-------------+
+| vfs and network          |
++------------+-------------+
+             |
++------------+-------------+
+| desktop launcher broker  |
++------------+-------------+
+             |
++------------+-------------+
+| desktop and market       |
++------------+-------------+
+             |
++------------+-------------+
+| supervisor loop          |
++--------------------------+
+```
+
 | Phase | Source |
 |-------|--------|
-| RAMFS first | `src/userspace/init/entry.rs:23` |
+| RAMFS first | `src/userspace/init/entry.rs:28` |
 | Core after RAMFS | `src/userspace/init/spawn_plan/core.rs:22` |
 | Driver groups | `src/userspace/init/spawn_plan/orchestrator.rs:29` |
-| VFS | `src/userspace/init/entry.rs:27` |
+| VFS | `src/userspace/init/entry.rs:32` |
 | Network stack | `src/userspace/init/spawn_plan/network.rs:17` |
+| Launcher broker | `src/userspace/init/entry.rs:34` |
 | Desktop stack | `src/userspace/init/spawn_plan/desktop_fleet.rs:17` |
 | Market | `src/userspace/init/spawn_plan/core.rs:35` |
 
 ## 3. Supervisor loop
 
 After spawning, init lowers its own priority and yields one hundred times before
-entering the supervisor loop (`src/userspace/init/entry.rs:47`,
-`src/userspace/init/entry.rs:56`). The loop ticks the lifecycle registry once
-per second and then yields (`src/userspace/init/supervisor/loop_impl.rs:23`).
+entering the supervisor loop
+(`src/userspace/init/entry/lower_init_priority.rs:17`,
+`src/userspace/init/entry/yield_after_spawns.rs:17`). The loop ticks the
+lifecycle registry once per second, drains the launcher inbox, and then yields
+(`src/userspace/init/supervisor/loop_impl.rs:25`,
+`src/userspace/init/supervisor/loop_impl.rs:29`).
 With the setup wizard feature enabled, the same loop waits until the setup
 wizard is no longer alive, then calls `spawn_post_wizard`
 (`src/userspace/init/supervisor/loop_impl.rs:35`).

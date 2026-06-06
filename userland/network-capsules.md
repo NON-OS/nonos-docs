@@ -4,6 +4,11 @@ This page documents the userland network capsule stack. Read
 [Capsule Inventory](capsules.md) and [Networking](../subsystems/networking.md)
 first.
 
+Read the network pages in three passes: boot order, protocol surface, then
+payload limits. Boot order proves which capsules exist at runtime. Protocol
+surface proves what each capsule accepts. Payload limits are the first place to
+look when a packet path fails only for larger frames.
+
 ---
 
 ## 1. Boot order
@@ -14,26 +19,28 @@ capsule is a no_std service with a `main.rs` entrypoint and a protocol ops
 table in `src/protocol/ops.rs`.
 
 ```
-  +-----------+
-  | net.l2    |
-  +-----+-----+
-        |
-  +-----+-----+
-  | net.ip    |
-  +-----+-----+
-        |
-  +-----+-----+
-  | udp tcp   |
-  +-----+-----+
-        |
-  +-----+-----+
-  | dhcp dns  |
-  +-----+-----+
-        |
-  +-----+-----+
-  | sockets   |
-  | nym       |
-  +-----------+
++-----------+
+| net.l2    |
++-----+-----+
+      |
++-----+-----+
+| net.ip    |
++-----+-----+
+      |
++-----+-----+
+| net.udp   |
+| net.tcp   |
++-----+-----+
+      |
++-----+-----+
+| net.dhcp  |
+| net.dns   |
++-----+-----+
+      |
++-----+-----+
+| net.nym   |
+| sockets   |
++-----------+
 ```
 
 ## 2. Capsule contracts
@@ -74,6 +81,24 @@ sockets handlers cover their socket-family operations
 `userland/capsule_net_tcp/src/server/handlers/mod.rs:25`,
 `userland/capsule_net_sockets/src/server/handlers/mod.rs:17` to
 `userland/capsule_net_sockets/src/server/handlers/mod.rs:31`).
+
+```
++--------------------------+
+| network capsule main     |
++------------+-------------+
+             |
++------------+-------------+
+| wait for setup           |
++------------+-------------+
+             |
++------------+-------------+
+| server run               |
++------------+-------------+
+             |
++------------+-------------+
+| op table handler         |
++--------------------------+
+```
 
 ## 4. Payload limits
 
