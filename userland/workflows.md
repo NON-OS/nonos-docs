@@ -320,6 +320,28 @@ subscription mask, and sends one event to that pid
 `userland/capsule_input_router/src/route/keyboard.rs:28`,
 `userland/capsule_input_router/src/route/keyboard.rs:32`).
 
+```
++--------------------------+
+| kernel input sequence    |
++------------+-------------+
+             |
++------------+-------------+
+| drain batch of 32        |
++------------+-------------+
+             |
++------------+-------------+
+| grabs first              |
++------------+-------------+
+             |
++------------+-------------+
+| pointer keyboard other   |
++------------+-------------+
+             |
++------------+-------------+
+| NINP frame to target     |
++--------------------------+
+```
+
 ## 5. Focus, move, resize, and close workflow
 
 WM `query_topmost` validates the request, calls `topmost_hit_at`, and returns
@@ -380,6 +402,28 @@ broadcasts close notification, and replies success
 `userland/capsule_wm/src/server/handlers/window_close.rs:64`,
 `userland/capsule_wm/src/server/handlers/window_close.rs:72`).
 
+```
++--------------------------+
+| pointer hit or app call  |
++------------+-------------+
+             |
++------------+-------------+
+| query topmost or focus   |
++------------+-------------+
+             |
++------------+-------------+
+| move resize close        |
++------------+-------------+
+             |
++------------+-------------+
+| validate owner geometry  |
++------------+-------------+
+             |
++------------+-------------+
+| state update or reject   |
++--------------------------+
+```
+
 ## 6. Service IPC workflow
 
 Core service calls use explicit protocol frames and service-owned dispatch. VFS
@@ -436,6 +480,31 @@ ignores replies with a different request id
 `src/services/lifecycle/transport.rs:176`,
 `src/services/lifecycle/transport.rs:180`,
 `src/services/lifecycle/transport.rs:181`).
+
+```
++--------------------------+
+| client request frame     |
++------------+-------------+
+             |
++------------+-------------+
+| service dispatch         |
+| op match                 |
++------------+-------------+
+             |
++------------+-------------+
+| handler validation       |
+| service state            |
++------------+-------------+
+             |
++------------+-------------+
+| reply frame              |
++------------+-------------+
+             |
++------------+-------------+
+| lifecycle transport      |
+| generation guard         |
++--------------------------+
+```
 
 ## 7. Network workflow
 
@@ -496,6 +565,30 @@ client calls the NIC driver service with an RX op and parses the payload
 `userland/capsule_net_l2/src/nic_client/rx/poll_frame.rs:35`,
 `userland/capsule_net_l2/src/nic_client/rx/poll_frame.rs:43`).
 
+```
++--------------------------+
+| net l2 send frame        |
++------------+-------------+
+             |
++------------+-------------+
+| nic tx ipc call          |
+| tx status mapped         |
++------------+-------------+
+             |
++------------+-------------+
+| net l2 poll frame        |
++------------+-------------+
+             |
++------------+-------------+
+| nic rx ipc call          |
+| payload parsed           |
++------------+-------------+
+             |
++------------+-------------+
+| arp observe response     |
++--------------------------+
+```
+
 ## 8. Debugging map
 
 | Symptom | First source path to inspect | Why |
@@ -505,6 +598,11 @@ client calls the NIC driver service with an RX op and parses the payload
 | App opens but no pixels update | `userland/compositor/src/server/handlers/damage_commit.rs:21` and `userland/compositor/src/frame_pacer/tick.rs:23` | Damage must accumulate and frame pacer must transfer and flush the dirty rect. |
 | Keyboard reaches no app | `userland/capsule_input_router/src/route/keyboard.rs:25` and `userland/capsule_wm/src/server/handlers/window_focus.rs:22` | Keyboard uses WM focus and subscription mask before delivery. |
 | Pointer click misses windows | `userland/capsule_input_router/src/route/pointer/topmost_target.rs:20` and `userland/capsule_wm/src/server/handlers/query_topmost.rs:27` | Pointer routing depends on WM topmost hit testing. |
+| Cursor does not move | `userland/capsule_input_router/src/route/pointer/route_pointer.rs:29` and `userland/capsule_input_router/src/state/cursor.rs:40` | Pointer routing applies the event to cursor state, and cursor state handles relative, absolute, and touch input. |
+| App subscribed but receives no input | `userland/capsule_input_router/src/server/handlers/subscribe.rs:28` and `userland/capsule_input_router/src/route/deliver.rs:24` | Subscription upsert must keep the pid and delivery must encode a `NINP` frame for that target. |
+| Close button is ignored | `userland/app_skeleton/src/runner/decorations.rs:28` and `userland/app_skeleton/src/runner/service_frame.rs:47` | Decoration hit testing must return close, and the service frame must enter teardown on close. |
+| Click does not focus the window | `userland/capsule_input_router/src/route/pointer/route_to_window.rs:38` and `userland/capsule_wm/src/server/handlers/route_focus/handle.rs:24` | Button-down routing asks WM to route focus before local delivery. |
 | Window overlap occurs | `userland/capsule_wm/src/server/handlers/window_move.rs:48` and `userland/capsule_wm/src/server/handlers/window_resize/handle.rs:51` | Move and resize reject normal-window collisions at WM. |
 | File write fails | `userland/capsule_vfs/src/server/handlers/write.rs:24` and `userland/capsule_vfs/src/server/handlers/open.rs:27` | VFS validates caller, fd, path, flags, and data caps. |
 | Network frame send fails | `userland/capsule_net_l2/src/server/handlers/send_frame.rs:22` and `userland/capsule_net_l2/src/nic_client/tx.rs:32` | L2 requires a resolved NIC port and a successful driver IPC TX response. |
+| Network receive stays empty | `userland/capsule_net_l2/src/server/handlers/poll_frame.rs:27` and `userland/capsule_net_l2/src/nic_client/rx/poll_frame.rs:28` | L2 must have a resolved NIC port, then the NIC RX IPC path must return a payload. |

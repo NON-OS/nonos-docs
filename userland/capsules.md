@@ -111,6 +111,33 @@ fleet source exists, but the current spawn plan module does not import it or
 export an app spawn entry (`src/userspace/init/spawn_plan/mod.rs:17`,
 `src/userspace/init/spawn_plan/mod.rs:41`).
 
+The map below separates source inventory from boot inclusion. A capsule can be
+present in the table above and still be conditional, feature-gated, or launched
+later by the desktop broker.
+
+```
++--------------------------+
+| run init boot path       |
++------------+-------------+
+             |
++------------+-------------+
+| ramfs core vfs           |
++------------+-------------+
+             |
++------------+-------------+
+| drivers network desktop  |
++------------+-------------+
+             |
++------------+-------------+
+| market if enabled        |
++------------+-------------+
+             |
++------------+-------------+
+| launcher broker          |
+| app launch on demand     |
++--------------------------+
+```
+
 | Boot class | Capsules | Source |
 |------------|----------|--------|
 | RAMFS first | `ramfs` | `src/userspace/init/spawn_plan/core.rs:17` |

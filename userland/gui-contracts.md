@@ -113,6 +113,26 @@ and returns the first non-colliding rectangle
 checks only consider visible normal windows
 (`userland/capsule_wm/src/server/handlers/window_open/collides.rs:21`).
 
+```
++--------------------------+
+| app manifest request     |
++------------+-------------+
+             |
++------------+-------------+
+| wm window open           |
+| clamp to display         |
++------------+-------------+
+             |
++------------+-------------+
+| normal collision check   |
++------------+-------------+
+             |
++------------+-------------+
+| requested or slot rect   |
+| owner focus z state      |
++--------------------------+
+```
+
 ## 4. Move and resize
 
 Window move validates request length, window id, x, and y, looks up the
@@ -137,6 +157,29 @@ The shared resize collision rule ignores the window being changed and rejects
 overlap with visible normal windows
 (`userland/capsule_wm/src/server/handlers/window_resize/collides.rs:20`).
 
+```
++--------------------------+
+| move or resize request   |
++------------+-------------+
+             |
++------------+-------------+
+| validate sender window   |
+| decode geometry          |
++------------+-------------+
+             |
++------------+-------------+
+| clamp candidate rect     |
++------------+-------------+
+             |
++------------+-------------+
+| reject normal collision  |
++------------+-------------+
+             |
++------------+-------------+
+| store rect or fail       |
++--------------------------+
+```
+
 ## 5. Close and teardown
 
 The app skeleton maps a button-down event on the toolkit close button to
@@ -155,6 +198,30 @@ closed lifecycle notification, and replies success
 `userland/capsule_wm/src/server/handlers/window_close.rs:58`,
 `userland/capsule_wm/src/server/handlers/window_close.rs:64`).
 
+```
++--------------------------+
+| close result in app      |
++------------+-------------+
+             |
++------------+-------------+
+| scene remove             |
+| input unsubscribe        |
++------------+-------------+
+             |
++------------+-------------+
+| release surface backing  |
++------------+-------------+
+             |
++------------+-------------+
+| wm window close          |
++------------+-------------+
+             |
++------------+-------------+
+| clear focus if needed    |
+| lifecycle notification   |
++--------------------------+
+```
+
 ## 6. Focus
 
 Button-down inside an app asks the WM to raise and focus that app window
@@ -165,6 +232,28 @@ sender pid resolves to `desktop_shell`
 `userland/app_skeleton/src/runner/control.rs:59`). Keyboard routing asks the
 WM for the focused pid and falls back to the shell pid when there is no focus
 (`userland/capsule_input_router/src/route/keyboard.rs:25`).
+
+```
++--------------------------+
+| button down or NCTL      |
++------------+-------------+
+             |
++------------+-------------+
+| wm raise focus           |
++------------+-------------+
+             |
++------------+-------------+
+| compositor focus state   |
++------------+-------------+
+             |
++------------+-------------+
+| keyboard route query     |
++------------+-------------+
+             |
++------------+-------------+
+| focused pid or shell     |
++--------------------------+
+```
 
 ## 7. Cursor and pointer delivery
 
@@ -186,6 +275,29 @@ Keyboard routing issues a WM focus query, checks that the destination
 subscription allows the event kind, delivers one event, forgets a dead target,
 and records delivery count (`userland/capsule_input_router/src/route/keyboard.rs:25`).
 
+```
++--------------------------+
+| kernel input ring        |
++------------+-------------+
+             |
++------------+-------------+
+| input router batch       |
++------------+-------------+
+             |
++------------+-------------+
+| cursor state update      |
+| shell mirror             |
++------------+-------------+
+             |
++------------+-------------+
+| wm topmost or focus      |
++------------+-------------+
+             |
++------------+-------------+
+| NINP delivery            |
++--------------------------+
+```
+
 ## 8. App-side delivery contract
 
 The app skeleton parses input deliveries with the `NINP` magic and a fixed
@@ -196,3 +308,22 @@ drains IPC, handles close, repaints when requested, and waits for display vsync
 (`userland/app_skeleton/src/runner/service_frame.rs:28`). This means input,
 paint, close, and teardown are part of the shared app runtime, not duplicated
 inside each app capsule.
+
+```
++--------------------------+
+| NINP frame               |
++------------+-------------+
+             |
++------------+-------------+
+| parse delivery           |
+| normalize event          |
++------------+-------------+
+             |
++------------+-------------+
+| app on event             |
++------------+-------------+
+             |
++------------+-------------+
+| repaint close or idle    |
++--------------------------+
+```

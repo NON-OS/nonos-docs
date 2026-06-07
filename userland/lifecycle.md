@@ -168,6 +168,27 @@ longer live (`src/services/lifecycle/state/liveness.rs:23`,
 `src/services/lifecycle/state/liveness.rs:51`,
 `src/services/lifecycle/state/liveness.rs:56`).
 
+```
++--------------------------+
+| set alive pid            |
++------------+-------------+
+             |
++------------+-------------+
+| store pid                |
+| advance generation       |
++------------+-------------+
+             |
++------------+-------------+
+| is alive check           |
+| process table lookup     |
++------------+-------------+
+             |
++------------+-------------+
+| live state keeps pid     |
+| dead state clears pid    |
++--------------------------+
+```
+
 The registry stores name and state pairs. A successful init boot helper logs the
 spawn and registers the capsule; a failed spawn logs the error and does not
 register (`src/userspace/init/capsule_boot/run.rs:21`,
@@ -196,6 +217,32 @@ generation, ignores replies with the wrong request id, and yields between polls
 `src/services/lifecycle/transport.rs:180`,
 `src/services/lifecycle/transport.rs:181`,
 `src/services/lifecycle/transport.rs:186`).
+
+```
++--------------------------+
+| lifecycle transport send |
++------------+-------------+
+             |
++------------+-------------+
+| capture generation       |
+| reject dead capsule      |
++------------+-------------+
+             |
++------------+-------------+
+| enqueue proc pid inbox   |
+| wake sleeping owner      |
++------------+-------------+
+             |
++------------+-------------+
+| wait for reply           |
+| recheck generation       |
++------------+-------------+
+             |
++------------+-------------+
+| matching request id      |
+| response returned        |
++--------------------------+
+```
 
 There is a generic supervised respawn helper. It skips live entries, skips never
 spawned entries, checks `should_respawn`, records exit time, and calls the spawn

@@ -166,6 +166,22 @@ pid. If no pid exists, it sends a launch request to `desktop.launcher`
 | `NCTL` | 8 bytes | desktop shell | app skeleton | magic `NCTL`, version `1`, op `1` for focus self. Constants are at `userland/capsule_desktop_shell/src/server/handlers/launcher_request/constants.rs:17` to `userland/capsule_desktop_shell/src/server/handlers/launcher_request/constants.rs:20`, frame encoding is at `userland/capsule_desktop_shell/src/server/handlers/launcher_request/focus_frame.rs:17`. |
 | `NLAU` | 8 bytes | desktop shell | init launcher broker | magic `NLAU`, version `1`, launch id. Constants are at `userland/capsule_desktop_shell/src/server/handlers/launcher_request/constants.rs:21` to `userland/capsule_desktop_shell/src/server/handlers/launcher_request/constants.rs:23`, frame encoding is at `userland/capsule_desktop_shell/src/server/handlers/launcher_request/launch_frame.rs:17`. |
 
+```
++----------------------+----------------------+----------------------+
+| bytes 0 to 3         | bytes 4 to 5         | bytes 6 to 7         |
++----------------------+----------------------+----------------------+
+| NCTL magic           | version 1            | focus self op        |
++----------------------+----------------------+----------------------+
+```
+
+```
++----------------------+----------------------+----------------------+
+| bytes 0 to 3         | bytes 4 to 5         | bytes 6 to 7         |
++----------------------+----------------------+----------------------+
+| NLAU magic           | version 1            | launch id            |
++----------------------+----------------------+----------------------+
+```
+
 The init broker has matching `desktop.launcher`, port `4700`, `NLAU`, and
 version constants (`src/userspace/init/launcher/constants.rs:17`,
 `src/userspace/init/launcher/constants.rs:18`,
@@ -182,6 +198,37 @@ whose length, magic, or version does not match, then returns the launch id
 The core services use small, fixed op tables. Some use an 8-byte local header,
 while entropy, crypto, and VFS use a 20-byte v1 frame with magic, version, op,
 flags, request id, and payload length.
+
+Entropy documents the shared 20-byte header layout, crypto states it uses the
+same shape, and VFS sets `HDR_LEN` to `20`
+(`userland/capsule_entropy/src/protocol/types.rs:44`,
+`userland/capsule_entropy/src/protocol/types.rs:45`,
+`userland/capsule_entropy/src/protocol/types.rs:46`,
+`userland/capsule_entropy/src/protocol/types.rs:47`,
+`userland/capsule_entropy/src/protocol/types.rs:48`,
+`userland/capsule_entropy/src/protocol/types.rs:49`,
+`userland/capsule_entropy/src/protocol/types.rs:50`,
+`userland/capsule_entropy/src/protocol/types.rs:51`,
+`userland/capsule_entropy/src/protocol/types.rs:54`,
+`userland/capsule_crypto/src/protocol/types.rs:64`,
+`userland/capsule_crypto/src/protocol/types.rs:66`,
+`userland/capsule_vfs/src/protocol/types.rs:44`).
+
+```
++----------------------+----------------------+----------------------+
+| bytes 0 to 3         | bytes 4 to 5         | bytes 6 to 7         |
++----------------------+----------------------+----------------------+
+| magic                | version              | op                   |
++----------------------+----------------------+----------------------+
+| bytes 8 to 9         | bytes 10 to 11       | bytes 12 to 15       |
++----------------------+----------------------+----------------------+
+| flags                | reserved             | request id           |
++----------------------+----------------------+----------------------+
+| bytes 16 to 19       | payload bytes        |                      |
++----------------------+----------------------+----------------------+
+| payload length       | protocol payload     |                      |
++----------------------+----------------------+----------------------+
+```
 
 | Capsule | Protocol surface | Source |
 |---------|------------------|--------|

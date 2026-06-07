@@ -100,7 +100,46 @@ sockets handlers cover their socket-family operations
 +--------------------------+
 ```
 
-## 4. Payload limits
+## 4. Per-Capsule Runner Map
+
+The stack uses the same receive, parse, dispatch shape, but each capsule owns a
+different layer contract. The table below points at the match arm that should be
+audited first when a layer fails.
+
+| Capsule | Runner contract | Dispatch source |
+|---------|-----------------|-----------------|
+| `net.l2` | Allocates RX and TX buffers, receives from inbox `0`, parses the L2 frame, and handles healthcheck, get MAC, get link, send frame, poll frame, and ARP resolve. | `userland/capsule_net_l2/src/server/runner.rs:31`, `userland/capsule_net_l2/src/server/runner.rs:32`, `userland/capsule_net_l2/src/server/runner.rs:38`, `userland/capsule_net_l2/src/server/runner.rs:43`, `userland/capsule_net_l2/src/server/runner.rs:44` to `userland/capsule_net_l2/src/server/runner.rs:52` |
+| `net.ip` | Receives from inbox `0`, parses the IP request, and handles healthcheck, config get, config set, packet send, packet poll, route add, and route clear. | `userland/capsule_net_ip/src/server/runner.rs:32`, `userland/capsule_net_ip/src/server/runner.rs:39`, `userland/capsule_net_ip/src/server/runner.rs:44`, `userland/capsule_net_ip/src/server/runner.rs:45` to `userland/capsule_net_ip/src/server/runner.rs:54` |
+| `net.udp` | Receives from inbox `0`, parses the UDP request, and handles healthcheck, bind, unbind, send, and receive. | `userland/capsule_net_udp/src/server/runner.rs:31`, `userland/capsule_net_udp/src/server/runner.rs:38`, `userland/capsule_net_udp/src/server/runner.rs:43`, `userland/capsule_net_udp/src/server/runner.rs:44` to `userland/capsule_net_udp/src/server/runner.rs:51` |
+| `net.tcp` | Receives from inbox `0`, parses the TCP request, and handles healthcheck, listen, connect, accept, send, receive, close, and shutdown. | `userland/capsule_net_tcp/src/server/runner.rs:32`, `userland/capsule_net_tcp/src/server/runner.rs:37`, `userland/capsule_net_tcp/src/server/runner.rs:41`, `userland/capsule_net_tcp/src/server/runner.rs:42` to `userland/capsule_net_tcp/src/server/runner.rs:51` |
+| `net.dhcp.client` | Uses fixed 256-byte RX and TX buffers, receives from inbox `0`, parses the request, and handles lease request, status, renew, and release. | `userland/capsule_net_dhcp/src/server/runner.rs:30`, `userland/capsule_net_dhcp/src/server/runner.rs:31`, `userland/capsule_net_dhcp/src/server/runner.rs:38`, `userland/capsule_net_dhcp/src/server/runner.rs:43`, `userland/capsule_net_dhcp/src/server/runner.rs:44` to `userland/capsule_net_dhcp/src/server/runner.rs:51` |
+| `net.dns` | Receives from inbox `0`, parses the DNS request, and handles resolve A, resolve AAAA, flush cache, and set upstream. | `userland/capsule_net_dns/src/server/runner.rs:32`, `userland/capsule_net_dns/src/server/runner.rs:37`, `userland/capsule_net_dns/src/server/runner.rs:41`, `userland/capsule_net_dns/src/server/runner.rs:42` to `userland/capsule_net_dns/src/server/runner.rs:49` |
+| `net.sockets` | Receives from inbox `0`, parses the socket facade request, and delegates to its handler dispatch table. | `userland/capsule_net_sockets/src/server/runner.rs:28`, `userland/capsule_net_sockets/src/server/runner.rs:33`, `userland/capsule_net_sockets/src/server/runner.rs:37`, `userland/capsule_net_sockets/src/server/runner.rs:38`, `userland/capsule_net_sockets/src/server/handlers/mod.rs:17` to `userland/capsule_net_sockets/src/server/handlers/mod.rs:31` |
+| `net.nym` | Receives from inbox `0`, parses the Nym request, and delegates to its handler dispatch table. | `userland/capsule_net_nym/src/server/runner.rs:28`, `userland/capsule_net_nym/src/server/runner.rs:33`, `userland/capsule_net_nym/src/server/runner.rs:37`, `userland/capsule_net_nym/src/server/runner.rs:38`, `userland/capsule_net_nym/src/server/handlers/mod.rs:17` to `userland/capsule_net_nym/src/server/handlers/mod.rs:39` |
+
+```
++--------------------------+
+| service inbox frame      |
++------------+-------------+
+             |
++------------+-------------+
+| layer parser             |
++------------+-------------+
+             |
++------------+-------------+
+| op match or dispatch     |
++------------+-------------+
+             |
++------------+-------------+
+| layer state or client    |
++------------+-------------+
+             |
++------------+-------------+
+| status payload reply     |
++--------------------------+
+```
+
+## 5. Payload limits
 
 L2 reserves an IPC payload maximum of Ethernet frame maximum plus 64 bytes
 (`userland/capsule_net_l2/src/protocol/limits.rs:25`). IP uses IPv4 MTU plus
@@ -111,3 +150,16 @@ bytes (`userland/capsule_net_udp/src/protocol/limits.rs:18`,
 segment payload maximum and an IPC payload maximum of segment plus 64 bytes
 (`userland/capsule_net_tcp/src/protocol/limits.rs:17`,
 `userland/capsule_net_tcp/src/protocol/limits.rs:18`).
+
+## 6. Failure Map
+
+| Symptom | First source path to inspect | Why |
+|---------|------------------------------|-----|
+| L2 cannot send frames | `userland/capsule_net_l2/src/server/runner.rs:48` | Send frame enters the L2 transmit handler from this branch. |
+| IP config never changes | `userland/capsule_net_ip/src/server/runner.rs:48` | `set_config` is the IP configuration mutation path. |
+| UDP bind does not stick | `userland/capsule_net_udp/src/server/runner.rs:46` | Bind is the first UDP state mutation to inspect. |
+| TCP receive stays empty | `userland/capsule_net_tcp/src/server/runner.rs:48` | TCP receive dispatches through this branch. |
+| DHCP lease never appears | `userland/capsule_net_dhcp/src/server/runner.rs:46` | Lease request is the active DHCP acquisition path. |
+| DNS resolution fails | `userland/capsule_net_dns/src/server/runner.rs:44` | A-record resolution enters this handler. |
+| Socket facade call fails | `userland/capsule_net_sockets/src/server/runner.rs:38` | The facade delegates into the socket handler dispatch table. |
+| Nym request is rejected | `userland/capsule_net_nym/src/server/runner.rs:38` | Nym parsing succeeded but handler dispatch returned false. |

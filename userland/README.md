@@ -11,6 +11,7 @@ Pages in this section:
 |------|-------|
 | [SDK](sdk.md) | Syscall bindings, runtime crates, and capsule structure. |
 | [Desktop](desktop.md) | GUI capsules, desktop IPC, window state, and input routing. |
+| [Desktop Service Capsules](desktop-capsules.md) | Compositor, WM, input router, shell, wallpaper, image, clipboard, login, and toolkit internals. |
 | [GUI Contracts](gui-contracts.md) | Window placement, move, resize, close, focus, cursor, and input delivery contracts. |
 | [Protocol Atlas](protocols.md) | IPC op tables, app control frames, launch frames, and per-family protocol surfaces. |
 | [Lifecycle and Launch](lifecycle.md) | Init spawn order, verified spawn, lifecycle tracking, supervisor loop, and desktop launch broker. |
@@ -18,6 +19,8 @@ Pages in this section:
 | [Capsule Inventory](capsules.md) | Complete userland capsule inventory with handles, endpoints, caps, entrypoints, and protocol refs. |
 | [Applications](apps.md) | App skeleton contract, app manifests, deterministic window geometry, input masks, and direct GUI apps. |
 | [Services](services.md) | Core, security, storage, desktop service, proof, policy, market, login, clipboard, image, and toolkit capsules. |
+| [Core Service Capsules](core-capsules.md) | RAMFS, VFS, keyring, entropy, crypto, policy, attest, market, installer, payment, power, and proof internals. |
+| [Storage Capsules](storage-capsules.md) | RAMFS, VFS, virtio block, AHCI, NVMe, and USB mass storage internals. |
 | [Drivers](drivers.md) | User-mode hardware driver capsules, boot group, endpoint, capability, and protocol surface. |
 | [Network Capsules](network-capsules.md) | L2, IPv4, UDP, DHCP, TCP, DNS, sockets, and Nym capsule contracts. |
 

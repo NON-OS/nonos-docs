@@ -1,0 +1,40 @@
+
+  [1;36mNONOS   per-capsule zero-knowledge attestation[0m
+[36m  ==============================================[0m
+  curve BLS12-381   Groth16   192-byte proof
+
+  [1;36mPROVE   build / sign time[0m
+[36m  =========================[0m
+
+  +------------------------------------------------------+
+  | capsule ELF                                          |
+  |   blake3  ->  capsule_hash                           |
+  |   + program_hash + capability_mask                   |
+  |   commit + Groth16  ->  192-byte proof               |
+  |   sidecar:  capsule.zk.bin                           |
+  +------------------------------------------------------+
+                              |
+                              v
+  [1;36mVERIFY   kernel, before schedule[0m
+[36m  ================================[0m
+
+  +------------------------------------------------------+
+  | 1  Ed25519 + ML-DSA-65 signatures                    |
+  | 2  manifest + payload hash                           |
+  | 3  Groth16 proof vs embedded VK                      |
+  | 4  blake3(elf) == proof capsule_hash                 |
+  |    caps        == granted capability                 |
+  +------------------------------------------------------+
+        fail  ->  [1;31mREFUSE[0m        pass  ->  run
+
+  [1;36mCHECK IT YOURSELF[0m
+[36m  =================[0m
+
+  $ verify-proof --capsule term.cap
+      [1;32mRESULT: PASS[0m
+
+  $ verify-proof   (one byte flipped)
+      [1;31mError: capsule hash mismatch[0m
+
+  no proof, no run.
+  the machine proves itself in math, not marketing.

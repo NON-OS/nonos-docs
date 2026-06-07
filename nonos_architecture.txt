@@ -1,0 +1,92 @@
+
+    ███╗   ██╗ ██████╗ ███╗   ██╗ ██████╗ ███████╗
+    ████╗  ██║██╔═══██╗████╗  ██║██╔═══██╗██╔════╝     a verifiable, capability-pure microkernel OS
+    ██╔██╗ ██║██║   ██║██╔██╗ ██║██║   ██║███████╗     Rust, no_std, x86_64, RAM-resident capsules
+    ██║╚██╗██║██║   ██║██║╚██╗██║██║   ██║╚════██║     nothing runs until it proves itself
+    ██║ ╚████║╚██████╔╝██║ ╚████║╚██████╔╝███████║
+    ╚═╝  ╚═══╝ ╚═════╝ ╚═╝  ╚═══╝ ╚═════╝ ╚══════╝     signed, attested, zero-persistence
+
+  TRUST CHAIN          one curve: BLS12-381 Groth16, every link verifies the next
+  ===========
+
+    +--------------------------------------------------+
+    | hardware root: TPM / PCR measurements            |
+    +--------------------------------------------------+
+                             |
+                             v
+    +--------------------------------------------------+
+    | UEFI secure boot                                 |
+    +--------------------------------------------------+
+                             |
+                             v
+    +--------------------------------------------------+
+    | NONOS bootloader                                 |
+    |   Ed25519 signature                              |
+    |   ML-DSA-65 post-quantum signature               |
+    |   Groth16 zero-knowledge proof                   |
+    |   rehash kernel, bind to proof or HALT           |
+    +--------------------------------------------------+
+                             |
+                             v
+    +--------------------------------------------------+
+    | NONOS kernel                                     |
+    |   boots only if every check above passed         |
+    |   small, auditable trusted base                  |
+    |   gates every capsule before it can run          |
+    +--------------------------------------------------+
+
+
+  RUNTIME             userland is signed capsules only, least privilege, RAM-only
+  =======
+
+    +-----------+ +-----------+ +-----------+ +-----------+ +-----------+ +-----------+
+    | desktop   | | compositor| | window mgr| | apps  x7  | | net stack | | drivers   |
+    | shell     | | sw blitter| | z-order   | | term files| | ip tcp udp| | ps2  xhci |
+    | launcher  | | damage    | | focus     | | edit calc | | dns dhcp  | | virtio    |
+    | dock      | | cursor    | | windows   | | settings  | | nym socks | | gpu  blk  |
+    +-----------+ +-----------+ +-----------+ +-----------+ +-----------+ +-----------+
+                                             |
+                capability-gated IPC, no ambient authority
+                                             v
+
+  KERNEL              the only trusted code
+  ======
+
+    +-----------+ +-----------+ +-----------+ +-----------+ +-----------+ +-----------+
+    | scheduler | | memory    | | IPC       | | capability| | crypto +  | | hardware  |
+    | preempt   | | per-proc  | | endpoints | | broker    | | ZK verify | | broker    |
+    | single    | | pagetables| | + ports   | | bitmask   | | Groth16   | | MMIO/IRQ  |
+    | core      | | isolation | | sealed    | | /capsule  | | BLS12-381 | | windows   |
+    +-----------+ +-----------+ +-----------+ +-----------+ +-----------+ +-----------+
+
+
+  PROOF PIPELINE      no proof, no execution
+  ==============
+
+    +--------------------------------------------------+
+    | build / sign time                                |
+    |   capsule ELF  ->  blake3  ->  capsule_hash      |
+    |   Poseidon (in-circuit)  ->  commitment          |
+    |   Groth16 / BLS12-381  ->  192-byte proof        |
+    |   embed  NZKCAPS1 + proof + pubins + commit      |
+    +--------------------------------------------------+
+                             |
+                             v
+    +--------------------------------------------------+
+    | spawn time   (kernel, before schedule)           |
+    |   1. verify Ed25519 + ML-DSA-65 signatures       |
+    |   2. verify manifest + payload hash              |
+    |   3. verify Groth16 proof against kernel VK      |
+    |   4. bind  H(elf) == proof.capsule_hash          |
+    |            caps   == proof.capability_mask       |
+    |            commit == Poseidon(public inputs)     |
+    |   any check fails  ->  REFUSE                    |
+    |   all pass         ->  map + schedule            |
+    +--------------------------------------------------+
+
+    prove it, do not claim it:
+        $ verify-proof --capsule term.cap        RESULT: PASS
+        $ verify-proof    (one byte flipped)     RESULT: FAIL
+
+    no code runs until it proves itself.  nothing persists unless granted.
+    NONOS    AGPL-3.0    built in the open, from the metal up
