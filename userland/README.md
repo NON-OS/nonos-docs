@@ -9,6 +9,12 @@ Pages in this section:
 
 | Page | Scope |
 |------|-------|
+| [Writing an App](writing-an-app.md) | The `App` trait, the manifest, the runtime loop, and the source-to-spawned-capsule pipeline. |
+| [The std PAL](std-pal.md) | Running unmodified Rust `std` programs: the graft, the per-facility mapping, gaps, and how to build one. |
+| [The nonos_std Crate](nonos-std.md) | The native std-shaped API for `no_std` capsules: collections, net, fs, and the seeded HashMap. |
+| [Using the Network](networking-guide.md) | The developer view of networking: `TcpStream` / `UdpSocket`, what happens underneath, and the limits. |
+| [The Terminal](terminal.md) | The terminal capsule and shell: the app model, pipelines and redirects, and the builtins. |
+| [Capsule Catalog](capsule-catalog/README.md) | Every capsule, one by one: a verified per-capsule spec (purpose, ops, behavior, gaps) for the core, desktop, app, and proof capsules. |
 | [SDK](sdk.md) | Syscall bindings, runtime crates, and capsule structure. |
 | [Desktop](desktop.md) | GUI capsules, desktop IPC, window state, and input routing. |
 | [Desktop Service Capsules](desktop-capsules.md) | Compositor, WM, input router, shell, wallpaper, image, clipboard, login, and toolkit internals. |
@@ -86,8 +92,8 @@ payloads, and requested capability bits, then calls `spawn_verified`
 ## 2. Init sequence
 
 The init capsule starts in `run_init`. Its ordered spawn sequence is RAMFS,
-RAMFS smoke, core services, drivers, VFS, network, launcher registration,
-desktop, market, smoke tests, then the supervisor loop
+RAMFS validation, core services, drivers, VFS, network, launcher registration,
+desktop, market, validation checks, then the supervisor loop
 (`src/userspace/init/entry.rs:25`). The source
 spells the sequence directly: `spawn_ramfs`, `spawn_core_after_ramfs`,
 `spawn_drivers`, `spawn_vfs`, `spawn_network`, `launcher::register`,

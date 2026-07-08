@@ -113,7 +113,7 @@ not, independent of the capability bit.
 `MkIpcCall` argument shape is `(endpoint, req_ptr, req_len, resp_ptr, resp_len,
 timeout_ms)`. A `timeout_ms` of zero means use the default of five seconds. The
 return is the reply length on success. See [the IPC subsystem
-page](../subsystems/ipc.md) for the routing and blocking detail.
+page](../subsystems/ipc/README.md) for the routing and blocking detail.
 
 ## Devices and the hardware broker
 
@@ -138,8 +138,8 @@ page](../subsystems/ipc.md) for the routing and blocking detail.
 out_ptr)` and writes an `{ grant_id, vector }` pair to `out_ptr`. `flags` selects
 INTx or MSI-X. The broker programs the IO-APIC route on x86_64 and masks the
 line until the first `MkIrqAck`. The full flow is on [the broker
-page](../subsystems/hardware-broker.md) and [the interrupt
-page](../subsystems/interrupts.md).
+page](../subsystems/hardware-broker/README.md) and [the interrupt
+page](../subsystems/interrupts/README.md).
 
 `MkIrqWait` is documented as reserved on purpose. The number is allocated and the
 `nonos_libc` binding exists, but there is no kernel handler, so drivers use the
@@ -173,7 +173,7 @@ riscv64 backends have no port IO; their devices are reached through MMIO grants.
 
 A handle is `(slot_index << 32) | epoch`. The epoch detects reuse of a freed
 slot. The whole surface lifecycle is on [the graphics
-page](../subsystems/graphics.md).
+page](../subsystems/graphics/README.md).
 
 ## Input events
 
@@ -185,7 +185,7 @@ page](../subsystems/graphics.md).
 
 Only one capsule, the input router, drains and waits; many drivers post. The
 posting side needs `InputSource`. The path from a key press to the desktop shell
-is on [the input page](../subsystems/input.md).
+is on [the input page](../subsystems/input/README.md).
 
 ## Cryptography
 
@@ -207,7 +207,7 @@ their own implementations. Each maps to a primitive in `src/crypto`.
 | CSKS | CryptoSecp256k1Sign | secp256k1 sign, Ethereum signing. |
 | CSPB | CryptoSecp256k1Pubkey | secp256k1 public key recovery. |
 
-See [the crypto page](../subsystems/crypto.md) for what each primitive is used
+See [the crypto page](../subsystems/crypto/README.md) for what each primitive is used
 for inside the system versus exposed for application use.
 
 ## Administration

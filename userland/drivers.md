@@ -1,9 +1,9 @@
 # Driver Capsules
 
 This page documents the user-mode hardware driver capsules. Read
-[Capsule Inventory](capsules.md), [Hardware Broker](../subsystems/hardware-broker.md),
-[Input](../subsystems/input.md), [Graphics](../subsystems/graphics.md), and
-[Storage](../subsystems/storage.md) first.
+[Capsule Inventory](capsules.md), [Hardware Broker](../subsystems/hardware-broker/README.md),
+[Input](../subsystems/input/README.md), [Graphics](../subsystems/graphics/README.md), and
+[Storage](../subsystems/storage/README.md) first.
 
 Read each driver as two contracts. The first contract is its service surface:
 which port, capability set, and protocol operations it exposes. The second is

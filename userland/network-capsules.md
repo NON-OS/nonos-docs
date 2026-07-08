@@ -1,7 +1,7 @@
 # Network Capsules
 
 This page documents the userland network capsule stack. Read
-[Capsule Inventory](capsules.md) and [Networking](../subsystems/networking.md)
+[Capsule Inventory](capsules.md) and [Networking](../subsystems/networking/README.md)
 first.
 
 Read the network pages in three passes: boot order, protocol surface, then

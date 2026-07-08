@@ -13,8 +13,8 @@ current. It does not imply that every capsule is auto-restarted by init today.
 ## 1. Init sequence
 
 Init starts in `run_init`. The ordered sequence is user-entry proof, RAMFS,
-RAMFS smoke test, core services, drivers, VFS, network, launcher registration,
-desktop, market, smoke tests, final payload, then the supervisor loop
+RAMFS validation check, core services, drivers, VFS, network, launcher registration,
+desktop, market, validation checks, final payload, then the supervisor loop
 (`src/userspace/init/entry.rs:25`, `src/userspace/init/entry.rs:27`,
 `src/userspace/init/entry.rs:28`, `src/userspace/init/entry.rs:29`,
 `src/userspace/init/entry.rs:30`, `src/userspace/init/entry.rs:31`,

@@ -19,7 +19,7 @@ symbol scan, and QEMU boot harnesses.
 | Capsule build and sign | `nonos-mk-<slug>`, `nonos-mk-<slug>-sign` | Builds the capsule ELF, signs the NØNOS-ID certificate, signs the manifest, and verifies the manifest against the trust policy (`nonos-mk/capsule.mk:149`, `nonos-mk/capsule.mk:151`, `nonos-mk/capsule.mk:180`, `nonos-mk/capsule.mk:201`, `nonos-mk/capsule.mk:217`, `nonos-mk/capsule.mk:222`). |
 | Desktop production image | `nonos-mk-desktop-gui-prod` | Requires signed artifacts for core services, drivers, network, desktop, first-party apps, attest, and power, then builds the `microkernel-desktop-gui` profile (`Makefile:1086`, `Makefile:1088`, `Makefile:1090`, `Makefile:1092`, `Makefile:1096`, `Makefile:1098`, `Makefile:1101`, `Makefile:1105`, `Makefile:1106`, `Makefile:1111`, `Makefile:1112`). |
 | ESP packaging | `nonos-mk-esp` | Builds bootloader and attested kernel, copies them into the ESP, writes `boot.cfg`, writes `startup.nsh`, and reports the ESP directory (`Makefile:1208`, `Makefile:1211`, `Makefile:1213`, `Makefile:1214`, `Makefile:1215`, `Makefile:1216`, `Makefile:1217`). |
-| QEMU desktop run | `nonos-mk-run` | Builds desktop production image, packages ESP, creates block image and OVMF vars, boots QEMU with block, GPU, network, USB, RNG, serial, and no reboot (`Makefile:1230`, `Makefile:1235`, `Makefile:1236`, `Makefile:1237`, `Makefile:1238`, `Makefile:1239`, `Makefile:1240`). |
+| QEMU desktop run | `nonos-mk-run` | Builds desktop production image, packages ESP, creates block image and OVMF vars, boots QEMU with block, GPU, USB, RNG, serial, and no reboot. Network is disabled by default; `nonos-mk-run-net` enables explicit QEMU host forwarding. |
 | Static lane | `nonos-mk-verify-fast` | Runs static checks only through `nonos-mk-static` (`Makefile:1366`, `Makefile:1367`). |
 | Full verify lane | `nonos-mk-verify` | Runs static checks, production desktop trust verification, and microkernel symbol scan (`Makefile:1369`, `Makefile:1370`, `Makefile:1371`, `Makefile:1372`). |
 | Full test lane | `nonos-mk-test` | Runs full verify plus RAMFS, keyring, and desktop GUI boot harnesses (`Makefile:1374`, `Makefile:1375`). |
@@ -169,47 +169,12 @@ production image and starts QEMU with GDB listen on port `1234`
 (`Makefile:1259`, `Makefile:1260`, `Makefile:1261`,
 `Makefile:1265`).
 
-## 6. Boot harness workflow
+## 6. Runtime evidence workflow
 
-Boot harnesses are script-owned QEMU tests. The Makefile exposes RAMFS, keyring,
-entropy, crypto hash, VFS, PS/2 input, XHCI, desktop GUI, and other boot-test
-targets by invoking scripts under `tests/boot`
-(`Makefile:1285`, `Makefile:1287`, `Makefile:1290`,
-`Makefile:1293`, `Makefile:1296`, `Makefile:1299`,
-`Makefile:1302`, `Makefile:1305`, `Makefile:1314`).
-
-The RAMFS harness builds the RAMFS test profile, packages a RAMFS ESP, boots
-QEMU with serial captured to `target/boot-test-ramfs.log`, waits for pass,
-fail, or fatal markers, kills QEMU, and verifies every expected marker
-(`tests/boot/ramfs_round_trip.sh:10`, `tests/boot/ramfs_round_trip.sh:58`,
-`tests/boot/ramfs_round_trip.sh:61`, `tests/boot/ramfs_round_trip.sh:77`,
-`tests/boot/ramfs_round_trip.sh:84`, `tests/boot/ramfs_round_trip.sh:95`,
-`tests/boot/ramfs_round_trip.sh:109`, `tests/boot/ramfs_round_trip.sh:113`,
-`tests/boot/ramfs_round_trip.sh:115`, `tests/boot/ramfs_round_trip.sh:133`).
-
-The desktop GUI harness builds the signed desktop GUI profile, packages the ESP,
-creates a disk image, boots QEMU with virtio block, virtio GPU, virtio RNG,
-network, XHCI, USB mouse, serial log, and no display, then checks init,
-driver, VFS, network, input router, compositor, WM, shell, visible app, and layer
-markers (`tests/boot/desktop_gui_boot.sh:10`,
-`tests/boot/desktop_gui_boot.sh:52`, `tests/boot/desktop_gui_boot.sh:55`,
-`tests/boot/desktop_gui_boot.sh:58`, `tests/boot/desktop_gui_boot.sh:71`,
-`tests/boot/desktop_gui_boot.sh:75`, `tests/boot/desktop_gui_boot.sh:77`,
-`tests/boot/desktop_gui_boot.sh:80`, `tests/boot/desktop_gui_boot.sh:81`,
-`tests/boot/desktop_gui_boot.sh:83`, `tests/boot/desktop_gui_boot.sh:86`,
-`tests/boot/desktop_gui_boot.sh:100`, `tests/boot/desktop_gui_boot.sh:101`,
-`tests/boot/desktop_gui_boot.sh:102`, `tests/boot/desktop_gui_boot.sh:103`,
-`tests/boot/desktop_gui_boot.sh:105`, `tests/boot/desktop_gui_boot.sh:106`,
-`tests/boot/desktop_gui_boot.sh:107`, `tests/boot/desktop_gui_boot.sh:114`,
-`tests/boot/desktop_gui_boot.sh:138`, `tests/boot/desktop_gui_boot.sh:140`,
-`tests/boot/desktop_gui_boot.sh:167`).
-
-`nonos-mk-test` currently depends on full verify plus RAMFS, keyring, and
-desktop GUI boot harnesses (`Makefile:1374`, `Makefile:1375`). The Makefile also
-declares input E2E target names that call `./tests/boot/input_e2e_ps2.sh` and
-`./tests/boot/input_e2e_xhci.sh` (`Makefile:1308`, `Makefile:1311`). Do not
-claim input E2E boot coverage from `nonos-mk-test` until those script paths are
-part of the boot-test suite and wired into the test lane.
+Runtime evidence must come from the production boot path, not from retired
+harness-only profiles. A release claim needs a bounded serial capture, capsule
+attestation receipt, hardware inventory where relevant, and an explicit statement
+of which writable surfaces were present.
 
 ## 7. Required workflow by change type
 
@@ -217,8 +182,8 @@ part of the boot-test suite and wired into the test lane.
 |-------------|------------------------|
 | Documentation only | Citation/style checks for the edited docs. |
 | Capsule source only | `make nonos-mk-<slug>` and `make nonos-mk-<slug>-sign`, then the relevant profile build. |
-| Capsule identity, caps, endpoint, or signing metadata | `make nonos-mk-<slug>-sign`, `make nonos-mk-verify-trust`, and the relevant QEMU boot harness. |
-| Desktop GUI, input, WM, compositor, app skeleton | `make nonos-mk-desktop-gui-prod`, `make nonos-mk-boot-desktop-gui`, plus an input E2E harness when present. |
-| Storage capsule path | `make nonos-mk-boot-ramfs` and `make nonos-mk-boot-vfs`. |
-| Security, entropy, crypto, keyring | `make nonos-mk-boot-keyring`, `make nonos-mk-boot-entropy`, `make nonos-mk-boot-crypto-hash`, and `make nonos-mk-verify-trust`. |
-| Release candidate | `make nonos-mk-test`, then fill any coverage gap listed in this page before calling it production-ready. |
+| Capsule identity, caps, endpoint, or signing metadata | Capsule signing plus trust-manifest verification. |
+| Desktop GUI, input, WM, compositor, app skeleton | Production desktop GUI boot evidence and input-device transcript. |
+| Storage capsule path | Source audit of mount, encryption, block I/O, flush, cleanup, and recovery paths. |
+| Security, entropy, crypto, keyring | Trust verification plus source audit of key lifetime, entropy source, and capability gates. |
+| Release candidate | Production boot evidence, hardware dossier, attestation receipts, and closed blockers from this page. |

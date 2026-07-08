@@ -1,184 +1,172 @@
 # Capabilities and Tokens
 
 A verified capsule is admitted to run, but admission says nothing about what it
-may do once running. That is the job of capabilities. Every privileged action is
-guarded by a capability bit, and a capsule holds a token that proves which bits
-it owns. This page covers the bits, how they are declared and enforced, and the
-token that carries them.
+may do once running. That is the job of capabilities. Every privileged action in
+NØNOS is guarded by a capability bit, and a capsule carries a token that proves
+which bits it holds. The kernel checks that token on the way into every system
+call, before the call does any work. There is no ambient authority: a capsule
+that holds no bits can compute and nothing else.
 
-Read [capsules and the trust anchor](capsules-and-trust.md) first; the capability
-set a capsule receives is the output of the verified-spawn pipeline described
-there.
+This page describes the capability set, how a capsule's authority is represented
+as an unforgeable token, and exactly where and how the kernel enforces it. It
+assumes the [verified-spawn pipeline](capsules-and-trust.md), which decides the
+set of bits a capsule is allowed to hold in the first place.
 
----
+## The capability set
 
-## The capability bits
-
-A capability is a single bit in a `u64`. There are 22, defined as an enum whose
-discriminants are the bit values themselves (`src/capabilities/types.rs`):
-
-```
-  CoreExec               1          IPC                    8
-  IO                     2          Memory                 16
-  Network                4          Crypto                 32
-  FileSystem             64         Hardware               128
-  Debug                  256        Admin                  512
-  RegisterService        1024       GraphicsDisplayQuery   2048
-  GraphicsSurfaceCreate  4096       GraphicsSurfaceMap     8192
-  GraphicsPresent        16384      DeviceEnum             32768
-  Driver                 65536      Mmio                   131072
-  Irq                    262144     Dma                    524288
-  Pio                    1048576    InputSource            2097152
-```
-
-The bits are grouped by the kind of authority they grant:
+A capability is a single bit. The set is closed and small: twenty-two variants
+of the `Capability` enum in `src/capabilities/types.rs:18`. Each variant maps to
+one bit through `Capability::bit()` (`types.rs:54`), and the bits are the plain
+powers of two, so a set of capabilities is a `u64` bitmask.
 
 ```
-  baseline      CoreExec, IPC, Memory          run, message, allocate
-  services      RegisterService, Crypto, IO    offer a service, use kernel crypto
-  graphics      GraphicsDisplayQuery, SurfaceCreate, SurfaceMap, Present
-  device        DeviceEnum, Driver             see and claim devices
-  hardware      Mmio, Irq, Dma, Pio            the four broker grants
-  input         InputSource                    post into the input ring
-  privileged    Admin, Debug, Hardware         the dangerous bits, rarely granted
+  CoreExec               1        DeviceEnum         32768
+  IO                     2        Driver             65536
+  Network                4        Mmio              131072
+  IPC                    8        Irq               262144
+  Memory                16        Dma               524288
+  Crypto                32        Pio              1048576
+  FileSystem            64        InputSource      2097152
+  Hardware             128
+  Debug                256        Admin                512
+  RegisterService     1024        GraphicsDisplayQuery   2048
+  GraphicsSurfaceCreate 4096      GraphicsSurfaceMap     8192
+  GraphicsPresent      16384
 ```
+
+The enum is the single source of the bit mapping. No other part of the kernel
+writes a raw literal for a capability; grant, revoke, and test all go through the
+bitmask algebra in `src/capabilities/bits.rs`, which is nothing more than `OR`,
+`AND` with a complement, and `AND` against a single bit. Keeping the whole
+authority surface to twenty-two bits is deliberate: it is small enough to audit
+in one reading, and every action a capsule performs that reaches beyond its own
+address space is one of these bits.
+
+Several bits form structured groups rather than standing alone.
+
+The driver-broker bits are layered, and the enum comment at `types.rs:35` is the
+authority for how they compose. `DeviceEnum` permits enumeration only. `Driver`
+permits claiming and releasing a device. `Mmio`, `Irq`, `Dma`, and `Pio` are each
+required in addition to a claim before the broker will hand over the
+corresponding grant: a slice of a device's memory window, an interrupt binding, a
+DMA-coherent buffer, or a port-window grant. A capsule holding `Driver` alone can
+own a device but touch none of it.
+
+`Admin` is a super-grant over that family. The token predicates that gate the
+broker treat `Admin` as satisfying the requirement (`token/types.rs:134`), so a
+capsule with `Admin` passes `can_driver`, `can_mmio`, `can_irq`, `can_dma`, and
+`can_pio` without holding those individual bits. `Admin` is itself a capability
+that a capsule holds only if its verified manifest was granted it, so this is a
+concentration of authority, not a bypass of the check. `InputSource`, the
+authority to post input events, is likewise implied by `Irq` or `Admin`, on the
+reasoning that a capsule already driving an input device's interrupt is by
+construction an input source.
 
 A driver capsule is the clearest example of a focused grant. The PS/2 input
-driver requests exactly what it needs and nothing more
-(`src/hardware/ps2_kbd_capsule/spawn.rs`):
+driver requests exactly the bits it needs (`src/hardware/ps2_kbd_capsule/spawn.rs:51`):
 
 ```
   CoreExec | IPC | Memory | Driver | DeviceEnum | Pio | Irq | InputSource
 ```
 
-It can run, message, allocate, claim its device, program ports and its IRQ line,
-and post input. It cannot touch the network, the framebuffer, or another
-device. If it tried, the syscall would return `EPERM`.
+It can run, send and receive messages, allocate memory, claim its device,
+program its ports and interrupt line, and post input. It holds no `Network`, no
+graphics bits, and no authority over any other device. An attempt to act outside
+that set returns `EPERM` at the syscall boundary.
 
 ## Declaration and the ceiling
 
-A capsule declares the bits it needs in its manifest, in `required_caps` and
-`optional_caps`. The certificate above the manifest sets `allowed_caps_ceiling`,
-the most that identity may ever hold. Verified spawn intersects the two: the
-installed set is the manifest request bounded by the certificate ceiling
-(`caps::check_ceiling` then `caps::check_grant` in the verify pipeline). A
-publisher cannot widen a capsule's authority by editing a manifest, because the
-ceiling is fixed in the anchor-signed certificate.
-
-The intersection result is what the kernel installs into the process control
-block and mints into the capability token.
-
----
-
-## Enforcement on the syscall path
-
-Every syscall is gated before its handler runs
-(`src/syscall/contract/dispatch.rs:31`):
-
-```
-  dispatch(number, args)
-      cap = Capability::resolve(number, args)
-      if cap is None:
-          log the denial
-          return EPERM
-      invoke(number, args)
-```
-
-`resolve` runs a chain of checks (`src/syscall/contract/resolver/resolve.rs`):
-
-```
-  check_token            the token's MAC verifies
-  check_session_binding  the token belongs to this session
-  check_asid_binding     the token belongs to this address space
-  check_revocation_epoch the token's epoch is current
-  check_syscall_allowed  the held capabilities permit this syscall
-```
-
-The last check consults an explicit table that maps each syscall to the
-capability it needs (`src/syscall/contract/cap_table/mk.rs`). The table is the
-authority; the [ABI reference](../abi/syscalls.md) mirrors it. A representative
-slice:
-
-```
-  MkMmap                       can_allocate_memory     (Memory)
-  MkSpawn, MkIpc*, MkService*  can_ipc                 (IPC)
-  MkDeviceClaim, MkDeviceRelease, MkPciConfig*  can_driver  (Driver)
-  MkMmioMap, MkMmioUnmap       can_mmio                (Mmio)
-  MkIrqBind/Unbind/Poll/Ack    can_irq                 (Irq)
-  MkDmaMap, MkDmaUnmap         can_dma                 (Dma)
-  MkPioGrant/Read/Write/Release can_pio                (Pio)
-  MkSurfaceRegister/Share/Release  can_surface_create  (GraphicsSurfaceCreate)
-  MkSurfaceAttach              can_surface_map         (GraphicsSurfaceMap)
-  MkSurfacePresent             can_present             (GraphicsPresent)
-  MkInputEventPost             can_input_source        (InputSource)
-```
-
-A few calls require only a valid token and no specific bit: `MkExit`,
-`MkPidAlive`, `MkYield`, the time calls, and `MkCapCheck`. Broker grant calls
-add an ownership check on top of the capability: holding `Irq` lets you call
-`MkIrqPoll`, but the broker still returns `EPERM` if the grant id you name is not
-yours.
-
----
+A capsule declares the bits it wants in its manifest, split into `required_caps`
+and `optional_caps`. The NØNOS identity certificate above the manifest carries an
+`allowed_caps_ceiling`, the most that identity may ever hold, and the certificate
+is signed by the trust anchor. Verified spawn bounds the manifest request by that
+ceiling: `caps::check_ceiling` rejects a manifest asking for anything above the
+ceiling, and `caps::check_grant` computes the installed set. A publisher cannot
+widen a capsule's authority by editing a manifest, because the ceiling is fixed
+in the anchor-signed certificate, not in the manifest. The [verified spawn
+page](capsules-and-trust.md) covers that pipeline; the result is a `u64` of bits
+installed into the process control block and minted into a token.
 
 ## The capability token
 
-The token is the proof a capsule carries. It is not a bearer secret that can be
-copied between capsules or replayed across boots; it is a structure
-authenticated by a keyed MAC and bound to the session, the address space, and the
-boot (`src/capabilities/token/types.rs`):
+The token is the proof a capsule carries at runtime. It is not a bearer secret
+that can be copied between capsules or replayed across boots. It is a structure
+authenticated by a keyed MAC and bound to a boot and an address space
+(`src/capabilities/token/types.rs:23`):
 
 ```
   CapabilityToken
-    owner_module          u64        the capsule this token belongs to
-    permissions           Vec<Capability>
-    expires_at_ms         Option<u64>
-    nonce                 u64
-    signature             [u8; 64]   the keyed MAC over the material below
-    token_id              u64
-    subject_capsule_id    u32
-    subject_asid          u32        the address space it is bound to
-    subject_measurement   [u8; 32]   a measurement of the capsule
-    boot_session_nonce    [u8; 16]   the boot it was minted in
-    revocation_epoch      u64
-    delegation_depth      u8         how far it may be re-delegated
+    owner_module          u64             the capsule the token belongs to
+    permissions           Vec<Capability> the granted capabilities
+    expires_at_ms         Option<u64>     optional wall-clock expiry
+    nonce                 u64             per-owner value, the revocation key
+    signature             [u8; 64]        the keyed MAC over everything else
+    token_id              u64             a unique id for this mint
+    subject_capsule_id    u32             the pid the token is bound to
+    subject_asid          u32             the address space it is bound to
+    subject_measurement   [u8; 32]        reserved, currently zero
+    boot_session_nonce    [u8; 16]        the boot it was minted in
+    revocation_epoch      u64             the capsule's revocation counter
+    delegation_depth      u8              depth in a delegation chain
 ```
+
+One field carries less than its name suggests, and the documentation says so
+plainly. `subject_measurement` is thirty-two bytes of zero in the current kernel.
+It is populated on every mint and covered by the MAC (`material.rs:34`), so a
+future measurement binding can be turned on without changing the token format,
+but nothing today computes a capsule measurement or checks one. The token is not
+bound to a code measurement. It is bound to the boot and the address space, and
+those bindings are real; the measurement binding is not yet.
 
 ### Authentication
 
 Verification recomputes the MAC and compares it in constant time
-(`src/capabilities/token/verify.rs`):
+(`src/capabilities/token/verify.rs:24`). It is short enough to state in full:
 
 ```
-  verify_token(tok)
-      key      = the token signing key minted at boot
-      material = token_material(tok, bits)       128 bytes, every field above
+  verify_token(tok):
+      key = signing_key()            minted at boot; if unset, return false
+      material = token_material(tok, caps_to_bits(tok.permissions))
       computed = mac64(key, material)
-      return ct_eq_64(computed, tok.signature)   constant time, no early exit
+      return ct_eq_64(computed, tok.signature)
 ```
 
-The MAC is two keyed BLAKE3 hashes concatenated to 64 bytes
-(`src/capabilities/token/material.rs`):
+The first line is a fail-closed guard: on a kernel where the signing key has not
+been set, verification returns `false` rather than proceeding. The bitmask fed
+into the material is derived from the `permissions` vector at that moment by
+`caps_to_bits`, not read from a stored field, so the vector and the bits it
+implies cannot disagree without breaking the signature.
+
+The material is a fixed 128-byte buffer with a field at every offset
+(`src/capabilities/token/material.rs:25`):
 
 ```
-  mac64(key, material)
-      mac1 = keyed_blake3(key, material)
-      mac2 = keyed_blake3(key, material || "CAP2")
-      return mac1 || mac2                         64 bytes
+  0..8     owner_module        48..80   subject_measurement
+  8..16    capability bitmask  80..96   boot_session_nonce
+  16..24   expires_at_ms       96..104  revocation_epoch
+  24..32   nonce               104      delegation_depth
+  32..40   token_id            105..128 zero padding
+  40..44   subject_capsule_id
+  44..48   subject_asid
 ```
 
-The comparison is `ct_eq_64`, which XORs all 64 bytes and folds the difference
-to a single branch, so verification time does not depend on how many bytes
-matched. That closes the timing side channel an attacker would otherwise use to
-forge a signature byte by byte.
+The authenticator is `mac64` (`material.rs:41`): two keyed BLAKE3 hashes of the
+same material under the same key, concatenated to sixty-four bytes. The second
+hash absorbs the literal suffix `CAP2` before finalising, which separates the two
+halves so they are independent outputs rather than one 256-bit hash written
+twice. The comparison uses `ct_eq_64` from `crypto/util/constant_time`, which
+folds the difference over all sixty-four bytes without an early exit, so
+verification time does not reveal how many bytes matched. That closes the timing
+channel an attacker would otherwise walk to forge a tag one byte at a time.
 
-### Why it cannot be replayed
+### Why it cannot be replayed or transplanted
 
-The material covers the boot session nonce, so a token minted in one boot fails
-to verify in the next: the signing key and the session nonce both change. It
-covers the subject address space id, so a token lifted from one capsule does not
-authenticate for another. It covers a measurement of the capsule, so the token is
-tied to the exact code it was issued to.
+The material covers `boot_session_nonce`, and the signing key is minted fresh at
+each boot, so a token from one boot fails to verify in the next: different key
+over a different nonce. The material covers `subject_asid`, so a token lifted out
+of one capsule does not authenticate for another, which runs in a different
+address space. These two bindings are what make the token safe to hold in
+userspace: possession of the bytes is not possession of the authority.
 
 ### Validity and revocation
 
@@ -190,28 +178,93 @@ revoked (`src/capabilities/token/validate.rs`):
       verify_token(tok) and not_expired(tok) and not is_revoked(owner, nonce)
 ```
 
-Revocation is a set of `(owner_module, nonce)` pairs
-(`src/capabilities/token/revocation.rs`), checked on every validation. Revoking
-one token, or every token for an owner, takes immediate effect: the next syscall
-the affected capsule makes fails the resolver chain and returns `EPERM`.
+Authority is withdrawn two ways. The direct way is a set of `(owner_module,
+nonce)` pairs (`src/capabilities/token/revocation.rs`), consulted on every
+validation; revoking a nonce, or every nonce for an owner, takes effect on the
+capsule's next syscall. The scalable way is the revocation epoch. Rather than
+hunt down every outstanding copy of a token when a capsule's authority changes,
+the kernel bumps a per-process revocation counter and mints the capsule a fresh
+token carrying the new epoch. Older tokens still authenticate, but they carry an
+epoch behind the process's current one, and the resolver rejects them. One
+counter increment retires every token minted before it.
 
-### Delegation
+`delegation_depth` bounds how far a capability can be passed on. `MkCapGrant` and
+`MkCapRevoke` are the syscalls that hand a subset of held capabilities to another
+capsule and undo it; both are gated by the `IPC` capability (see the table
+below). The delegation machinery lives in `src/capabilities/delegation/`.
 
-`delegation_depth` bounds how far a capability can be passed on. `MkCapGrant`
-hands a subset of held capabilities to another capsule; the new token's depth is
-lower than the granter's, so a delegated capability cannot be re-delegated
-without limit. `MkCapRevoke` undoes a grant.
+## Enforcement on the syscall path
 
----
+Every syscall is gated before its handler runs (`src/syscall/contract/dispatch.rs:31`).
+The contract resolves the calling capsule's token and runs it through a fixed,
+ordered chain (`src/syscall/contract/resolver/resolve.rs:31`):
+
+```
+  check_token             the MAC verifies, the token is unexpired and unrevoked
+  check_session_binding   the token's boot nonce is this boot's nonce
+  check_asid_binding      the token's address space id is the caller's
+  check_revocation_epoch  the token's epoch is not behind the process epoch
+  check_syscall_allowed   the held bits permit this specific syscall
+```
+
+The order is not incidental. Authenticity is established first, so every field a
+later step reads is already known genuine. The context bindings come next, so a
+genuine but stale or transplanted token is rejected before the per-syscall test.
+Only then does the chain consult the bits. Any failure turns the dispatch into
+`EPERM`, logs the denial, and the handler never runs.
+
+The final check consults an explicit table mapping each syscall to the authority
+it needs (`src/syscall/contract/cap_table/mk.rs`). The table is the authority;
+the [ABI reference](../abi/syscalls.md) mirrors it. Read exactly as the code
+stands:
+
+```
+  valid token, no specific bit
+    MkExit, MkPidAlive, MkYield, MkTimeMillis, MkTimeRtc, MkBatteryStatus,
+    MkProcStat, MkAttestStatus, MkCapCheck
+
+  Memory        MkMmap (allocate), MkMunmap (deallocate)
+  IPC           MkSpawn, all MkIpc*, MkServiceLookup/Register,
+                MkCapGrant, MkCapRevoke, MkThreadSpawn, MkProcOutput,
+                MkInputEventDrain, MkInputEventWait
+  CoreExec      MkGetPid, MkArgs  (via can_getpid)
+  CoreExec+IPC+Memory  MkCapsuleLoad  (all three required)
+
+  DeviceEnum    MkDeviceList
+  Driver        MkDeviceClaim, MkDeviceRelease, MkPciConfigRead/Write
+  Mmio          MkMmioMap, MkMmioUnmap
+  Irq           MkIrqBind, MkIrqUnbind, MkIrqAck, MkIrqPoll, MkIrqWait
+  Dma           MkDmaMap, MkDmaUnmap
+  Pio           MkPioGrant, MkPioRead, MkPioWrite, MkPioRelease
+  Debug         MkDebug
+
+  GraphicsSurfaceCreate  MkSurfaceRegister, MkSurfaceShare, MkSurfaceRelease
+  GraphicsSurfaceMap     MkSurfaceAttach
+  GraphicsPresent        MkSurfacePresent
+  GraphicsDisplayQuery   MkDisplayVsyncWait
+  InputSource            MkInputEventPost
+```
+
+Two details of the table are worth stating because they are easy to assume
+wrong. Draining and waiting on the input ring (`MkInputEventDrain`,
+`MkInputEventWait`) require `IPC`, not `InputSource`; only posting an event
+(`MkInputEventPost`) requires `InputSource`. And a syscall the `Mk` table does
+not name at all falls through with `None` (`mk.rs:82`), which lets another
+capability family claim it or, failing that, denies it.
+
+The broker calls layer one more check on top of the capability. Holding `Irq`
+lets a capsule call `MkIrqPoll`, but the broker still returns `EPERM` if the
+grant id it names is not one the capsule owns. The capability is permission to
+participate; ownership of the specific grant is checked separately, on the
+[hardware broker](../subsystems/hardware-broker/README.md) page.
 
 ## The shape of the guarantee
 
-Putting the pieces together, an action succeeds only if all of the following
-hold at once:
+An action succeeds only if all of the following hold at once:
 
 ```
-  the token's MAC verifies under the boot's signing key
-  the token is bound to this session, this address space, this boot
+  the token's MAC verifies under this boot's signing key
+  the token is bound to this session, this address space, and this boot
   the token has not expired and has not been revoked
   the held capabilities permit this specific syscall
   for a broker call, the caller owns the named grant
@@ -220,5 +273,21 @@ hold at once:
 None of these can be satisfied by a capsule editing its own state, because the
 authority rests on a MAC the capsule cannot forge and bindings it cannot fake.
 The capability system and the [verified-spawn gate](capsules-and-trust.md) are
-the two halves of the same story: spawn decides what a capsule is allowed to
-hold, and the token enforces it on every call thereafter.
+the two halves of one story: spawn decides what a capsule is allowed to hold, and
+the token enforces it on every call thereafter.
+
+## Source
+
+```
+  src/capabilities/types.rs             the Capability enum and bit mapping
+  src/capabilities/bits.rs              the bitmask algebra
+  src/capabilities/token/types.rs       the CapabilityToken and predicates
+  src/capabilities/token/material.rs    the 128-byte MAC material and mac64
+  src/capabilities/token/verify.rs      verify_token
+  src/capabilities/token/validate.rs    is_token_valid
+  src/capabilities/token/revocation.rs  the revoked (owner, nonce) set
+  src/capabilities/delegation/          delegation and its depth bound
+  src/syscall/contract/dispatch.rs      the pre-handler gate
+  src/syscall/contract/resolver/        the ordered resolve chain
+  src/syscall/contract/cap_table/mk.rs  the syscall-to-capability table
+```

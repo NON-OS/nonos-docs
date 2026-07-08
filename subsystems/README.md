@@ -11,21 +11,23 @@ source.
 
 | Page | Subsystem | Overview section |
 |------|-----------|------------------|
-| [boot.md](boot.md) | Boot and init sequence | 4 |
-| [memory.md](memory.md) | Physical memory, paging, unified VM | 5 |
-| [process-model.md](process-model.md) | The PCB, the process table, lifecycle, the supervisor | 6, 11 |
-| [elf-loader.md](elf-loader.md) | Parsing, validation, and mapping of capsule ELFs | 6, 7 |
-| [scheduler.md](scheduler.md) | Priority scheduling, preemption, sleep and wake | 11 |
-| [smp.md](smp.md) | Multicore bring-up, per-CPU data, per-CPU scheduling | 11 |
-| [ipc.md](ipc.md) | Endpoints, inboxes, call and reply | 10 |
-| [hardware-broker.md](hardware-broker.md) | Device claim, IRQ, MMIO, DMA, PIO grants | 12 |
-| [interrupts.md](interrupts.md) | IO-APIC routing, GSI ownership, vector pool | 12 |
-| [input.md](input.md) | The input ring and the driver to shell path | 13 |
-| [graphics.md](graphics.md) | Surfaces, sharing, presentation, vsync | 14 |
-| [networking.md](networking.md) | The L2 to sockets network capsule stack | 9 |
-| [storage.md](storage.md) | Block drivers, ramfs, and the vfs capsules | 9 |
-| [time-and-clock.md](time-and-clock.md) | TSC calibration, the two time bases, entropy | 11 |
-| [crypto.md](crypto.md) | The in-tree crypto stack and what uses each primitive | 15 |
+| [boot/](boot/README.md) | Boot and init sequence | 4 |
+| [memory/](memory/README.md) | Physical frames, paging, unified VM, heap, faults, hardening, usercopy, zeroization | 5 |
+| [process/](process/README.md) | The PCB, the process table, lifecycle, context switch, the supervisor | 6, 11 |
+| [elf-loader/](elf-loader/README.md) | Parsing, validation, and mapping of capsule ELFs | 6, 7 |
+| [scheduler/](scheduler/README.md) | Priority selection, preemption, sleep and wake | 11 |
+| [smp/](smp/README.md) | Per-CPU data, CPU identity, TLB shootdown | 11 |
+| [syscall/](syscall/README.md) | The ring boundary, the tag numbers, the capability contract, the router | 6, 10 |
+| [ipc/](ipc/README.md) | Inboxes, routing and permission, the message envelope and MAC, pipes | 10 |
+| [hardware-broker/](hardware-broker/README.md) | Device claim, IRQ, MMIO, DMA, PIO grants | 12 |
+| [interrupts/](interrupts/README.md) | IO-APIC routing, GSI ownership, vector pool | 12 |
+| [input/](input/README.md) | The input ring and the driver to shell path | 13 |
+| [graphics/](graphics/README.md) | Surfaces, sharing, presentation, vsync | 14 |
+| [networking/](networking/README.md) | The L2 to sockets network capsule stack | 9 |
+| [storage/](storage/README.md) | Block drivers, ramfs, and the vfs capsules | 9 |
+| [time-and-clock/](time-and-clock/README.md) | TSC calibration, the two time bases, entropy | 11 |
+| [crypto/](crypto/README.md) | The in-tree crypto stack and what uses each primitive | 15 |
+| [proof-system/](proof-system/README.md) | The transparent STARK, the Poseidon-Goldilocks hash, the AIR catalog, and the Pedersen attestation | 15 |
 
 The overview-section column points back to the matching section of the
 architecture overview for the short version of each subsystem.

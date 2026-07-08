@@ -2,7 +2,7 @@
 
 This page documents the storage-facing capsule set: RAMFS, VFS, virtio block,
 AHCI, NVMe, and USB mass storage. Read [Core Service Capsules](core-capsules.md),
-[Drivers](drivers.md), and [Storage](../subsystems/storage.md) first.
+[Drivers](drivers.md), and [Storage](../subsystems/storage/README.md) first.
 
 The storage path is split deliberately. File state is owned by RAMFS and VFS.
 Block device control is owned by driver capsules. USB mass storage is a command

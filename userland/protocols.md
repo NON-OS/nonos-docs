@@ -234,15 +234,15 @@ same shape, and VFS sets `HDR_LEN` to `20`
 |---------|------------------|--------|
 | `ramfs` | open, close, read, write, truncate, plus create and truncate open flags | `userland/capsule_ramfs/src/protocol/types.rs:17` to `userland/capsule_ramfs/src/protocol/types.rs:28` |
 | `vfs` | magic `NOVF`, version `1`, open, close, read, write, stat, list, healthcheck, mkdir, unlink, rename, create/truncate/append flags, path and payload caps | `userland/capsule_vfs/src/protocol/types.rs:17` to `userland/capsule_vfs/src/protocol/types.rs:44` |
-| `keyring` | store, retrieve, delete, lock, unlock, metadata, count, wallet import, wallet generate, wallet address, sign NOX receipt, sign NOX approve | `userland/capsule_keyring/src/protocol/types.rs:17` to `userland/capsule_keyring/src/protocol/types.rs:32` |
+| `keyring` | store, retrieve, delete, lock, unlock, metadata, count, wallet import, wallet generate, wallet address, sign NOX receipt, sign NOX approve, sign ETH transfer, list wallet rails | `userland/capsule_keyring/src/protocol/types.rs:17` to `userland/capsule_keyring/src/protocol/types.rs:34` |
 | `entropy` | magic `NOEN`, version `1`, get random, get stats, reseed, healthcheck, bounded random and reseed sizes | `userland/capsule_entropy/src/protocol/types.rs:26` to `userland/capsule_entropy/src/protocol/types.rs:54` |
 | `crypto` | magic `NOCX`, version `1`, BLAKE3, SHA3-256, SHA-256, SHA-512, Ed25519 verify, ChaCha20-Poly1305 seal/open, AES-256-GCM seal/open, bounded verify and AEAD payload sizes | `userland/capsule_crypto/src/protocol/types.rs:17` to `userland/capsule_crypto/src/protocol/types.rs:66` |
 | `crypto` primitives | X25519 public key, X25519 shared secret, HMAC-SHA256, HKDF-SHA256, primitive-specific caps | `userland/capsule_crypto/src/protocol/primitives.rs:17` to `userland/capsule_crypto/src/protocol/primitives.rs:25` |
 | `attest` | healthcheck, proof summary, proof invariants, proof boot, proof capsule list | `userland/capsule_attest/src/protocol/ops.rs:17` to `userland/capsule_attest/src/protocol/ops.rs:21` |
 | `policy` | get and set over typed policy fields | `userland/policy_proto/src/ops.rs:17` to `userland/policy_proto/src/ops.rs:18`, fields at `userland/policy_proto/src/field.rs:17` to `userland/policy_proto/src/field.rs:57` |
 | `market` | load index, list apps, get app, get release, install ready, healthcheck | `userland/capsule_market/src/protocol/ops.rs:17` to `userland/capsule_market/src/protocol/ops.rs:22` |
-| `installer` | healthcheck, install, kernel reply endpoint, 8-byte header, `EINVAL`, `EAGAIN` | `userland/capsule_installer/src/protocol/types.rs:17` to `userland/capsule_installer/src/protocol/types.rs:25` |
-| `payment` | healthcheck, pay, drain receipts, kernel reply endpoint, 8-byte header, `EINVAL`, `EAGAIN` | `userland/capsule_payment/src/protocol/types.rs:17` to `userland/capsule_payment/src/protocol/types.rs:26` |
+| `installer` | healthcheck, install admission, load from VFS store, kernel reply endpoint, 8-byte header, `EINVAL`, `EAGAIN` | `userland/capsule_installer/src/protocol/types.rs:17` to `userland/capsule_installer/src/protocol/types.rs:26` |
+| `payment` | healthcheck, pay, drain receipts, list tokens, kernel reply endpoint, 8-byte header, `EINVAL`, `EAGAIN` | `userland/capsule_payment/src/protocol/types.rs:17` to `userland/capsule_payment/src/protocol/types.rs:27` |
 | `power` | healthcheck, reboot, shutdown | `userland/capsule_power/src/protocol/ops.rs:17` to `userland/capsule_power/src/protocol/ops.rs:19` |
 
 ## 6. Network protocols

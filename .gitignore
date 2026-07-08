@@ -1,0 +1,6 @@
+# macOS
+.DS_Store
+
+# pandoc/docx build scratch (unzipped docx internals)
+work/
+engineering/

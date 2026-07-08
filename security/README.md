@@ -1,16 +1,42 @@
 # Security
 
-How NØNOS decides what code may run and what running code may do. The two pages
-here are the two halves of one story: admission, then enforcement.
+How NØNOS decides what code may run and what running code may do. The section
+divides into two halves of one story: admission, the pipeline that verifies a
+capsule before it becomes a process, and enforcement, the authority a capsule
+holds afterward and how every syscall is checked against it. Read the admission
+pages first, since the capabilities a capsule holds are the output of the
+admission pipeline.
+
+## Admission
+
+Everything that decides whether a capsule is allowed to run, and with what
+authority, before a single instruction of it executes.
 
 | Page | What it covers |
 |------|----------------|
-| [capsules-and-trust.md](capsules-and-trust.md) | The capsule format, the NONOS-ID certificate, the manifest, publisher signatures (Ed25519 and ML-DSA-65), the baked trust anchor, and the verified-spawn gate that runs every check before a capsule executes. |
-| [capabilities-and-tokens.md](capabilities-and-tokens.md) | The 22 capability bits, how they are declared and bounded by the certificate ceiling, how they are enforced on every syscall, and the MAC-authenticated capability token that binds them to a session, an address space, and a boot. |
+| [capsules-and-trust.md](capsules-and-trust.md) | The capsule as an artifact, the baked trust anchor, and the exact ordered verified-spawn pipeline: certificate against the anchor, then manifest against the certificate, then the capability math and the attestation gate. |
+| [manifest-schema.md](manifest-schema.md) | Every field of the `CapsuleManifest`, the fixed sizes, the endpoint and publisher-signature sub-schemas, what the signatures cover, and which verification step reads each field. |
+| [certificate-schema.md](certificate-schema.md) | Every field of the NØNOS-ID certificate, the capability ceiling and namespace globs, the publisher keys that sign manifests, and the two signing layers from anchor to certificate to manifest. |
+| [trust-anchor.md](trust-anchor.md) | The baked, non-optional anchor policy, its signing keys and their windows, the epoch anti-rollback, the three revocation lists, and exactly what it enforces on a certificate. |
+| [attestation.md](attestation.md) | The zero-knowledge attestation gate, its feature-gated enforcement, the `NZKCAPS2` trailer format, and what the enrolled-secret proof binds. |
 
-Read them in that order. The capability set a capsule receives is the output of
-the verified-spawn pipeline, so admission comes first.
+## Enforcement
 
-Sources behind this section live under `src/security/` (capsule manifest,
-NONOS-ID certificate, trust anchor), `src/capabilities/` (bits and tokens), and
-`src/crypto/` (the signature and hash primitives).
+The authority a running capsule holds, how it is authenticated, how it is passed
+on, and how it is withdrawn.
+
+| Page | What it covers |
+|------|----------------|
+| [capabilities-and-tokens.md](capabilities-and-tokens.md) | The twenty-two capability bits, the driver-broker layering and the `Admin` super-grant, the capability token and its bindings, the syscall-to-capability table, and the ordered resolve chain. |
+| [signing-and-mac.md](signing-and-mac.md) | The per-boot signing key, the 128-byte MAC material and the two-pass keyed BLAKE3, the mint and sign and verify paths, the boot-session nonce, and the constant-time comparison. |
+| [delegation.md](delegation.md) | The `Delegation` structure, the subset and expiry rules enforced at creation, the domain-separated MAC, the three verification entry points, and every error. |
+| [revocation.md](revocation.md) | The four scopes of revocation: the per-boot key and nonce, the per-process epoch, the per-token revoked set, and the anchor lists, with where each takes effect. |
+
+## Sources
+
+The code behind this section lives under `src/security/` (the capsule manifest,
+the NØNOS-ID certificate, the trust anchor, and the attestation trailer),
+`src/capabilities/` (the capability bits, tokens, and delegation),
+`src/kernel_core/process_spawn/` (the spawn runner), and `src/crypto/` (the
+signature, hash, and constant-time primitives). Every page is verified against
+those trees with `file:line` references.

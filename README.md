@@ -33,6 +33,7 @@ documentation hangs off.
 
 | Page | What it covers |
 |------|----------------|
+| [the-nonos-path.md](the-nonos-path.md) | The single institutional and engineering document: what NØNOS is today, the microkernel and capsule model, the SDK and the GUI, the true path to build on both, the cryptographic spine, the NOX settlement layer, and the road to x402 and agentic payments on Base. |
 | [architecture/overview.md](architecture/overview.md) | The full system in one document: the arch boundary, privilege model, boot order, memory, capsules, verified spawn, capabilities, syscalls, IPC, scheduling, the hardware broker, and the input and graphics paths. |
 
 ### Reference

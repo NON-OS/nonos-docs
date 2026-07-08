@@ -109,9 +109,10 @@ Keyring owns a `BTreeMap` from key id to key entry and a `next_id` counter
 `userland/capsule_keyring/src/store/types/store.rs:21`,
 `userland/capsule_keyring/src/store/types/store.rs:22`). Its dispatch surface
 covers key store, retrieve, delete, lock, unlock, metadata, count, wallet import,
-wallet generate, wallet address, NOX receipt signing, and NOX approve signing
+wallet generate, wallet address, NOX receipt signing, NOX approve signing, and
+native ETH transfer signing, and wallet rail listing
 (`userland/capsule_keyring/src/server/dispatch.rs:28` to
-`userland/capsule_keyring/src/server/dispatch.rs:41`).
+`userland/capsule_keyring/src/server/dispatch.rs:43`).
 
 Entropy owns atomic counters for request count, bytes served, last reseed
 request, and source failures (`userland/capsule_entropy/src/pool/types.rs:26`,
@@ -188,10 +189,12 @@ release, and install-ready operations (`userland/capsule_market/src/server/runne
 `userland/capsule_market/src/server/runner.rs:62`,
 `userland/capsule_market/src/server/runner.rs:63`).
 
-Installer dispatches healthcheck and install. Payment dispatches healthcheck,
-pay, and drain receipts (`userland/capsule_installer/src/server/dispatch.rs:23`,
+Installer dispatches healthcheck, install admission, and VFS store capsule load.
+Payment dispatches healthcheck, pay, drain receipts, and token listing
+(`userland/capsule_installer/src/server/dispatch.rs:23`,
 `userland/capsule_installer/src/server/dispatch.rs:24`,
 `userland/capsule_installer/src/server/dispatch.rs:25`,
+`userland/capsule_installer/src/server/dispatch.rs:26`,
 `userland/capsule_payment/src/server/dispatch.rs:26`,
 `userland/capsule_payment/src/server/dispatch.rs:27`,
 `userland/capsule_payment/src/server/dispatch.rs:28`,
@@ -222,7 +225,7 @@ size handling, retired syscall rejection, then emits pass or fail and exits
 | Capsule | Audit question | First source |
 |---------|----------------|--------------|
 | `market` | Was the index decoded, bounded, and dispatched to the right handler? | `userland/capsule_market/src/server/runner.rs:41` |
-| `installer` | Is the request healthcheck or install? | `userland/capsule_installer/src/server/dispatch.rs:23` |
-| `payment` | Is the request pay or drain receipts? | `userland/capsule_payment/src/server/dispatch.rs:26` |
+| `installer` | Is the request healthcheck, install admission, or VFS store capsule load? | `userland/capsule_installer/src/server/dispatch.rs:23` |
+| `payment` | Is the request pay, drain receipts, or list supported tokens? | `userland/capsule_payment/src/server/dispatch.rs:26` |
 | `power` | Is the command reboot or shutdown after parse? | `userland/capsule_power/src/server/handlers/router.rs:27` |
 | `proof_io` | Which syscall proof failed before exit? | `userland/capsule_proof_io/src/main.rs:38` |

@@ -12,7 +12,7 @@ not work, this page points to the exact source path that should be inspected.
 ## 1. Boot to runqueue
 
 The boot path starts in `run_init`, runs the proof and RAMFS phases, spawns core
-services, drivers, VFS, network, the launcher broker, desktop, market, smoke
+services, drivers, VFS, network, the launcher broker, desktop, market, validation
 tests, then enters the supervisor loop (`src/userspace/init/entry.rs:25`,
 `src/userspace/init/entry.rs:27`, `src/userspace/init/entry.rs:28`,
 `src/userspace/init/entry.rs:30`, `src/userspace/init/entry.rs:31`,

@@ -235,8 +235,8 @@ caps the done state at `10`, treats enter as advance, escape as back, and maps
 +--------------------------+
 ```
 
-These two apps are useful smoke tests because they exercise the raw GUI client,
-compositor, and input route without `nonos_app_skeleton` in the middle.
+These two apps are useful direct GUI exercises because they drive the raw GUI
+client, compositor, and input route without `nonos_app_skeleton` in the middle.
 
 ## 6. App boot inclusion
 
@@ -245,7 +245,7 @@ and market after network
 (`src/userspace/init/entry.rs:33`, `src/userspace/init/entry.rs:34`,
 `src/userspace/init/entry.rs:35`, `src/userspace/init/entry.rs:36`). The
 spawn plan module imports desktop, desktop services, input probe, drivers,
-network, core, and smoketests, but does not import the app fleet modules or
+network, and core, but does not import the app fleet modules or
 export an app spawn entry (`src/userspace/init/spawn_plan/mod.rs:17`,
 `src/userspace/init/spawn_plan/mod.rs:41`). `apps.rs` and `apps_tools.rs`
 still define a source-level app fleet for input proof, about, calculator,

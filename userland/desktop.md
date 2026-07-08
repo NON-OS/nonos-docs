@@ -2,7 +2,7 @@
 
 This page describes the userland GUI stack: compositor, WM, input_router, and
 desktop_shell. Read [Userland Model](README.md), then
-[Graphics](../subsystems/graphics.md) and [Input](../subsystems/input.md).
+[Graphics](../subsystems/graphics/README.md) and [Input](../subsystems/input/README.md).
 
 Audit the desktop in two passes: first follow drawing into the compositor, then
 follow input through the router and WM. Keeping those paths separate makes GUI
