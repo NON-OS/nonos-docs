@@ -135,13 +135,13 @@ event to the consumer that should receive it, over [IPC](../ipc/README.md).
   with `code = bit+1` (`userland/capsule_driver_ps2_input/src/mouse/post.rs:24`).
 - USB HID: the same shape through `userland/capsule_driver_usb_hid/src/hid/post_wire.rs`, which
   offers both a relative `send` and an absolute `send_abs` that fills `x`/`y`. The mouse publisher
-  posts `POINTER_REL`, `WHEEL`, and button events (`.../hid/publish.rs`).
+  posts `POINTER_REL`, `WHEEL`, and button events (`.../hid/post_mouse.rs`).
 - i2c HID: `userland/capsule_driver_i2c_hid/src/input/post.rs:19` posts through the same
   `mk_input_event_post`, driven by the report parser under `.../input/`.
 
 A driver whose `post_input` returns `ENOMEM` has hit a full ring; the driver simply sees a negative
 return from `mk_input_event_post` and treats the event as lost. The USB HID mouse counts these in
-`state.post_failures` (`.../hid/publish.rs:44`); the PS/2 and i2c paths discard the boolean.
+`state.post_failures` (`.../hid/mouse.rs:67`); the PS/2 and i2c paths discard the boolean.
 
 ### The router loop
 
