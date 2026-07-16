@@ -48,7 +48,7 @@ On key events the `flags` field carries modifier bits. The PS/2 driver defines t
 `MOD_ALT=4`, `MOD_META=8`, and its comment notes the USB HID driver uses the same encoding. On
 button events `code` is the button id: the PS/2 and USB drivers post `bit + 1`, so left button is
 1, right is 2, middle is 3 (`userland/capsule_driver_ps2_input/src/mouse/post.rs:43`,
-`userland/capsule_driver_usb_hid/src/hid/publish.rs:39`). `timestamp_ns` is posted as zero by every
+`userland/capsule_driver_usb_hid/src/hid/post_mouse.rs:44`). `timestamp_ns` is posted as zero by every
 current driver; nothing on the path fills it in.
 
 ## The three syscalls
