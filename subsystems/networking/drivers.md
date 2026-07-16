@@ -17,6 +17,10 @@ Several NIC drivers exist, each a capsule spawned from the driver bring-up plan
   (virtio-net)       the virtio network device (QEMU's default)
 ```
 
+The virtio-net driver has its own capsule documentation under
+[userland/driver-virtio-net](../../userland/driver-virtio-net/README.md): the NNET protocol, the broker
+bring-up transaction, and the RX/TX virtqueue engine, one page each.
+
 Each is feature-gated, so a build includes the drivers it needs, and each is a signed capsule the
 init sequence spawns like any other. A driver capsule claims its NIC through the
 [hardware broker](../hardware-broker/README.md): it claims the device, maps the controller registers

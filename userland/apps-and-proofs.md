@@ -30,72 +30,18 @@ them.
 
 ## Proof and stub capsules
 
-These do not have dedicated pages. The full spec for each is here.
+The tutorial capsule, the one unbuilt contract, and the runtime self-tests. Each has its own page; the
+honest label on each is preserved.
 
-### capsule_hello
-
-The minimal example. App on `userland/capsule_hello/src/main.rs`, an app-skeleton GUI app.
-
-- **Behavior**: draws the static text "hello, NONOS" with a subtitle "signed, attested capsule" in a
-  small window and closes on Escape. It is the smallest complete `App` implementation, the reference to
-  read first alongside [writing an app](writing-an-app.md).
-
-### capsule_ripgrep
-
-A text-search tool contract. `userland/capsule_ripgrep/`.
-
-- **Status: not implemented.** There is no application source; only a README defining the intended
-  contract (a signed tool endpoint with the `0x19` capability mask, IPC, memory, and syscall only, no
-  hardware or persistence). This is documented honestly as a defined-but-unbuilt capsule, not a working
-  ripgrep port.
-
-### capsule_gui_proof
-
-Proves the standard library drives a real GUI. App-skeleton GUI app,
-`userland/capsule_gui_proof/src/app.rs`.
-
-- **Behavior**: stores a label in a `nonos_std::collections::HashMap`, increments a click counter on
-  button-down events, and paints the label (via `nonos_std::format`) and the count, closing on Escape. It
-  is the runtime evidence that the [nonos_std crate](nonos-std.md) collections and formatting work in a
-  GUI capsule.
-
-### capsule_std_proof
-
-Proves unmodified crates.io crates run on the std PAL. A CLI proof,
-`userland/capsule_std_proof/src/main.rs`.
-
-- **Behavior**: parses JSON with `serde_json`, matches words with `regex`, and encodes with `base64`, all
-  unmodified crates.io crates, and prints the results to stdout. It runs as a pure `std` binary through
-  the [std PAL](std-pal.md), and is the concrete evidence that unmodified Rust crates compile and run
-  on NØNOS.
-
-### capsule_input_proof
-
-Proves input delivery to GUI apps. App-skeleton GUI app,
-`userland/capsule_input_proof/src/proof/app.rs`.
-
-- **Behavior**: latches "surface composited" on the first paint and logs every `InputEvent` it receives,
-  rendering the latches and markers. Honest scope: the markers are latches rather than formal proofs, and
-  debug output ordering can race the paint.
-
-### capsule_input_probe
-
-An input-router protocol probe. A server daemon (not a GUI app),
-`userland/capsule_input_probe/src/main.rs:13`.
-
-- **Behavior**: initializes a heap and runs a router-protocol server, listening for subscribe and grab
-  requests and delivering `InputEvent` frames in the wire format, to exercise the input protocol. Honest
-  scope: it is a protocol test harness, and parts of the server loop are scaffolding.
-
-### capsule_proof_io
-
-Proves the syscall interface behaves. A bare-metal proof, `userland/capsule_proof_io/src/main.rs:37`.
-
-- **Behavior**: calls the time syscall 1024 times asserting success, then checks that a bad syscall tag
-  returns `ENOSYS`, an invalid pointer returns `EFAULT`, an oversized length returns `EINVAL`, and four
-  retired syscall tags each return `ENOSYS`. It exits 0 on pass and a nonzero code on the specific
-  failure, printing a proof marker. It is the runtime check that the [syscall boundary](../../subsystems/syscall/boundary.md)
-  rejects the malformed as designed.
+| Capsule | Kind | One-line summary |
+| --- | --- | --- |
+| [hello](hello/README.md) | tutorial | The minimal complete `App`: draws static text in a small window and closes on Escape; the reference to read first alongside [writing an app](writing-an-app.md). |
+| [ripgrep](ripgrep/README.md) | not implemented | A text-search tool contract with no application source, only a README defining the intended signed endpoint. Documented honestly as defined-but-unbuilt, not a working ripgrep port. |
+| [gui-proof](gui-proof/README.md) | self-test | Runtime evidence that the [nonos_std](nonos-std.md) collections and formatting drive a real GUI: a HashMap label and a click counter painted through `nonos_std::format`. |
+| [std-proof](std-proof/README.md) | self-test | Evidence that unmodified crates.io crates run on the [std PAL](std-pal.md): parses JSON with `serde_json`, matches with `regex`, encodes with `base64`, all as a pure `std` binary. |
+| [input-proof](input-proof/README.md) | self-test | Latches surface composition on first paint and logs every `InputEvent`; honest scope, the markers are latches rather than formal proofs. |
+| [input-probe](input-probe/README.md) | test harness | A router-protocol server daemon that exercises the subscribe, grab, and delivery wire format; a protocol test harness, parts of the loop are scaffolding. |
+| [proof-io](proof-io/README.md) | self-test | Asserts the [syscall boundary](../../subsystems/syscall/boundary.md) rejects the malformed: bad tags return `ENOSYS`, a bad pointer `EFAULT`, an oversized length `EINVAL`; exits nonzero on the specific failure. |
 
 ## Security analysis
 
