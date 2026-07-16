@@ -305,7 +305,7 @@ router; there is no shared mutable desktop state any of them can reach directly.
 grabs are the sharpest instance: the router reserves exclusive keyboard and pointer grabs
 to three named system capsules and refuses everyone else with `E_ACCES`, so the desktop
 shell and ordinary apps see only the events routed to them by focus and hit test, never an
-exclusive capture (the gate is on the [input router page](capsule-catalog/input-router.md)).
+exclusive capture (the gate is on the [input router page](input-router/README.md)).
 
 Login is the session-authority capsule, and it holds ports to the keyring, the desktop
 shell, and the compositor plus a locked-or-unlocked session flag

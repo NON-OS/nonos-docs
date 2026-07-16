@@ -185,7 +185,7 @@ and is not part of any of those steady-state paths.
 ## Verification
 
 The specification-level `Zeroization` proofs in the
-[verification stack](../../../verification/README.md) prove that a wiped region
+[verification stack](../../architecture/verification.md) prove that a wiped region
 holds no secret and that a reused region leaks nothing across lifetimes, which is the
 abstract statement of the frame-free zeroing and the ZeroState wipe documented here.
 
@@ -202,4 +202,4 @@ abstract statement of the frame-free zeroing and the ZeroState wipe documented h
 Every reference above is verified against those trees. The demand-page zero is on the
 [fault handler](faults.md) page, the heap zeroing is on the [heap](heap.md) page, the frame-free zero is
 the free-path arm of the [physical frame allocator](physical-frames.md), and the spec proofs are on the
-[verification stack](../../../verification/README.md) page.
+[verification stack](../../architecture/verification.md) page.

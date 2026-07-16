@@ -84,9 +84,9 @@ value. When a wallet or an agent holds a key or authorizes a payment, three ques
 you can trust it, and NONOS answers each structurally.
 
 **Where does the key live, and who can reach it?** On NONOS the signing key lives in the [keyring
-capsule](../userland/capsule-catalog/keyring.md), which holds the crypto capability but not the
+capsule](../userland/keyring/README.md), which holds the crypto capability but not the
 network or driver capabilities, so it can sign but cannot exfiltrate over a socket or a device. The
-[wallet capsule](../userland/capsule-catalog/wallet-nonos.md) that builds and displays a transaction
+[wallet capsule](../userland/wallet-nonos/README.md) that builds and displays a transaction
 holds no key material and no network hardware; it reaches the keyring only by named IPC and the network
 only through the confined [network capsules](../subsystems/networking/README.md). A browser exploit or
 a malicious dependency in one capsule cannot walk into the key, because it has no capability that

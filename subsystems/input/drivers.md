@@ -190,7 +190,7 @@ record and advance the head, and if the 1024-entry ring is full it increments a 
 returns rather than blocking the driver. Ordering across drivers is total: the ring is MPSC, so a key
 from PS/2 and a motion from the touchpad interleave in posting order and the single router drains them
 in that order. And the wakeup is exact: a post bumps a release-ordered sequence number and wakes the
-one waiter armed on the ring, so the [input_router](../../userland/capsule-catalog/input-router.md)
+one waiter armed on the ring, so the [input_router](../../userland/input-router/README.md)
 sleeps until there is an event instead of spinning. A driver never has to know any of this; it calls
 one syscall and the kernel provides the bound, the order, and the wakeup.
 
@@ -286,5 +286,5 @@ tablets; the full report-descriptor generality of arbitrary HID devices is not i
 
 Every reference above is verified against those trees. The router capsule that drains the ring and fans
 events out to focus is documented on the
-[input_router](../../userland/capsule-catalog/input-router.md) page; the grant syscalls it rests on are
+[input_router](../../userland/input-router/README.md) page; the grant syscalls it rests on are
 specified on the [hardware broker](../hardware-broker/README.md) pages.

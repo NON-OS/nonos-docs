@@ -6,7 +6,7 @@ directly. It validates the range against a pure policy, walks the page tables to
 confirm every page is present with the right permission, and then transfers the
 bytes through the physical direct map, with interrupts disabled so the mapping the
 walk approved cannot change before the copy uses it. This is the surface the
-[Kani proofs](../../../verification/README.md) exercise for panic-freedom and
+[Kani proofs](../../architecture/verification.md) exercise for panic-freedom and
 bounds. The module is layered so that each concern lives in one file, and the code
 is under `src/usercopy/`.
 
@@ -208,4 +208,4 @@ not only asserted here.
 Every reference above is verified against those trees. The SMAP bit that forces the direct-map route is
 set on the [hardening](hardening.md) page, the interrupt discipline matches the
 [paging manager](paging-manager.md)'s, and the Kani proofs are on the
-[verification stack](../../../verification/README.md) page.
+[verification stack](../../architecture/verification.md) page.

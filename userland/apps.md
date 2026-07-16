@@ -287,7 +287,7 @@ emits debug markers; the ordinary apps do not.
 An app never grabs input for itself. Exclusive keyboard and pointer grabs are
 reserved to three named system capsules, the boot splash, the setup wizard, and the
 input probe, and the input router refuses a grab from anyone else with `E_ACCES`
-(the gate is on the [input router page](capsule-catalog/input-router.md)). So a
+(the gate is on the [input router page](input-router/README.md)). So a
 skeleton app receives only the events the router routes to it by focus or hit test,
 and cannot monopolize the keyboard. Focus itself is the WM's decision, not the app's:
 the runner raises a focus request on button input, but the WM owns the focus state,
@@ -348,4 +348,4 @@ never spawned or has exited, not that focus failed.
 
 The per-app capability masks and endpoints are in
 [the capsule inventory](capsules.md); the input delivery contract is on
-[the input router page](capsule-catalog/input-router.md).
+[the input router page](input-router/README.md).

@@ -212,7 +212,7 @@ applies to every mapping the manager makes, including the ones the
 per-process kernel stacks the [page allocator](page-allocator.md) carves and the
 [heap](heap.md). The SMAP bit set here is what forces the [usercopy](usercopy.md)
 boundary to go through the direct map. The W^X invariant is also one of the properties the
-[verification stack](../../../verification/README.md) proves at the encoding level,
+[verification stack](../../architecture/verification.md) proves at the encoding level,
 in the kernel isolation proofs.
 
 ## Source map

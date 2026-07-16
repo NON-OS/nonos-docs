@@ -14,7 +14,7 @@ Pages in this section:
 | [The nonos_std Crate](nonos-std.md) | The native std-shaped API for `no_std` capsules: collections, net, fs, and the seeded HashMap. |
 | [Using the Network](networking-guide.md) | The developer view of networking: `TcpStream` / `UdpSocket`, what happens underneath, and the limits. |
 | [The Terminal](terminal.md) | The terminal capsule and shell: the app model, pipelines and redirects, and the builtins. |
-| [Capsule Catalog](capsule-catalog/README.md) | Every capsule, one by one: a verified per-capsule spec (purpose, ops, behavior, gaps) for the core, desktop, app, and proof capsules. |
+| [Capsule Catalog](README.md) | Every capsule, one by one: a verified per-capsule spec (purpose, ops, behavior, gaps) for the core, desktop, app, and proof capsules. |
 | [SDK](sdk.md) | Syscall bindings, runtime crates, and capsule structure. |
 | [Desktop](desktop.md) | GUI capsules, desktop IPC, window state, and input routing. |
 | [Desktop Service Capsules](desktop-capsules.md) | Compositor, WM, input router, shell, wallpaper, image, clipboard, login, and toolkit internals. |
