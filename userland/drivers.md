@@ -56,25 +56,50 @@ and storage groups each call their capsule spawn functions in fixed order
 
 ## 2. Driver contract table
 
-| Capsule | Service | Caps | Protocol operations | Entrypoint | Spec refs |
-|---------|---------|------|---------------------|------------|-----------|
-| `driver.virtio_rng` | `service:4200:driver.virtio_rng` | `0x1F8019` | fill random, healthcheck | `userland/capsule_driver_virtio_rng/src/main.rs:35` | `userland/capsule_driver_virtio_rng/Capsule.mk:13`, `userland/capsule_driver_virtio_rng/Capsule.mk:17`, `userland/capsule_driver_virtio_rng/src/protocol/ops.rs:21` |
-| `driver.virtio_blk0` | `service:4202:driver.virtio_blk0` | `0x1F8019` | healthcheck, capacity, read blocks, write blocks, flush | `userland/capsule_driver_virtio_blk/src/main.rs:30` | `userland/capsule_driver_virtio_blk/Capsule.mk:13`, `userland/capsule_driver_virtio_blk/Capsule.mk:16`, `userland/capsule_driver_virtio_blk/src/protocol/ops.rs:16` |
-| `driver.virtio_net0` | `service:4204:driver.virtio_net0` | `0x1F8019` | healthcheck, link status, MAC address, TX packet, RX packet | `userland/capsule_driver_virtio_net/src/main.rs:36` | `userland/capsule_driver_virtio_net/Capsule.mk:14`, `userland/capsule_driver_virtio_net/Capsule.mk:17`, `userland/capsule_driver_virtio_net/src/protocol/ops.rs:21` |
-| `driver.virtio_gpu0` | `service:4226:driver.virtio_gpu0` | `0x1F9019` | healthcheck, controller info, display info, controlq state, query caps, create resource, attach backing, transfer to host, set scanout, flush, mode list, primary surface | `userland/capsule_driver_virtio_gpu/src/main.rs:35` | `userland/capsule_driver_virtio_gpu/Capsule.mk:12`, `userland/capsule_driver_virtio_gpu/Capsule.mk:16`, `userland/capsule_driver_virtio_gpu/src/protocol/ops.rs:16` |
-| `driver.xhci0` | `service:4206:driver.xhci0` | `0xF8019` | healthcheck, controller status, port status, enable slot, disable slot, address device, device descriptor, config descriptor, transfer ring allocation, control transfer, interrupt in | `userland/capsule_driver_xhci/src/main.rs:36` | `userland/capsule_driver_xhci/Capsule.mk:13`, `userland/capsule_driver_xhci/Capsule.mk:16`, `userland/capsule_driver_xhci/src/protocol/ops.rs:16` |
-| `driver.ps2_kbd0` | `service:4208:driver.ps2_kbd0` | `0x358019` | healthcheck, poll events, get state, controller status, poll mouse | `userland/capsule_driver_ps2_input/src/main.rs:31` | `userland/capsule_driver_ps2_input/Capsule.mk:13`, `userland/capsule_driver_ps2_input/Capsule.mk:17`, `userland/capsule_driver_ps2_input/src/protocol/ops.rs:16` |
-| `driver.e1000_0` | `service:4210:driver.e1000_0` | `0xF8019` | healthcheck, link status, MAC address, TX packet, RX packet, stats | `userland/capsule_driver_e1000/src/main.rs:38` | `userland/capsule_driver_e1000/Capsule.mk:16`, `userland/capsule_driver_e1000/Capsule.mk:19`, `userland/capsule_driver_e1000/src/protocol/ops.rs:23` |
-| `driver.rtl8139_0` | `service:4212:driver.rtl8139_0` | `0x1D8019` | healthcheck, link status, MAC address, TX packet, RX packet, stats | `userland/capsule_driver_rtl8139/src/main.rs:35` | `userland/capsule_driver_rtl8139/Capsule.mk:13`, `userland/capsule_driver_rtl8139/Capsule.mk:16`, `userland/capsule_driver_rtl8139/src/protocol/ops.rs:17` |
-| `driver.rtl8169_0` | `service:4214:driver.rtl8169_0` | `0xF8019` | healthcheck, link status, MAC address, TX packet, RX packet, stats | `userland/capsule_driver_rtl8169/src/main.rs:40` | `userland/capsule_driver_rtl8169/Capsule.mk:13`, `userland/capsule_driver_rtl8169/Capsule.mk:16`, `userland/capsule_driver_rtl8169/src/protocol/ops.rs:17` |
-| `driver.ahci0` | `service:4216:driver.ahci0` | `0x78019` | healthcheck, controller info, port list | `userland/capsule_driver_ahci/src/main.rs:37` | `userland/capsule_driver_ahci/Capsule.mk:14`, `userland/capsule_driver_ahci/Capsule.mk:17`, `userland/capsule_driver_ahci/src/protocol/ops.rs:17` |
-| `driver.hda0` | `service:4218:driver.hda0` | `0x78019` | healthcheck, controller info, codec mask, stream layout, codec list | `userland/capsule_driver_hda/src/main.rs:37` | `userland/capsule_driver_hda/Capsule.mk:14`, `userland/capsule_driver_hda/Capsule.mk:17`, `userland/capsule_driver_hda/src/protocol/ops.rs:17` |
-| `driver.nvme0` | `service:4220:driver.nvme0` | `0xF8019` | healthcheck, controller info, identify controller, identify namespace, SMART health | `userland/capsule_driver_nvme/src/main.rs:39` | `userland/capsule_driver_nvme/Capsule.mk:14`, `userland/capsule_driver_nvme/Capsule.mk:17`, `userland/capsule_driver_nvme/src/protocol/ops.rs:17` |
-| `driver.usb_hid0` | `service:4222:driver.usb_hid0` | `0x200019` | healthcheck, probe config, feed keyboard report, feed mouse report, poll keys, poll mouse, get state | `userland/capsule_driver_usb_hid/src/main.rs:33` | `userland/capsule_driver_usb_hid/Capsule.mk:13`, `userland/capsule_driver_usb_hid/Capsule.mk:15`, `userland/capsule_driver_usb_hid/src/protocol/ops.rs:17` |
-| `driver.usb_msc0` | `service:4224:driver.usb_msc0` | `0x19` | healthcheck, probe config, build inquiry, build read capacity, build read10, build write10, accept CSW, get state | `userland/capsule_driver_usb_msc/src/main.rs:32` | `userland/capsule_driver_usb_msc/Capsule.mk:13`, `userland/capsule_driver_usb_msc/Capsule.mk:18`, `userland/capsule_driver_usb_msc/src/protocol/ops.rs:17` |
-| `driver.iwlwifi0` | `service:4228:driver.iwlwifi0` | `0xF8019` | healthcheck, device info, firmware info, RF state, DMA state, firmware stage, alive wait | `userland/capsule_driver_iwlwifi/src/main.rs:35` | `userland/capsule_driver_iwlwifi/Capsule.mk:12`, `userland/capsule_driver_iwlwifi/Capsule.mk:15`, `userland/capsule_driver_iwlwifi/src/protocol/ops.rs:9` |
-| `driver.i2c_pci0` | `service:4230:driver.i2c_pci0` | `0x78019` | healthcheck, controller info, register snapshot, timing info, transfer, probe | `userland/capsule_driver_i2c_pci/src/main.rs:19` | `userland/capsule_driver_i2c_pci/Capsule.mk:13`, `userland/capsule_driver_i2c_pci/Capsule.mk:16`, `userland/capsule_driver_i2c_pci/src/protocol/ops.rs:1` |
-| `driver.i2c_hid0` | `service:4232:driver.i2c_hid0` | `0x200019` | healthcheck, probe, descriptor | `userland/capsule_driver_i2c_hid/src/main.rs:32` | `userland/capsule_driver_i2c_hid/Capsule.mk:12`, `userland/capsule_driver_i2c_hid/Capsule.mk:14`, `userland/capsule_driver_i2c_hid/src/protocol/ops.rs:1` |
+Each of the thirteen non-network drivers has a dedicated page in
+[capsule-catalog](capsule-catalog/) with the full operation reference, bring-up,
+and source map; the `Page` column links it. The five network drivers
+(`e1000`, `iwlwifi`, `rtl8139`, `rtl8169`, `virtio_net`) are documented by the
+[networking subsystem](../subsystems/networking/README.md) and have no dedicated
+capsule page. Masks below are the signed `CAPSULE_REQUIRED_CAPS` from each
+capsule's `Capsule.mk`.
+
+| Capsule | Service | Caps | Protocol operations | Entrypoint | Page | Spec refs |
+|---------|---------|------|---------------------|------------|------|-----------|
+| `driver.virtio_rng` | `service:4200:driver.virtio_rng` | `0x1F8019` | fill random, healthcheck | `userland/capsule_driver_virtio_rng/src/main.rs:35` | [driver-virtio-rng](capsule-catalog/driver-virtio-rng.md) | `userland/capsule_driver_virtio_rng/Capsule.mk:13`, `userland/capsule_driver_virtio_rng/Capsule.mk:17`, `userland/capsule_driver_virtio_rng/src/protocol/ops.rs:21` |
+| `driver.virtio_blk0` | `service:4202:driver.virtio_blk0` | `0x1F8019` | healthcheck, capacity, read blocks, write blocks, flush | `userland/capsule_driver_virtio_blk/src/main.rs:30` | [driver-virtio-blk](capsule-catalog/driver-virtio-blk.md) | `userland/capsule_driver_virtio_blk/Capsule.mk:13`, `userland/capsule_driver_virtio_blk/Capsule.mk:16`, `userland/capsule_driver_virtio_blk/src/protocol/ops.rs:16` |
+| `driver.virtio_net0` | `service:4204:driver.virtio_net0` | `0x1F8019` | healthcheck, link status, MAC address, TX packet, RX packet | `userland/capsule_driver_virtio_net/src/main.rs:36` | [networking](../subsystems/networking/README.md) | `userland/capsule_driver_virtio_net/Capsule.mk:14`, `userland/capsule_driver_virtio_net/Capsule.mk:17`, `userland/capsule_driver_virtio_net/src/protocol/ops.rs:21` |
+| `driver.virtio_gpu0` | `service:4226:driver.virtio_gpu0` | `0x1F9019` | healthcheck, controller info, display info, controlq state, query caps, create resource, attach backing, transfer to host, set scanout, flush, mode list, primary surface | `userland/capsule_driver_virtio_gpu/src/main.rs:35` | [driver-virtio-gpu](capsule-catalog/driver-virtio-gpu.md) | `userland/capsule_driver_virtio_gpu/Capsule.mk:12`, `userland/capsule_driver_virtio_gpu/Capsule.mk:16`, `userland/capsule_driver_virtio_gpu/src/protocol/ops.rs:16` |
+| `driver.xhci0` | `service:4206:driver.xhci0` | `0xF8019` | healthcheck, controller status, port status, enable slot, disable slot, address device, device descriptor, config descriptor, transfer ring allocation, control transfer, interrupt in | `userland/capsule_driver_xhci/src/main.rs:36` | [driver-xhci](capsule-catalog/driver-xhci.md) | `userland/capsule_driver_xhci/Capsule.mk:13`, `userland/capsule_driver_xhci/Capsule.mk:16`, `userland/capsule_driver_xhci/src/protocol/ops.rs:16` |
+| `driver.ps2_kbd0` | `service:4208:driver.ps2_kbd0` | `0x358019` | healthcheck, poll events, get state, controller status, poll mouse | `userland/capsule_driver_ps2_input/src/main.rs:31` | [driver-ps2-input](capsule-catalog/driver-ps2-input.md) | `userland/capsule_driver_ps2_input/Capsule.mk:13`, `userland/capsule_driver_ps2_input/Capsule.mk:17`, `userland/capsule_driver_ps2_input/src/protocol/ops.rs:16` |
+| `driver.e1000_0` | `service:4210:driver.e1000_0` | `0xF8019` | healthcheck, link status, MAC address, TX packet, RX packet, stats | `userland/capsule_driver_e1000/src/main.rs:38` | [networking](../subsystems/networking/README.md) | `userland/capsule_driver_e1000/Capsule.mk:16`, `userland/capsule_driver_e1000/Capsule.mk:19`, `userland/capsule_driver_e1000/src/protocol/ops.rs:23` |
+| `driver.rtl8139_0` | `service:4212:driver.rtl8139_0` | `0x1D8019` | healthcheck, link status, MAC address, TX packet, RX packet, stats | `userland/capsule_driver_rtl8139/src/main.rs:35` | [networking](../subsystems/networking/README.md) | `userland/capsule_driver_rtl8139/Capsule.mk:13`, `userland/capsule_driver_rtl8139/Capsule.mk:16`, `userland/capsule_driver_rtl8139/src/protocol/ops.rs:17` |
+| `driver.rtl8169_0` | `service:4214:driver.rtl8169_0` | `0xF8019` | healthcheck, link status, MAC address, TX packet, RX packet, stats | `userland/capsule_driver_rtl8169/src/main.rs:40` | [networking](../subsystems/networking/README.md) | `userland/capsule_driver_rtl8169/Capsule.mk:13`, `userland/capsule_driver_rtl8169/Capsule.mk:16`, `userland/capsule_driver_rtl8169/src/protocol/ops.rs:17` |
+| `driver.ahci0` | `service:4216:driver.ahci0` | `0xf8019` | healthcheck, controller info, port list | `userland/capsule_driver_ahci/src/main.rs:37` | [driver-ahci](capsule-catalog/driver-ahci.md) | `userland/capsule_driver_ahci/Capsule.mk:14`, `userland/capsule_driver_ahci/Capsule.mk:16`, `userland/capsule_driver_ahci/src/protocol/ops.rs:17` |
+| `driver.hda0` | `service:4218:driver.hda0` | `0x78019` | healthcheck, controller info, codec mask, stream layout, codec list | `userland/capsule_driver_hda/src/main.rs:37` | [driver-hda](capsule-catalog/driver-hda.md) | `userland/capsule_driver_hda/Capsule.mk:14`, `userland/capsule_driver_hda/Capsule.mk:17`, `userland/capsule_driver_hda/src/protocol/ops.rs:17` |
+| `driver.nvme0` | `service:4220:driver.nvme0` | `0xF8019` | healthcheck, controller info, identify controller, identify namespace, SMART health | `userland/capsule_driver_nvme/src/main.rs:39` | [driver-nvme](capsule-catalog/driver-nvme.md) | `userland/capsule_driver_nvme/Capsule.mk:14`, `userland/capsule_driver_nvme/Capsule.mk:16`, `userland/capsule_driver_nvme/src/protocol/ops.rs:17` |
+| `driver.usb_hid0` | `service:4222:driver.usb_hid0` | `0x200019` | healthcheck, probe config, feed keyboard report, feed mouse report, poll keys, poll mouse, get state | `userland/capsule_driver_usb_hid/src/main.rs:33` | [driver-usb-hid](capsule-catalog/driver-usb-hid.md) | `userland/capsule_driver_usb_hid/Capsule.mk:13`, `userland/capsule_driver_usb_hid/Capsule.mk:15`, `userland/capsule_driver_usb_hid/src/protocol/ops.rs:17` |
+| `driver.usb_msc0` | `service:4224:driver.usb_msc0` | `0x19` | healthcheck, probe config, build inquiry, build read capacity, build read10, build write10, accept CSW, get state | `userland/capsule_driver_usb_msc/src/main.rs:32` | [driver-usb-msc](capsule-catalog/driver-usb-msc.md) | `userland/capsule_driver_usb_msc/Capsule.mk:13`, `userland/capsule_driver_usb_msc/Capsule.mk:18`, `userland/capsule_driver_usb_msc/src/protocol/ops.rs:17` |
+| `driver.iwlwifi0` | `service:4228:driver.iwlwifi0` | `0xF8019` | healthcheck, device info, firmware info, RF state, DMA state, firmware stage, alive wait | `userland/capsule_driver_iwlwifi/src/main.rs:35` | [networking](../subsystems/networking/README.md) | `userland/capsule_driver_iwlwifi/Capsule.mk:12`, `userland/capsule_driver_iwlwifi/Capsule.mk:15`, `userland/capsule_driver_iwlwifi/src/protocol/ops.rs:9` |
+| `driver.i2c_pci0` | `service:4230:driver.i2c_pci0` | `0x78019` | healthcheck, controller info, register snapshot, timing info, transfer, probe | `userland/capsule_driver_i2c_pci/src/main.rs:19` | [driver-i2c-pci](capsule-catalog/driver-i2c-pci.md) | `userland/capsule_driver_i2c_pci/Capsule.mk:13`, `userland/capsule_driver_i2c_pci/Capsule.mk:16`, `userland/capsule_driver_i2c_pci/src/protocol/ops.rs:1` |
+| `driver.i2c_hid0` | `service:4232:driver.i2c_hid0` | `0x200019` | healthcheck, probe, descriptor | `userland/capsule_driver_i2c_hid/src/main.rs:32` | [driver-i2c-hid](capsule-catalog/driver-i2c-hid.md) | `userland/capsule_driver_i2c_hid/Capsule.mk:12`, `userland/capsule_driver_i2c_hid/Capsule.mk:14`, `userland/capsule_driver_i2c_hid/src/protocol/ops.rs:1` |
+
+The `i2c_hid` capsule on this branch is the relative-mouse driver: it posts
+relative pointer, wheel, and button events
+(`userland/capsule_driver_i2c_hid/src/input/publish.rs:28`,
+`userland/capsule_driver_i2c_hid/src/input/publish.rs:31`,
+`userland/capsule_driver_i2c_hid/src/input/publish.rs:38`). The full Precision
+Touchpad path with absolute coordinates lives on a separate branch and is not in
+this tree.
+
+There is a fourteenth display capsule in the source tree,
+[driver-bga](capsule-catalog/driver-bga.md), which is not in the table above
+because it is parked. `capsule_driver_bga` has source but no `Capsule.mk`, so it
+has no service handle, no port, no capability mask, and no entry in the
+build-and-sign system; its README calls it a parked source inventory for a
+future brokered BGA display capsule
+(`userland/capsule_driver_bga/README.md:5`). Treat it as reference source, not a
+shipping driver.
 
 ## 3. Server form
 
@@ -222,8 +247,8 @@ interchangeable; each is the smallest set for its bus:
 |------|-----------------------------------------|---------|
 | `0x19` | none | `usb_msc` |
 | `0x200019` | InputSource | `usb_hid`, `i2c_hid` |
-| `0x78019` | DeviceEnum, Driver, Mmio, Irq | `ahci`, `hda`, `i2c_pci` |
-| `0xF8019` | DeviceEnum, Driver, Mmio, Irq, Dma | `xhci`, `nvme`, `e1000`, `rtl8169`, `iwlwifi` |
+| `0x78019` | DeviceEnum, Driver, Mmio, Irq | `hda`, `i2c_pci` |
+| `0xf8019` | DeviceEnum, Driver, Mmio, Irq, Dma | `ahci`, `xhci`, `nvme`, `e1000`, `rtl8169`, `iwlwifi` |
 | `0x1D8019` | DeviceEnum, Driver, Irq, Dma, Pio | `rtl8139` |
 | `0x1F8019` | DeviceEnum, Driver, Mmio, Irq, Dma, Pio | `virtio_rng`, `virtio_blk`, `virtio_net` |
 | `0x1F9019` | DeviceEnum, Driver, Mmio, Irq, Dma, Pio, GraphicsSurfaceCreate | `virtio_gpu` |
@@ -241,9 +266,9 @@ which is the [input drivers](../subsystems/input/drivers.md) page in one sentenc
 extreme case, mask `0x19`, the three baseline bits and no hardware capability at all, because it builds
 SCSI command blocks and hands them to the xHCI driver rather than touching a controller itself.
 
-`Dma` is the capability to watch, and the split between `0x78019` and `0xF8019` is exactly the line
-between devices that bus-master and devices that do not. `ahci`, `hda`, and `i2c_pci` get Mmio and Irq
-but no Dma; the NICs, NVMe, xHCI, and iwlwifi get Dma because they move data through descriptor rings in
+`Dma` is the capability to watch, and the split between `0x78019` and `0xf8019` is exactly the line
+between devices that bus-master and devices that do not. `hda` and `i2c_pci` get Mmio and Irq but no
+Dma; AHCI, the NICs, NVMe, xHCI, and iwlwifi get Dma because they move data through descriptor rings in
 RAM. The [broker's DMA grant](../subsystems/hardware-broker/dma.md) bounds what a *capsule* may allocate
 and program (a per-class page ceiling, a zero-scrub before the frames leave the kernel, and an epoch
 check against use-after-release), but it is honest about the one bound it does not enforce: the IOMMU
