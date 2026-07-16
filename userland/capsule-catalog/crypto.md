@@ -162,6 +162,35 @@ This is the honest, precise part. `capsule_crypto` does not use the kernel's in-
 - **The degenerate-nonce guard** blocks the most dangerous AES-GCM misuse.
 - **Status-only verification** means a verify op returns a boolean-shaped result, not data.
 
+The capability mask is `0x39` (`Capsule.mk`, `CAPSULE_REQUIRED_CAPS`), decoding to CoreExec (1), IPC (8),
+Memory (16), and Crypto (32). Crypto is held because the AEAD and X25519 ops reach kernel primitives
+through `nonos_libc` syscalls; IPC and Memory make it a service with a heap. The least-privilege argument
+is that this is where the userland's crypto-crate dependencies are concentrated (the `aes-gcm` and
+`ed25519-dalek` crates link here so no other capsule links them), and yet the concentration buys no extra
+authority: the mask holds no FileSystem, so a compromised crypto crate cannot write to a storage surface;
+no Network, so it cannot exfiltrate a key it was handed to seal with; no Driver, Mmio, Irq, Dma, or Pio, so
+it cannot reach hardware; no Debug, so it cannot log the plaintext it processes. Its isolation is
+statelessness: no key or session survives a request, so there is nothing to leak *between* callers, and the
+reply endpoint `0x1_0000_0004` is distinct from ramfs, keyring, and entropy so in-flight replies cannot
+cross-route. The honest boundary is within a single request: the parsed key bytes handed to a cipher are
+not separately zeroized and rely on the whole-buffer wipe, as the [gaps](#honest-gaps) state.
+
+## Debugging
+
+The service is `crypto_pool` on port 4102 (`Capsule.mk`, `service:4102:crypto_pool`), reply endpoint
+`0x1_0000_0004`, brought up at `spawn_plan/core.rs:60` as `boot::capsule("CRYPTO", "crypto", ...)` from
+`src/security/crypto_capsule/`. It prints `[CRYPTO] capsule spawned` through `capsule_boot::boot` on
+success, or a `[ERROR]` line with the `SpawnError` (framebuffer under `NONOS_FBCONSOLE=1`). A present
+marker means `mk_service_lookup("crypto_pool")` resolves, so callers like the [market](market.md), which
+verifies its signed index through the `ED25519_VERIFY` op rather than linking Ed25519 itself, can reach it;
+an absent marker means those callers fall back or fail. Because the pool is stateless, its request-time
+failure signatures map cleanly to cause: `EMSGSIZE` is an oversize input against a per-op cap (64 KiB hash,
+1 MiB AEAD/verify), `EINVAL` is a malformed frame, a bad public key, a length-field mismatch, or the
+degenerate all-zero AES-GCM nonce guard firing, `EBADMSG` is an Ed25519 signature that did not verify, and
+`EIO` is an AEAD seal or open failure. The one worth recognizing is `EBADMSG`: because verification returns
+a status and no body, a failing verify is a clean boolean-shaped answer, so a market install that reports
+`E_KEYREJECTED` traces back through this op returning `EBADMSG` on the index signature.
+
 ## Honest gaps
 
 Stated plainly: while the receive buffer is wiped, the intermediate parsed key bytes inside a handler

@@ -83,6 +83,37 @@ The manager is a **read-only observer**: it reads `mk_proc_stat` and the service
 what they expose, and it does not start, stop, or signal any process. It holds no secrets and makes no
 privileged calls beyond the introspection syscall.
 
+The capability mask is `0x1819` (`Capsule.mk`, `CAPSULE_REQUIRED_CAPS`), which decodes to CoreExec (1), IPC
+(8), Memory (16), GraphicsDisplayQuery (2048), and GraphicsSurfaceCreate (4096). The two graphics bits are
+the difference between this capsule and the service capsules: it is a GUI app, so it needs to query the
+display and create a surface to paint into, which is what those bits grant and what the service pools do not
+hold. The least-privilege reading is that even though the manager reports on every process, it holds no
+authority *over* any of them: it has no Admin, so it cannot reboot or signal; no Driver, Mmio, Irq, Dma, or
+Pio, so it cannot touch hardware; no FileSystem, Crypto, or Network. Its only introspection power is the
+`mk_proc_stat` syscall, which is a read, and the service-registry lookup, which is a read. So the capsule
+that shows you the whole process table cannot change a single row of it. Its isolation is that it holds no
+per-process handle, only pids it resolved by name and tick counts it read. The honest boundary, stated in
+the [gaps](#honest-gaps), is that the capabilities column it renders is a hardcoded "unavailable" because
+per-process capability reporting is not implemented, so the tool cannot show the very masks this page
+decodes.
+
+## Debugging
+
+Unlike the service capsules, the process manager has no IPC server and no service port to receive on: it is
+an app-skeleton application on the app port `app.process_manager` :4730 (`Capsule.mk`,
+`service:4730:app.process_manager`) that polls the kernel on a timer. It is spawned in the apps fleet at
+`spawn_plan/apps_tools.rs:50` (behind the `nonos-capsule-process-manager` feature) as
+`boot::capsule("APP-PROCESS-MANAGER", "app_process_manager", ...)` from
+`src/userspace/capsule_process_manager/`, so the boot marker is `[APP-PROCESS-MANAGER] capsule spawned`
+through `capsule_boot::boot` on success, or a `[ERROR]` line with the `SpawnError` (framebuffer under
+`NONOS_FBCONSOLE=1`). Because it is an observer rather than a server, its failure signatures are visual
+rather than errnos: a service row that reads "offline" means `lookup_service` did not resolve that name to
+a pid on the last refresh, which for a service that crashed lags the truth by up to one refresh interval (a
+few ticks), and a flat or blank sparkline means the CPU sampler has not "warmed" yet, since a percentage is
+only computed from the second `mk_proc_stat` sample onward when there is a prior baseline. So a window that
+opens but shows every row offline points at the service registry or the monitored capsules not being up,
+not at the manager itself.
+
 ## Honest gaps
 
 Two limits are stated in the code itself: the capabilities column is a hardcoded "unavailable" because

@@ -92,6 +92,37 @@ at ingest).
 - **Monotonic serial**: a stale index is rejected, preventing a rollback to an older index.
 - **Detailed readiness**: the six-field verdict does not conflate distinct failure reasons.
 
+The capability mask is `0x19` (`Capsule.mk`, `CAPSULE_REQUIRED_CAPS`), decoding to CoreExec (1), IPC (8),
+and Memory (16), the same minimal set as the [installer](installer.md) and the [vfs pool](vfs.md). The
+least-privilege point is that the market gates its index on a signature but holds no Crypto capability of
+its own: `CryptoVerifier::verify` calls `crypto_ed25519_verify` through `nonos_libc`, which reaches the
+[crypto capsule](crypto.md) or a kernel primitive over IPC, so the verification runs behind a boundary
+rather than in a crypto library linked into the market. It holds no FileSystem (the index arrives over
+IPC), no Network (it does not fetch the index itself), and no hardware capability. So the capsule that
+decides whether an app is trusted enough to install cannot itself touch a key, a disk, or the wire. Its
+isolation is that it holds a single `accepted` index and no per-caller state. The honest boundary, and the
+one the page is most careful about, is the compile-time verifier swap: under the `offline-verify` feature
+the mask is unchanged but `RejectAll` replaces the real verifier, so the capability posture is identical
+between a production build and a development build that cannot verify anything, which is why this is a
+build-flag gap the [gaps](#honest-gaps) call out rather than a capability one.
+
+## Debugging
+
+The service is `market.index` on port 4106 (`Capsule.mk`, `service:4106:market.index`), and the capsule is
+brought up in the boot fleet at `spawn_plan/core.rs:39` (behind the `nonos-capsule-market` feature) as
+`boot::capsule("MARKET", "market", ...)` from `src/security/market_capsule/`. It prints `[MARKET] capsule
+spawned` through `capsule_boot::boot` on success, or a `[ERROR]` line with the `SpawnError` (framebuffer
+under `NONOS_FBCONSOLE=1`). A present marker means `mk_service_lookup("market.index")` resolves for the
+desktop and installer; an absent one means the app index is unavailable. The failure signature that most
+often confuses is `E_KEYREJECTED` on `LOAD_INDEX`: in a production build it means the index's Ed25519
+signature did not verify against the operator key (traceable one hop into the [crypto](crypto.md) capsule's
+`ED25519_VERIFY` returning `EBADMSG`), but in an `offline-verify` development build *every* index is
+refused by `RejectAll` regardless of its signature, so `E_KEYREJECTED` on a build you expected to accept a
+valid index is the first thing to check against the compile-time feature. The other `LOAD_INDEX` errnos are
+`E_STALE` for a non-monotonic serial (a rollback attempt) and `E_INVAL` for a malformed blob, and
+`INSTALL_READY` returns a six-byte verdict rather than an errno so a client can separate a signature
+failure from an architecture mismatch without guessing.
+
 ## Honest gaps
 
 Stated plainly: the market has **no caller attestation** (its inbox is public); the verifier is swapped at

@@ -143,6 +143,62 @@ return are `InvalidRange`, `NoCompletePagesInRange`, `BitmapTooSmall`,
 `InvalidBitmapPointer`, `NotInitialized`, `AddressBelowRange`, `AddressNotAligned`,
 `AddressAboveRange`, and `DoubleFree`.
 
+## Security analysis
+
+This allocator is the root of physical memory, so a corruption here is a corruption everywhere above
+it. Its safety is the discipline of the free path and the refusal to operate before it is seeded.
+Three properties carry that.
+
+**A frame is validated against the managed range before its bit is touched.** `deallocate_frame`
+(`alloc.rs:55`) rejects an address below `frame_start` (`AddressBelowRange`), an unaligned address
+(`AddressNotAligned`), and an index at or past `frame_count` (`AddressAboveRange`) before it computes
+a bit position. So the free path cannot be used to clear a bit outside the allocator's own bitmap,
+which means a bad or attacker-influenced address cannot corrupt the free/allocated state of memory
+the allocator does not manage.
+
+**Double free is a hard error.** If the target bit is already clear, `deallocate_frame` returns
+`DoubleFree` (`alloc.rs:72`) rather than silently clearing an already-clear bit. This is the bottom
+line under the higher-level lifetime tracking: even if a caller loses track of a frame's state, the
+bitmap itself refuses to mark the same frame free twice, which is what prevents the classic double-free
+that hands the same physical frame to two owners.
+
+**It never operates uninitialised, and never faults on exhaustion.** Every operation checks
+`is_initialized` first (`allocator_state.rs:39`), so the allocator refuses to hand out or free frames
+before it is seeded from the firmware map, and a genuinely out-of-frames `allocate_frame` returns
+`None` (`alloc.rs:20`) rather than faulting or halting: exhaustion is reported and the caller decides.
+The low megabyte is excluded at seed time by clamping the start up to `0x100000`, so the allocator
+never hands out the legacy region. The honest boundary worth stating: this layer does not zero a
+frame on allocation unless the `ZERO` flag is passed, so the no-stale-data guarantee for reused memory
+comes from the *free* path zeroing (the [zeroization](zeroization.md) `zero_frame` on deallocate) and
+from the callers that pass `ZERO`, not from allocation zeroing by default here.
+
+## Debugging the frame allocator
+
+The frame allocator does not narrate to the console; it returns a `PhysAllocError`
+(`error/types.rs`), and the variant is the whole diagnosis. Seeding and the free path return distinct
+ones:
+
+```
+  InvalidRange           managed_end <= managed_start                  a bad seed range
+  NoCompletePagesInRange after inward alignment, nothing is left       range too small or misaligned
+  BitmapTooSmall         the bitmap cannot cover frame_count           bitmap sized wrong for the range
+  InvalidBitmapPointer   the bitmap pointer is null
+  NotInitialized         an operation ran before seeding
+  AddressBelowRange      a free below frame_start                      wrong or foreign address
+  AddressNotAligned      a free of a non-page-aligned address          a corrupted or fabricated frame
+  AddressAboveRange      a free at or past frame_count                 wrong or foreign address
+  DoubleFree             a free of an already-free frame               a lifetime bug in the caller
+```
+
+The three `Address*` variants and `DoubleFree` are the ones that mean a caller handed the allocator a
+bad frame, and they are the tell for a lifetime bug or a stray physical address rather than exhaustion.
+Allocation exhaustion, by contrast, is not an error variant at all: `allocate_frame` returns `None`, so
+a caller that maps that to its own "no memory" error (the [heap's](heap.md) `FrameAllocationFailed`,
+the [DMA path's](../hardware-broker/dma.md) `NoMemory`) is reporting real physical pressure. At boot,
+the seeding step (`kernel_core/init/memory.rs`) logs a `CRITICAL` if the allocator cannot be
+initialised at all after the fallback ranges, which is the one console signal from this layer and means
+the firmware memory map was unusable.
+
 ## What sits above it
 
 This allocator hands out single frames. Contiguous multi-frame allocation is a
@@ -152,14 +208,19 @@ tables and mappings, the [kernel heap](heap.md) is backed by frames mapped at a
 fixed virtual base, and the DMA pools reserve frames for device buffers. Each of
 those has its own page; this one is the source they all draw from.
 
-## Source
+## Source map
 
 ```
   src/memory/phys/types/allocator_state.rs  the AllocatorState
-  src/memory/phys/allocator/init.rs          init_with_bitmap
-  src/memory/phys/allocator/alloc.rs         allocate_frame, deallocate_frame
-  src/memory/phys/bitmap/                     the bit operations
-  src/memory/phys/types/flags.rs             AllocFlags
-  src/memory/phys/error/types.rs             PhysAllocError
-  src/kernel_core/init/memory.rs             the boot seeding
+  src/memory/phys/allocator/init.rs         init_with_bitmap
+  src/memory/phys/allocator/alloc.rs        allocate_frame, deallocate_frame, the double-free check
+  src/memory/phys/bitmap/                    the bit operations
+  src/memory/phys/types/flags.rs            AllocFlags
+  src/memory/phys/error/types.rs            PhysAllocError
+  src/kernel_core/init/memory.rs            the boot seeding
 ```
+
+Every reference above is verified against those trees. The free-path zeroing that makes reused frames
+safe is on the [zeroization](zeroization.md) page, and the consumers that turn a `None` allocation into
+their own error are the [heap](heap.md), the [paging manager](paging-manager.md), and the
+[DMA path](../hardware-broker/dma.md).

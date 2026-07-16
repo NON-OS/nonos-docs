@@ -174,7 +174,47 @@ so that authority cannot be forwarded without limit. The syscalls that expose
 grant and revoke to capsules, `MkCapGrant` and `MkCapRevoke`, are gated by the
 `IPC` capability and handled in `src/syscall/microkernel/capability/`.
 
-## Source
+## Debugging a refused delegation
+
+A delegation is refused at one of two moments, creation or use, and the
+`DelegationError` variant (`src/capabilities/delegation/error.rs:18`) names which.
+The strict verifier is the one to reach for, because the primary
+`verify_delegation` returns a bare `false` and hides the cause;
+`verify_delegation_strict` (`verify.rs:35`) returns the first failing variant
+instead.
+
+At creation, `create_delegation` (`create_checked.rs:24`) refuses an over-broad or
+unauthorised grant. `NoCapabilities` means the requested set was empty.
+`CapabilityNotHeld` is the subset rule firing: the caller asked to delegate a
+capability its own parent token does not grant, which is the refusal that makes
+delegation attenuate-only. `InvalidParentToken` and `ParentExpired` split the two
+ways a parent can be unusable, a token that does not authenticate versus one that
+has simply lapsed, and `is_recoverable` (`error.rs:41`) marks only the expired
+cases as fixable by re-minting, so a `CapabilityNotHeld` or a plain
+`InvalidParentToken` is a request the caller was never entitled to make.
+
+At use, the failure is usually revocation showing through. `verify_delegation`
+(`verify.rs:24`) checks that `d.parent_nonce` still equals the parent token's
+current nonce and that `d.delegator` equals its `owner_module`; a mismatch on
+either returns `InvalidParentToken` from the strict path. This is the important
+one to recognise: a delegation is bound to the exact nonce the parent held when it
+was signed, so when the parent's token is re-minted with a new nonce, which is what
+a revoke does, the delegation stops matching and every copy of it dies at once
+without being individually hunted down. So a delegation that verified a moment ago
+and now fails `InvalidParentToken` is very likely a revoked or re-minted parent,
+not a corrupted delegation. `DelegationExpired` is the delegation's own TTL, which
+was clamped at creation never to outlive the parent's. `InvalidSignature` is the
+MAC not matching, which after the nonce and delegator checks have passed means the
+delegation bytes themselves were altered, and `MissingSigningKey` is the
+fail-closed guard on a kernel whose boot signing key is not set.
+
+One subtlety worth stating: `verify_delegation_standalone` (`verify.rs:55`) can
+confirm a delegation is internally authentic and unexpired without a parent token
+in hand, but it cannot see a parent revocation, since it compares against the
+delegation's own recorded `parent_nonce` rather than a live one. A delegation that
+passes standalone but fails the parent-taking verifier is exactly a revoked parent.
+
+## Source map
 
 ```
   src/capabilities/delegation/types.rs           the Delegation structure
@@ -183,7 +223,11 @@ grant and revoke to capsules, `MkCapGrant` and `MkCapRevoke`, are gated by the
   src/capabilities/delegation/material.rs         the 48-byte material and MAC
   src/capabilities/delegation/sign.rs             sign_delegation
   src/capabilities/delegation/verify.rs           the three verify entry points
-  src/capabilities/delegation/error.rs            DelegationError
+  src/capabilities/delegation/error.rs            DelegationError and is_recoverable
   src/capabilities/chain/                          multi-hop depth bounding
   src/syscall/microkernel/capability/             the MkCapGrant/Revoke handlers
 ```
+
+The parent-token re-mint that quietly voids a delegation is the revocation epoch
+and nonce machinery on the [revocation](revocation.md) page; the token the parent
+nonce lives in is on the [capability model](capabilities-and-tokens.md) page.

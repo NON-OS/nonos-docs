@@ -17,7 +17,7 @@ gaps. This page indexes them.
 | [clipboard](clipboard.md) | `clipboard` :4414 | `0x19` | Bounded copy history that wipes itself on idle. |
 | [login](login.md) | `login` :4416 | `0x19` | Session gate: unlocks the keyring (which is authoritative), owner-pid enforced. |
 | [toolkit](toolkit.md) | `toolkit` :4610 | `0x19` | Stateless theme, animation, and component-render RPC. |
-| [boot-splash](boot-splash.md) | (no service) | | Boot screen that displays the kernel's attestation badge; it displays, it does not verify. |
+| [boot-splash](boot-splash.md) | `app.boot_splash` (client only) | `0x1819` | Boot screen that displays the kernel's attestation badge; it displays, it does not verify. Endpoint reserved but the code never binds it; it is a pure compositor client. |
 | [setup-wizard](setup-wizard.md) | `app.setup_wizard` :4794 | `0x1819` | First-run config wizard that commits choices to policy. |
 
 The pattern across the fleet: the compositor is passive and owns the frame, the window manager owns

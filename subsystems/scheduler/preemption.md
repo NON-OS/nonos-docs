@@ -80,7 +80,54 @@ process if selection returns it. The intent lets the contract account for volunt
 versus involuntary switches, which show up as the `voluntary_switches` and
 `involuntary_switches` counters on the PCB.
 
-## Source
+## Security analysis
+
+Preemption runs in an interrupt, and it decides when to hand the CPU away, so its safety rests on not
+switching where a switch would corrupt state and on not letting one process hold the CPU indefinitely.
+Three properties hold.
+
+**The tick never switches inline.** `tick` (`tick.rs:22`) charges accounting, decrements the slice, and
+at most sets `NEED_RESCHEDULE` with a release-ordered store (`tick.rs:35`); it performs no context
+switch. Switching inside the ISR, in the middle of whatever the interrupted code was doing, would run the
+scheduler over a half-updated kernel state, so the decision is deferred to a safe return point where the
+kernel checks the flag. This is the discipline that keeps preemption from corrupting the code it
+interrupts, and it is why the flag is a `Release` store: the CPU that later reads it sees a fully-formed
+decision.
+
+**A runaway process is always preempted.** The slice is a countdown of ticks reset to
+`DEFAULT_TIME_SLICE` (10, `state.rs:21`) on dispatch and floored at zero by `fetch_update`
+(`tick.rs:25`) so it never underflows. When it reaches zero the tick records a
+`time_slice_exhaustion` and, if `kernel_preempt()` policy allows, flags a reschedule. So a process that
+never yields voluntarily still loses the CPU when its slice is spent: there is no way for a compute-bound
+capsule to hold a core forever, which is the liveness property a preemptive scheduler owes the rest of
+the system.
+
+**Realtime work is not held hostage by the current slice.** If any realtime task is runnable, the tick
+sets `NEED_RESCHEDULE` regardless of the running process's remaining slice
+(`tick.rs:38`), so a realtime task does not have to wait out a normal task's slice. The honest boundary:
+whether an exhausted slice actually forces a switch is gated on `sys::policy::kernel_preempt()`, so the
+policy can decline to preempt a kernel-mode path, and the switch only happens once execution reaches a
+safe point that checks the flag, so a long non-preemptible kernel section defers the switch until it
+returns. The voluntary `yield_now` disables interrupts across the whole save-select-switch
+(`yield_impl.rs:22`), the same interrupts-off discipline the paging and usercopy paths use, so the
+sequence is not interrupted partway.
+
+## Debugging preemption
+
+The two failure shapes are a process that hogs the CPU and a process that is preempted when it should not
+be. A capsule that never yields the core is a `NEED_RESCHEDULE` that is set but never acted on: the tick
+did its job (check that `time_slice_exhaustions` in `SCHEDULER_STATS` is climbing) but the safe-point
+check that consumes the flag is not being reached, which on a wedged kernel path means the code never
+returned to where the flag is read. If `time_slice_exhaustions` is not climbing, the timer is not
+ticking at all, or `CURRENT_TIME_SLICE` was never reset on dispatch and sits at zero doing nothing. A
+realtime task that starts late despite being runnable is `has_realtime_tasks()` not reporting it, or the
+reschedule flag being set but not consumed, the same safe-point question. The `voluntary_switches`
+versus `involuntary_switches` counters on the PCB distinguish the two paths: a process accumulating only
+involuntary switches is always being preempted rather than yielding, which is expected for a compute
+capsule, while a process that should block but shows involuntary switches is failing to hit a voluntary
+wait point and being timer-preempted out of a spin instead.
+
+## Source map
 
 ```
   src/process/scheduler/preemption/tick.rs        the timer tick and the slice
@@ -88,3 +135,9 @@ versus involuntary switches, which show up as the `voluntary_switches` and
   src/process/scheduler/preemption/state.rs        CURRENT_TIME_SLICE, NEED_RESCHEDULE
   src/process/scheduler/contract/                  the switch contract and SwitchIntent
 ```
+
+Every reference above is verified against those trees. The slice reset on dispatch happens in the
+[context switch](../process/context-switch.md); the selection the contract calls to pick the next pid is
+on the [selection](selection.md) page; the wait points that lead into `yield_now` are on the
+[sleep and wake](sleep-wake.md) page; and the `voluntary_switches` / `involuntary_switches` counters live
+on the [PCB](../process/pcb.md).

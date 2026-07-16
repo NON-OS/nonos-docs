@@ -57,11 +57,78 @@ to drop every surface a capsule owned. The attach map is likewise cleaned per ha
 behind. Combined with the epoch on the handle, this means a surface's lifetime is bounded by its
 references and its owner, and a handle to a released surface fails rather than aliasing a new one.
 
-## Source
+## Security analysis
+
+Sharing is where one capsule's pixels become visible to another, so it is the point in the graphics
+path with the most opportunity to leak or alias memory across an address-space boundary. Three
+properties keep it honest, and the same IOMMU boundary as the rest of the DMA-adjacent path applies.
+
+**Share and attach are separately gated.** Marking a surface shareable goes through
+`MkSurfaceShare`, which the cap table routes to `can_surface_create` (`mk.rs:73`); mapping a shared
+surface into a receiver goes through `MkSurfaceAttach`, which routes to `can_surface_map`
+(`mk.rs:75`), requiring the `GraphicsSurfaceMap` grant (bit `8192`, `capabilities/types.rs:69`). The
+producer of a surface and the consumer that maps it are therefore distinct capabilities: a
+compositor that only ever attaches other capsules' surfaces needs the map grant but not the create
+grant, and a client that only draws needs create but not map.
+
+**Only the owner shares, and the epoch guards the frames.** `share_surface`
+(`share/share_surface.rs:20`) decodes the handle, rejects a non-owner with `NotOwner` and a stale
+epoch with `BadHandle`, then bumps the refcount under check. So a capsule cannot mark someone else's
+surface shareable, and it cannot resurrect a released surface through a stale handle. The refcount is
+what keeps the frames alive while any sharer holds them, which means a surface's backing memory is
+freed exactly when the last reference drops, not while a compositor is still reading it.
+
+**The receiver only ever sees frames it was handed.** `attach_surface`
+(`share/attach_surface.rs`) maps the surface's existing physical frames into the receiver's own ASID
+at a VA the receiver reserved through `reserve_vma`, one page per frame, with user read-write perms
+(`attach_surface.rs:71`). The kernel never invents a receiver address, and it maps only the frame
+list recorded in the slot, so a receiver cannot attach its way to memory outside the surface it was
+given a handle for. The idempotent and self-attach shortcuts return an already-recorded VA rather
+than laying down a second aliasing mapping.
+
+The honest boundary is again the IOMMU. The whole point of the design is that both capsules map the
+*same* physical frames so the sharing is zero-copy, which means the CPU-side isolation between the
+two capsules is deliberately relaxed for exactly those pages. That is safe between two cooperating
+graphics capsules under paging, but once a display device is programmed with those physical frames,
+nothing in this path stops the device from reaching other RAM; that bound lives with the
+[DMA broker](../hardware-broker/dma.md) and its absent IOMMU backend, not with the registry.
+
+## Debugging sharing and attaching
+
+Attach is the step that touches two address spaces, so its failures map to the paging-related
+`RegistryError` variants (`types.rs:56`), surfaced as errnos by `map_err` (`surface_ops.rs:51`):
+
+```
+  BadHandle  -> EINVAL    stale epoch: the surface was released and its slot reused
+  NotOwner   -> EPERM     share on a surface the caller does not own
+  NoProc     -> ENOTSUP   no current process at attach time (attach_surface.rs:72)
+  MapFailed  -> ENOTSUP   the cross-ASID mapping itself failed
+```
+
+`MapFailed` is the interesting one, because it has three distinct origins inside
+`attach_surface`: `lookup_asid_for_process` returned nothing for the receiver (`attach_surface.rs:71`),
+`reserve_vma` could not carve a region of `frames.len()` pages (`attach_surface.rs:74`), or a
+`map_page_in_asid` call failed while installing a frame (`attach_surface.rs:79`). All three collapse
+to `ENOTSUP`, so when a compositor attach fails the way to tell them apart is the receiver's state:
+a receiver with no ASID is a process-teardown race, a `reserve_vma` failure is VA exhaustion in the
+receiver, and a per-frame map failure points at the frame list or the receiver's page tables. A
+`BadHandle` here almost always means the client released the surface out from under the compositor,
+which is exactly the aliasing the epoch is there to catch. Attach also emits `[SURFACE] attach
+enter` / `attach ok` traces on the compositor and shell pids (`surface_handlers.rs:110`), so you can
+see whether attach reached `ok`.
+
+## Source map
 
 ```
   src/kernel_core/surface_registry/share/share_surface.rs    share (owner, refcount)
-  src/kernel_core/surface_registry/share/attach_surface.rs   attach (cross-ASID frame mapping)
+  src/kernel_core/surface_registry/share/attach_surface.rs   attach (cross-ASID frame mapping, MapFailed origins)
   src/kernel_core/surface_registry/attach_map/               per-receiver VA record and cleanup
   src/kernel_core/surface_registry/release/                  release_surface, release_owned_by_pid
+  src/syscall/contract/cap_table/mk.rs                       share -> GraphicsSurfaceCreate, attach -> GraphicsSurfaceMap
+  src/capabilities/types.rs                                  the graphics capability bits
 ```
+
+Every reference above is verified against those trees. The descriptor and epoch these operations
+rest on are on the [surfaces](surfaces.md) page, present and vsync over the shared frames are on the
+[presentation](presentation.md) page, and the zero-copy frame mapping uses the
+[paging manager](../memory/paging-manager.md) per-ASID map.

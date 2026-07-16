@@ -20,6 +20,7 @@ server certificate chain against a single pinned root. This page documents it ex
 - [The certificate trust model](#the-certificate-trust-model)
 - [The network path](#the-network-path)
 - [Security analysis](#security-analysis)
+- [Debugging](#debugging)
 - [Honest gaps](#honest-gaps)
 - [Source map](#source-map)
 
@@ -236,6 +237,48 @@ authority hierarchy and rejects everything else, which is stronger than a broad 
 talking to a known endpoint, but it also means the RPC endpoint must chain to that specific root. The
 TLS client offers one suite (ChaCha20-Poly1305) and one group (X25519), which is a small, auditable
 surface rather than a full negotiation matrix.
+
+## Debugging
+
+The wallet fails in layers, and it is instrumented so the layer that failed is visible rather than
+hidden behind a blank window. The order to check them in follows the network path from the outside in.
+
+The first check is that the capsule spawned. The wallet is brought up through
+`super::boot::capsule("APP-NONOS-WALLET", ...)` (`src/userspace/init/spawn_plan/apps.rs:74`), which prints
+`[APP-NONOS-WALLET] capsule spawned` on success and a spawn error on failure. If that line is absent the
+ELF failed verification or the manifest asked for a capability outside policy, and none of the wallet's
+own code ran.
+
+If the window is up but the account never loads, the next stop is the keyring, because the address, the
+balance nonce, and every signature are IPC calls to it. The starting `status` line is `"keyring pending"`
+(`src/wallet/state/new.rs:18`), and a wallet stuck on that string never resolved the keyring port: the
+[keyring](keyring.md) capsule is down or the wallet was not granted IPC to it. The address and balance
+fields carry their own `_ready` flags in `State` (`address_ready`, `balance_ready`, `nonce_ready`,
+`fee_ready`), so the UI shows which of the four account facts arrived and which is still missing, which
+separates a keyring problem (no address) from a network problem (address but no balance).
+
+If the address loads but the balance and nonce do not, the failure is in the network path, and the
+`probe_*` functions exist to localise it before you touch the signing code. `probe_network`
+(`src/wallet/net/probe.rs:22`) runs the ladder in order and folds the results into `NetStatus`:
+`probe_rpc_tcp` (`net/probe_rpc_tcp.rs:24`) reports `resolve`, `socket`, and `connect` as three separate
+booleans, so a DNS failure, a socket-open failure, and a TCP-connect failure are distinguishable rather
+than one opaque timeout; then `probe_tls_rpc` (`net/probe_tls_rpc.rs:39`) attempts the full TLS 1.3
+handshake and `probe_status` (`net/probe_status.rs:17`) turns the combination into the status string the
+Home view shows. So a wallet that resolves and connects but shows no balance is failing inside the TLS
+handshake or the certificate chain, not at the socket, and the reverse narrows it to the network stack
+below TLS. The certificate path itself is the sharpest failure: `chain_anchor`
+(`src/wallet/tls13/chain_anchor.rs:17`) rejects a server whose chain does not terminate in the pinned
+GTS R4 root, and `cert_valid_now.rs` rejects one outside its validity window, so an endpoint that swaps
+its CA or a clock that is wrong (the validity check reads `rtc_stamp`) presents as a handshake that
+completes on the wire but is refused by the wallet. That is a deliberate rejection, not a bug, and it is
+the one to suspect when the same endpoint worked before and does not now.
+
+Signing is the last layer and the easiest to confirm, because it produces a proof. A successful
+`sign_eth` or `sign_nox` stores the transaction hash in `proof_eth_hash` / `proof_nox_hash` and bumps
+`proof_count` (`src/wallet/state/types.rs`), rendered in the Proofs view, so a signature that the keyring
+performed is visible as a hash without broadcasting anything. If the Proofs view fills but a broadcast
+never lands, the split is clean: the keyring signed (proof present) and the failure is the network send,
+which is the same `probe_*` ladder again.
 
 ## Honest gaps
 

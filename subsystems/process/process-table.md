@@ -138,7 +138,55 @@ space, which belongs to the process and is only reclaimed when the last member e
 Unlike a process, a thread is given its kernel stack and initial user context inline
 and added straight to the run queue.
 
-## Source
+## Security analysis
+
+The table decides what "the current process" means and hands out the identity every authority check keys
+on, so its correctness under SMP and its no-live-without-a-token rule are the security properties. Three
+hold.
+
+**Per-CPU current pid, no cross-core confusion.** `CURRENT_PID` is not a global; it is
+`[AtomicU32; MAX_CPUS]` (`types.rs:25`), and `load`, `store`, and `swap` all index `slots[cpu_id()]`, the
+calling CPU's own slot. So two cores running two processes each read their own current pid with no
+coordination, and no core can be tricked into acting as another core's current process. Every kernel path
+that asks "who is calling" resolves it through this per-CPU slot, which is what makes an authority check
+attributed to the right capsule under real parallelism.
+
+**A process never joins the table without an authenticated token.** `create_process`
+(`table/create.rs:26`) builds the PCB with a token minted for the pid, then re-mints it through
+`caps::rebind_address_space` so `subject_asid` reflects the real address space, and only then calls
+`PROCESS_TABLE.add`. The re-mint fails closed if the boot session nonce is not set, so a process cannot
+be created before the session is established, the same fail-closed rule the
+[signing path](../../security/signing-and-mac.md) enforces. `build_pcb` (`create.rs:76`) sets the
+security-relevant defaults: `io_bitmap` all-ones (every port denied), `kernel_stack_top` zero (no user
+mode until a stack is allocated), and a token minted at construction, so a PCB is never live without
+authority.
+
+**PID allocation cannot collide across cores or alias a live process.** `allocate_tid`
+(`types.rs:93`) advances `NEXT_PID` under a dedicated mutex, so two cores cannot hand out the same id, and
+because the u32 space wraps back to 1 rather than overflowing, a candidate could still name a live
+process; the allocator checks `is_active_pid` and skips it, giving up after `MAX_ATTEMPTS` (65536) rather
+than looping forever. The honest boundary: the queries are `O(n)` linear scans under a read lock, which
+is a deliberate fit for dozens of capsules, not thousands of processes, and the table shares ownership
+through `Arc`, so a lookup returns an `Arc` a caller can hold across a lock drop. A pid returned by a
+lookup is a live-at-lookup snapshot; the process can exit while the caller holds the `Arc`, which keeps
+the PCB alive but does not keep it schedulable.
+
+## Debugging the process table
+
+The wrong current pid on one CPU under SMP, an authority check attributed to the wrong capsule, points
+straight at the per-CPU `CURRENT_PID` slot and whether the [scheduler](../scheduler/README.md) updated
+`slots[cpu_id()]` on the last switch rather than a global. PID allocation returning `None` is the
+exhaustion path: `allocate_tid` logs `[PROCESS] PID space exhausted after 65536 attempts`
+(`types.rs:107`) when every candidate in a full sweep was already active, which on a dozens-of-capsules
+system means pids are being allocated but never reaped, so the trail leads to the reaper, not the
+allocator. A process that seems to exist but no lookup finds it, or the reverse, is an `add` that never
+ran or a `terminate_process` that ran early: `find_by_pid` scans only live entries, so a pid missing from
+`get_all_processes` was either never added, created before the boot nonce (the fail-closed `create_process`
+error), or already removed by finalize. A capsule that comes up with unexpected port access or reaches
+user mode when it should not is a `build_pcb` default gone wrong: the two to check are `io_bitmap`
+(all-ones is correct) and `kernel_stack_top` (zero until a stack is allocated).
+
+## Source map
 
 ```
   src/process/core/table/types.rs    ProcessTable, CurrentPid, PID allocation
@@ -146,3 +194,10 @@ and added straight to the run queue.
   src/process/core/table/inherit.rs  compute_inherited_caps
   src/process/core/table/ops.rs      the table operation wrappers
 ```
+
+Every reference above is verified against those trees. The per-CPU current pid is updated by the
+[scheduler](../scheduler/selection.md) on every switch; the token minted at creation and its fail-closed
+rule are on the [capability](../../security/capabilities-and-tokens.md) and
+[signing](../../security/signing-and-mac.md) pages; the verified capsule path that swaps the inherited
+token for the manifest one is on the [capsule trust](../../security/capsules-and-trust.md) page; and the
+`build_pcb` defaults are read on the [PCB](pcb.md) and [context switch](context-switch.md) pages.

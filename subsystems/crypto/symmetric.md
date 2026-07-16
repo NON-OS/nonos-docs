@@ -54,12 +54,79 @@ capsule that submits a corrupted ciphertext gets a failure, not garbage plaintex
 layer is a thin dispatch over the same in-tree primitives documented here; it adds the user
 boundary and the capability check, not new crypto.
 
-## Source
+## Security analysis
+
+Both schemes are authenticated encryption, so the properties that matter are that a tampered
+message is rejected, that the rejection does not leak through timing or through a half-decrypted
+buffer, and that the key does not outlive the object that holds it.
+
+**A tampered ciphertext or wrong associated data is rejected, not returned.** Decryption
+recomputes the tag over the ciphertext and the associated data and compares it against the tag the
+message carries; only if they match is the plaintext returned. AES-256-GCM does this in
+`Aes256Gcm::decrypt` (`src/crypto/symmetric/aes_gcm/aes256.rs:51`) and ChaCha20-Poly1305 in
+`aead_decrypt` (`src/crypto/symmetric/chacha20poly1305/aead.rs:51`). Each is proven against
+published vectors by its known-answer test (`aesgcm_tests.rs`, `chacha_tests.rs`), so the seal and
+open agree with the standard rather than just with each other.
+
+**The tag comparison is constant time and a rejected plaintext is scrubbed.** The GCM path
+compares the computed and received tags with `ct_eq_16` (`aes256.rs:69`) and ChaCha20-Poly1305
+with `ct_eq` (`chacha20poly1305/aead.rs:70`), both of which fold the whole tag before deciding, so
+a forged tag does not reveal through timing how many bytes it got right. On a tag failure the code
+does not hand back the buffer it decrypted into: GCM volatile-zeros the plaintext through
+`secure_zero_slice` before returning the error (`aes256.rs:74`), and ChaCha20-Poly1305 does the
+same, with a comment that it decrypts regardless of tag validity specifically to avoid a timing
+oracle on the decrypt itself. So a caller that submits a corrupted ciphertext gets an error and a
+zeroed buffer, never partial plaintext.
+
+**Key material is bound to the AEAD object's lifetime.** `Aes256GcmAead` and
+`Chacha20Poly1305Aead` (`src/crypto/core/aead.rs:75`, `:44`) hold a 32-byte key and volatile-zero
+it in `Drop` with a `SeqCst` fence, so the key does not linger once the object goes out of scope.
+The tag handling lives inside seal and open, so a caller of the AEAD trait cannot reach in and
+accept unauthenticated plaintext by mistake.
+
+The honest boundary is that these are portable in-tree implementations, not the hardware AES path.
+The AES core is table-and-S-box based rather than AES-NI, and GHASH is a software Galois
+multiply, so the constant-time guarantee the code makes is specifically the tag comparison and the
+scrub-on-failure, not a claim that the block cipher and the field multiply are free of
+data-dependent timing on every microarchitecture. Nonce management is the caller's responsibility;
+the AEAD takes a 96-bit nonce and does not itself prevent nonce reuse, which for GCM is the usual
+sharp edge.
+
+## Debugging symmetric encryption
+
+A symmetric failure is almost always one of three things, and they surface differently. A
+primitive that has drifted from the standard fails its known-answer test at build and test time
+under `userland/crypto_proofs/src/` (`aesgcm_tests.rs`, `chacha_tests.rs`), which compile the real
+cipher source, so a KAT failure there means the cipher or the GHASH/Poly1305 authenticator itself
+is wrong, not the caller.
+
+At runtime the visible failure is the tag check. Decryption returns `CryptoError::AeadTagMismatch`
+(mapped in `core/aead.rs:71`, `:102`) or the low-level `"authentication failed"` string
+(`aes256.rs:76`), and the returned buffer is zeroed rather than partially filled. That single
+failure covers three distinct causes, and the way to separate them is to hold the inputs fixed one
+at a time: the same key and nonce but a flipped ciphertext byte is genuine tampering; the correct
+ciphertext but a different key or a different nonce than was used to seal produces the identical
+mismatch, because the recomputed tag depends on both; and associated data that differs between
+seal and open fails the tag even though the ciphertext is untouched, because the AAD is folded into
+the tag. So a tag mismatch on data you believe is correct usually points at a key, nonce, or AAD
+that does not match the sealing side rather than at corruption in transit. A length that is shorter
+than a tag comes back earlier and distinctly, as `"ciphertext too short"` (`aes256.rs:58`) or
+`CryptoError::InvalidLength` from `aead_unwrap` (`core/aead.rs:120`), which tells you the framing is
+wrong before any crypto ran.
+
+## Source map
 
 ```
-  src/crypto/symmetric/aes/, aes_gcm/       AES-256-GCM
-  src/crypto/symmetric/chacha20poly1305/    ChaCha20-Poly1305
-  src/crypto/core/aead.rs                    the AEAD trait and the two impls
-  src/syscall/dispatch/crypto/               the MkCrypto* dispatch
-  userland/crypto_proofs/src/                the AEAD known-answer tests
+  src/crypto/symmetric/aes/, aes_gcm/        AES-256-GCM: the cipher, GHASH, and tag path
+  src/crypto/symmetric/aes_gcm/aes256.rs     decrypt: ct_eq_16 tag check and scrub-on-failure
+  src/crypto/symmetric/chacha20poly1305/     ChaCha20-Poly1305 stream and Poly1305 MAC
+  src/crypto/core/aead.rs                     the AEAD trait, the two impls, key zeroization on drop
+  src/crypto/error.rs                         AeadTagMismatch and the other CryptoError variants
+  src/syscall/dispatch/crypto/                the MkCrypto* dispatch
+  userland/crypto_proofs/src/                 the AEAD known-answer tests
 ```
+
+Every reference above is verified against those trees. The syscall boundary these calls cross is on
+the [syscall router](../syscall/router.md) page, the user-buffer copy is on the
+[usercopy](../memory/usercopy.md) page, and the constant-time comparison the tag check uses is on
+the [hashes](hashes.md) page.

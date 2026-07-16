@@ -99,9 +99,61 @@ runs. The [preemption](preemption.md) page covers the timer that forces a resele
 and the [sleep and wake](sleep-wake.md) page covers how a process leaves and re-enters
 the run queue.
 
-## Source
+## Security analysis
+
+Selection decides who runs next, so its properties are about liveness and fairness rather than
+confidentiality: it must not let a process starve indefinitely, and it must not select something that is
+not genuinely runnable. Three hold.
+
+**Only a genuinely-ready process is selected.** `select_by_priority` (`select.rs:48`) skips any pid
+whose state is not `Ready` and whose band does not match, and `select_fallback` (`select.rs:70`) keeps
+the current process only if it is still in the runnable set and still `Ready`, returning `None`
+otherwise so the caller idles. A pid that has exited, gone to sleep, or been preempted out of `Ready`
+cannot be dispatched, which is what keeps the scheduler from resuming a dead or blocked context. The run
+queue itself refuses duplicates on both insert paths (`run_queue.rs`), so a pid cannot appear runnable in
+two places and be double-counted.
+
+**No process in a band starves its neighbours.** The round-robin picks `after`, the smallest runnable
+pid greater than the band's last-scheduled pid, and wraps to `lowest` when it runs off the end
+(`select.rs:48`), and it skips `current` so it rotates to another process rather than reselecting the one
+that just ran. Every ready process in a band therefore takes a turn before any repeats. The run queue is
+FIFO by arrival (`run_queue.rs`), which the source notes is deliberate: a long-running pid does not
+starve newcomers the way a pid-sorted structure would.
+
+**Higher priority strictly precedes lower, deterministically.** The band walk is strict order,
+`RealTime` then `High` then `Normal` then `Low` then `Idle` (`select.rs:26`), and it takes the first
+band with a runnable process and never looks lower while a higher band has work. So a realtime process
+always preempts a normal one and idle work runs only when nothing else can. The honest boundary: this
+strictness is exactly what makes cross-band starvation possible. A saturated `RealTime` or `High` band
+will indefinitely starve `Normal` and below, by design, so fairness holds *within* a band, not across
+bands. There is no aging that promotes a starved low-priority process. The tree also contains `deadline`
+and `realtime` modules, but the live policy is this priority walk, so a claim about deadline guarantees
+would be about code the selection path does not run.
+
+## Debugging selection
+
+A process that is runnable but never gets the CPU is the central symptom, and the priority band is the
+first thing to check. If a higher band is saturated, starvation of a lower band is expected behaviour,
+not a bug, given the strict walk. If the starved process shares a band with what is running, the
+round-robin should be rotating to it, so check that its state is actually `Ready` (a process left in
+`Running`, `Sleeping`, or a stale state is skipped by `select_by_priority`) and that it is in the run
+queue at all (`is_in_run_queue`), since a pid off the queue is invisible to selection regardless of
+state. A pid that runs twice in a row when others are ready is a `current`-skip that did not apply or a
+band `last` pointer not advancing. The CPU idling while a process is runnable is `select_fallback`
+returning `None` because the only candidate is `current` and it is no longer `Ready`, which is correct
+if that process just blocked; if it should still be ready, the bug is whatever moved it out of `Ready`.
+A process that appears in the runnable snapshot but never in a band is a band-membership mismatch: its
+`priority` field does not match the band being walked, so it is skipped in every pass.
+
+## Source map
 
 ```
   src/process/scheduler/selection/select.rs   select_next_process and the band walk
   src/process/scheduler/dispatch/run_queue.rs  the FIFO runnable queue
 ```
+
+Every reference above is verified against those trees. The timer that forces a reselection is on the
+[preemption](preemption.md) page; the transitions that add and remove a pid from the run queue are on the
+[sleep and wake](sleep-wake.md) page; the switch into the selected pid is on the
+[context switch](../process/context-switch.md) page; and the `Priority` and `state` fields the walk reads
+live on the [PCB](../process/pcb.md).

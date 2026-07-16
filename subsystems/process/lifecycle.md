@@ -110,7 +110,54 @@ Separately from the two-phase exit, `terminate(code)` on the PCB
 process must be marked dead without going through the graceful teardown, and it is the
 state a reaped process ends in.
 
-## Source
+## Security analysis
+
+The lifecycle is where a capsule's authority is granted and, more importantly, where it is taken back.
+An exit that leaves anything behind is an authority leak, so the teardown ordering is the security
+property, not just housekeeping. Three properties hold.
+
+**Exit revokes every hardware authority the capsule held.** `teardown` (`teardown.rs:21`) calls
+`release_all_for_pid` across all four broker grant classes: the device claims (`broker::release_all_for_pid`),
+bound IRQs (`irq_release_all_for_pid`), DMA buffers (`dma_release_all_for_pid`), and port-IO grants
+(`pio_release_all_for_pid`), plus the surfaces the pid owned. So a device a crashed driver held is
+returned rather than stranded, and because the claim table drops the claim, no stale grant handle from
+the dead pid can be replayed. This is the process-side half of the [broker claim](../hardware-broker/claim.md)'s
+`release_all_for_pid` contract. The reaper repeats every one of these releases idempotently in
+`finalize_teardown`, so nothing survives even if the first pass was partial.
+
+**Teardown is idempotent and self-fencing.** `teardown` returns immediately if the process is already
+`Zombie` or `Terminated` (`teardown.rs:26`), so a double exit, an `MkExit` racing a kill signal racing a
+fault, releases resources exactly once. It marks the process `Zombie`, removes it from the run queue, and
+clears it as current before enqueueing it for the reaper, so a dead pid cannot be selected again. The
+kernel stack it is still executing on cannot be freed inline, so that release is deferred rather than
+skipped, which avoids freeing the ground under the running context.
+
+**Memory is scrubbed on reclaim, not merely unmapped.** The zombie still has its frames mapped after
+teardown; the reaper's `address_space::lifecycle::release` clears the VMAs and calls
+`cleanup_address_space(asid)` (`address_space/lifecycle/release.rs`), which frees every leaf frame and
+page table through `frame_alloc::deallocate_frame`, and each freed frame is zeroed by `zero_frame` on the
+way out. This is why the [ZeroState guarantee](../memory/zeroization.md) is the composition of exit
+returning frames and the allocator zeroing them, not a dedicated wipe. The honest boundary: the scrub
+happens at reclaim time on the reaper's tick, so between teardown and reap the frames are unmapped from
+the dead process but not yet zeroed; they are not reachable by any live capsule in that window because
+they are no longer in any live address space, but the zeroing is a reclaim event, not an exit event.
+
+## Debugging the lifecycle
+
+The state itself is the primary diagnostic: a process wedged in `Zombie(code)` has been torn down but
+not yet reaped, which points at the reaper not running, the timer-driven `drain` never draining the
+pending list (see the [supervisor](supervisor.md) page). A process stuck in `Sleeping` that should have
+woken is a lost wakeup, traced on the [sleep and wake](../scheduler/sleep-wake.md) page, not here. The
+exit code travels inside the state, `Zombie(-1)` or `Terminated(-1)` is the sentinel the context-switch
+path writes when a process has no kernel stack, so a capsule that dies at first entry with code `-1`
+rather than its own exit code was killed by the [context switch](context-switch.md), not by its own
+`MkExit`. A leaked device after a driver crash, the device still shows `AlreadyClaimed` to a fresh
+driver, means teardown's broker release did not run or the pid was never marked exiting; because the
+release is by pid, the check is whether `teardown` was reached for that pid at all, and the idempotent
+repeat in `finalize_teardown` is the backstop. `exit_and_yield` never returns by construction
+(`exit_and_yield.rs:26`), so if a caller appears to continue past it, the call was skipped, not the exit.
+
+## Source map
 
 ```
   src/process/core/types.rs                          the ProcessState enum
@@ -120,3 +167,9 @@ state a reaped process ends in.
   src/process/address_space/lifecycle/release.rs      address-space reclaim
   src/kernel_core/process_spawn/capsule_spawn/        creation (verified spawn install)
 ```
+
+Every reference above is verified against those trees. The reaper that drains the pending list and runs
+`finalize_teardown` is on the [supervisor](supervisor.md) page; the broker `release_all_for_pid` this
+path drives is on the [claim](../hardware-broker/claim.md) page; the frame zeroing behind reclaim is on
+the [zeroization](../memory/zeroization.md) page; and the PCB whose state field these transitions move is
+on the [PCB](pcb.md) page.

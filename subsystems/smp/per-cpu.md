@@ -67,11 +67,76 @@ these to decide which CPUs a per-address-space invalidation needs to reach: a us
 flush does not need to reach a CPU whose `active_asid` is `ASID_NONE` or a different
 address space, while kernel-VA flushes are not ASID-keyed and reach every online CPU.
 
-## Source
+## Security analysis
+
+Per-CPU state is a correctness and isolation mechanism rather than a privilege boundary: none of it is
+reachable from ring 3. Its properties are about keeping one CPU's state from corrupting another's and
+about a CPU knowing which core it actually is. Three hold.
+
+**Per-CPU isolation is by page-aligned ownership, not by locking.** `PerCpuData` is `#[repr(C,
+align(4096))]` (`src/smp/percpu/types.rs:29`), so each CPU's structure sits on its own cache lines and its
+own page. The fields only ever touched by the owning CPU (kernel stack, syscall scratch, interrupt
+nesting and disable depth, RNG state) are read and written without locking or atomics, which is sound
+precisely because no other CPU touches them. The handful another CPU may read (`current_process`,
+`active_asid`) are atomics. The isolation is structural: a CPU indexes its own record and does not reach
+into another's, so there is no shared mutable field to race on for the non-atomic ones.
+
+**A CPU's identity is derived from hardware, then made dense, not assumed.** `cpu_id`
+(`src/smp/cpu.rs:22`) reads the hardware id through the arch facade (`get_cpu_id`, the Local APIC id on
+x86_64) and maps it to a dense `0..CPU_COUNT` index with `apic_to_cpu_id` by scanning the CPU
+descriptors. This matters because the boot CPU's APIC id is not guaranteed to be 0: firmware assigns APIC
+ids, and the dense index the rest of the kernel uses to index per-CPU arrays is a separate space from the
+hardware id. `is_bsp` (`cpu.rs:53`) reflects this honestly by comparing `get_cpu_id()` against the
+recorded `BSP_APIC_ID` (stored from `apic::id()` during `init_bsp`, `src/smp/init/bsp.rs:31`) rather than
+against 0. Assuming the BSP is APIC id 0, or that hardware ids are dense, would be a bug on hardware where
+IOAPIC routing and firmware numbering do not line up with that assumption; the map is what makes the code
+correct regardless.
+
+**`active_asid` is the only field published for cross-CPU reads, and it is an atomic with a defined
+idle value.** It records the address space executing on this CPU, updated by
+`switch_address_space` on every context switch, and `ASID_NONE` (zero) means no user CR3 is active
+(`percpu/types.rs:19`). The [TLB shootdown](tlb-shootdown.md) filter reads it to decide which CPUs a
+per-address-space invalidation must reach. The honest boundary is that the correctness of every per-CPU
+read rests on the kernel GS base being loaded first: `current()` reaches the structure through that base,
+so a read before the swapgs on an entry path would index the wrong CPU. That discipline is the
+trampoline's and the entry paths' responsibility, not something this module re-checks.
+
+## Debugging per-CPU state
+
+Per-CPU bugs rarely print; they show as one core behaving differently from the others, so they are
+diagnosed by asymmetry. The startup path does log identity, which is the anchor for everything else:
+`init_bsp` prints `[SMP] BSP initialized: APIC ID=<n>, <k> CPUs detected` (`src/smp/init/bsp.rs`), and AP
+bring-up prints `[SMP] AP <cpu_id> online (APIC <n>)` (`src/smp/init/ap_unit.rs`). Read together these
+tell you the mapping from dense `cpu_id` to hardware APIC id that `apic_to_cpu_id` built, which is the
+first thing to check when a per-CPU array looks like it is indexing the wrong core.
+
+The characteristic failure modes:
+
+- **A wrong or duplicated `cpu_id`.** If two CPUs resolve to the same dense index, `apic_to_cpu_id` found
+  two descriptors with the same APIC id or the descriptor table was misfilled during bring-up. The
+  symptom is two cores sharing one per-CPU record, which corrupts stacks and scheduler state. The
+  `[SMP] AP ... online (APIC ...)` lines are where you confirm each APIC id is distinct.
+- **`is_bsp` disagreeing with expectation.** On hardware where the BSP is not APIC id 0, code that assumed
+  the BSP is core 0 will act on the wrong CPU while `is_bsp` (which compares against the recorded
+  `BSP_APIC_ID`) stays correct. A divergence between the two is the tell that some other code hard-coded
+  0 instead of asking `is_bsp`.
+- **A per-CPU read returning another core's data.** This is almost always a GS-base problem on an entry
+  path (a read before swapgs), not a bug in this module, and it presents as one core's counters or
+  `active_asid` being wrong while the others are fine. The fix is on the entry/trampoline path that runs
+  before the GS base is loaded.
+
+## Source map
 
 ```
   src/smp/percpu/types.rs       PerCpuData and ASID_NONE
   src/smp/percpu/operations.rs  current() and the per-CPU accessors
   src/smp/cpu.rs                cpu_id, apic_to_cpu_id, is_bsp
+  src/smp/init/bsp.rs           init_bsp, BSP_APIC_ID recorded from apic::id()
+  src/smp/init/ap_unit.rs       AP descriptor configuration and the online log
   src/smp/constants.rs          MAX_CPUS
 ```
+
+Every reference above is verified against those trees. The AP bring-up that fills these descriptors is on
+the [TLB shootdown](tlb-shootdown.md) page's neighbours in this section, the `active_asid` field is
+consumed by the [TLB shootdown](tlb-shootdown.md) filter, and the dense `cpu_id` indexes the per-CPU
+current-pid array in the [process table](../process/process-table.md).

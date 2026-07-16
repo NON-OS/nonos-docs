@@ -152,7 +152,40 @@ gate](capsules-and-trust.md); the anchor it verifies against is the [trust
 anchor](trust-anchor.md); the manifest it authorises is the [manifest
 schema](manifest-schema.md).
 
-## Source
+## Debugging a certificate rejection
+
+Every certificate failure is an `IdCertVerifyError`
+(`src/security/nonos_id_cert/error.rs:44`), and at the loader it collapses to the
+single reason `id_cert` on the `[RUNTIME-LOAD] FAILED` line, so the reason string
+alone does not tell you which check fired. The variant does, and the two decode
+paths are worth separating.
+
+A structural rejection is an `IdCertDecodeError` wrapped in `Decode` and comes from
+the bounded decoder refusing a malformed certificate: `SchemaVersion` when the
+`schema_version` is not the `2` this kernel accepts, `NamespaceGlobCount` or
+`PublisherKeyCount` or `TrustAnchorSignatureCount` when a vector exceeds its named
+maximum (`MAX_NAMESPACE_GLOBS`, `MAX_PUBLISHER_KEYS`, `MAX_TRUST_ANCHOR_SIGNATURES`),
+`PublisherKeysPerAlg` when one algorithm carries more than the two keys
+`MAX_KEYS_PER_ALG` allows, and `PubkeyLen` or `SigLen` when a key or signature does
+not have the length its algorithm requires. These mean the certificate is the wrong
+shape, not that its signature is wrong, and they are the errors to expect from a
+truncated or hand-edited certificate blob.
+
+A policy rejection is one of the verification variants and each names a real state:
+`EpochStale` for a certificate issued under an anchor epoch older than the current
+one (a rollback), `Revoked` and `NonosIdRevoked` for a serial or publisher identity
+on an anchor list, `NotYetValid` and `Expired` for a time outside the validity
+window, `TrustAnchorPolicy` when no anchor key exists for the required algorithm,
+and `TrustAnchorBadSig(alg)` when a signature under that algorithm did not verify.
+The order of these is fixed in `checks::run` and the epoch, revocation, and time
+checks all run before any signature (`verify/checks.rs:22`), so a `Revoked` or
+`EpochStale` is decided without the cost of the anchor signature verify, and seeing
+one does not imply the signature was even reached. `TrustAnchorBadSig` is the one
+that means a well-formed, in-window, unrevoked certificate simply carried a
+signature that did not check out against any anchor key for that algorithm, which
+is the genuine "wrong key or tampered bytes" case.
+
+## Source map
 
 ```
   src/security/nonos_id_cert/schema/cert.rs       NonosIdCertificate, VerifiedNonosId
@@ -160,4 +193,10 @@ schema](manifest-schema.md).
   src/security/nonos_id_cert/schema/sub.rs        NamespaceGlob, PublisherKey, TrustAnchorSignature
   src/security/nonos_id_cert/schema/glob_match.rs the namespace glob matcher
   src/security/nonos_id_cert/verify/checks.rs     epoch, revocation, validity
+  src/security/nonos_id_cert/verify/dispatch.rs   the per-algorithm anchor signature check
+  src/security/nonos_id_cert/error.rs             IdCertDecodeError and IdCertVerifyError
 ```
+
+The anchor these signatures reduce to is the [trust anchor](trust-anchor.md); the
+pipeline that maps these errors onto the `[RUNTIME-LOAD] reason=id_cert` line is on
+the [verified spawn](capsules-and-trust.md) page.

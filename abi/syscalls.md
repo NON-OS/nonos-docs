@@ -223,7 +223,44 @@ in the system and the trust anchor ceiling on most certificates excludes it.
 
 ---
 
-## How to read a denial
+## Security analysis
+
+The whole point of routing every privileged action through this table is that
+there is exactly one gate. `dispatch` resolves the required capability for the
+number and denies with `EPERM` before the handler ever runs
+(`src/syscall/contract/dispatch.rs:31`), so a capsule cannot reach the body of a
+call it is not entitled to make. The capability the call needs is not a property
+of the caller's intent; it is a property of the number, fixed in
+`src/syscall/contract/cap_table/mk.rs`, and the caller's token either holds the
+bit or it does not.
+
+The bits themselves are a small closed set. There are twenty-two capabilities
+(`src/capabilities/types.rs:81`), each one a single bit in a `u64`
+(`src/capabilities/types.rs:54`), and a capsule's token carries only the bits its
+verified manifest asked for. That is what makes the table a least-privilege
+surface rather than a menu: a capsule that declared only `IPC` and `Memory` can
+send messages and map its own memory, and every device, surface, admin, and
+input-source call in this document returns `EPERM` for it at the gate. The four
+broker-authority bits (`Driver`, `Mmio`, `Irq`, `Dma`, and `Pio` on x86_64) are
+split deliberately so that holding one does not imply the others; a driver that
+needs to map a BAR but never takes an interrupt carries `Mmio` and not `Irq`.
+
+Two calls are more dangerous than their neighbors and are worth naming.
+`MkCapGrant` delegates a subset of the caller's own bits to another capsule, and
+the delegation depth is bounded by the token, so authority cannot be laundered
+into an unbounded chain. The three `Admin` calls, reboot, shutdown, and policy
+push, sit behind the one bit that almost nothing holds; the trust anchor ceiling
+on most certificates excludes it, so a compromised application capsule cannot
+reach them even by asking.
+
+There is a second check the capability bit does not cover. A call that operates
+on a broker grant, an MMIO unmap, an IRQ poll, a DMA unmap, additionally verifies
+that the caller owns the grant it named and returns `EPERM` if not, independent of
+the capability bit. Holding `Irq` lets a capsule bind interrupts; it does not let
+it poll a grant id that belongs to another capsule. The grant is the object, the
+capability is the class of action, and both are checked.
+
+## Debugging the boundary
 
 When a call returns `EPERM`, two things could have happened: the token did not
 hold the required capability, or, for a grant-scoped call, the caller is not the
@@ -231,3 +268,33 @@ owner of the grant it named. The kernel logs the denial on the deny path
 (`src/syscall/contract/dispatch.rs`). When debugging a driver that gets `EPERM`
 on `MkIrqPoll`, check both that the manifest declared `Irq` and that the poll
 names the grant id the bind returned, not a different one.
+
+`ENOSYS` (-38) is a different failure and easy to confuse with a denial: it means
+the number had no handler, not that the caller was refused. `MkIrqWait` is the
+call to watch for here. The number is allocated (`MIRW` at
+`src/syscall/numbers/defs.rs:80`) and the `nonos_libc` binding exists, but there
+is no kernel handler, so a driver wired against a wait rather than the poll-and-ack
+loop gets `ENOSYS` and never makes progress. The rest of the negative returns are
+in [the error page](errors.md); the ones a capsule sees most at this boundary are
+`EPERM` at the gate, `EFAULT` on a bad user pointer, and `ENOENT` from a service
+lookup that did not resolve.
+
+Because the numbers are four-character ASCII tags, a syscall trace reads as
+mnemonics: `MISD` is a send, `MIRB` is an IRQ bind, `MSPR` is a surface present.
+That is the fastest way to see what a capsule is actually doing against the
+kernel, and it is why the tags were chosen to be legible rather than dense.
+
+## Source map
+
+```
+  src/syscall/numbers/defs.rs        every SyscallNumber and its four-char tag
+  src/syscall/contract/cap_table/mk.rs  the capability each number requires
+  src/syscall/contract/dispatch.rs   the gate: resolve the cap, deny with EPERM
+  src/capabilities/types.rs          the 22 Capability bits and their u64 values
+  src/syscall/abi/tag.rs             the tag4 packing behind each number
+```
+
+Every tag, capability, and semantic in the tables above is mirrored from those
+files. The grant-ownership half of the `EPERM` check lives on the
+[hardware broker page](../subsystems/hardware-broker/README.md); the errno
+magnitudes are on [the error page](errors.md).

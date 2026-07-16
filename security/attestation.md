@@ -123,14 +123,65 @@ classical-versus-post-quantum boundary, is documented on the
 [proof system](../subsystems/proof-system/pedersen-attestation.md) page, alongside the
 in-kernel transparent [STARK](../subsystems/proof-system/README.md).
 
-## Source
+## Debugging attestation
+
+An attestation failure surfaces at two places, and the first thing to do is read
+which one. The gate itself prints one of three lines with the capsule name
+(`attest_gate.rs:24`, `:35`, `:42`): `[ZK-ATTEST] none` means the capsule carried
+no trailer, `[ZK-ATTEST] ok` means the proof verified, and `[ZK-ATTEST] FAIL`
+means a trailer was present but did not verify. On a `FAIL` the gate appends the
+`AttestError` string from `as_str` (`error.rs:26`), so the line reads, for
+example, `[ZK-ATTEST] FAIL <name>: capsule attestation rejected`. That suffix is
+the whole diagnosis: `trailer missing` for a bad or absent `NZKCAPS2` magic,
+`trailer malformed` for a wrong length or depth byte, `policy root unavailable`
+when `policy_root::root()` returned nothing, and `rejected` when the trailer
+parsed and the group check in `verify_enrolled` (`attest/verify.rs:24`, which
+returns `false`) did not pass.
+
+The distinction between `none` and `FAIL` matters when a capsule will not spawn.
+In a strict build (without `nonos-zk-rollout`) both a `none` and a `FAIL` become
+`SpawnError::AttestationRejected` (`attest_gate.rs:28`, `:49`), and the capsule
+loader turns that into `[RUNTIME-LOAD] FAILED name=<name> reason=attestation`
+(`from_vfs/load.rs:98`). So a runtime-load failure with `reason=attestation` is
+always this gate, never a signature problem: if the reason were a bad signature it
+would read `reason=id_cert` or `reason=manifest:pub_sig` instead, and if it were a
+capability overreach it would read `reason=manifest:caps_ceiling` or
+`reason=manifest:grant`. The `reason=` field is the fastest way to separate an
+attestation reject from a signature reject from a capability reject.
+
+A `rejected` on a capsule that was enrolled correctly is usually a binding
+mismatch rather than a forged secret. The 48-byte context ties the proof to the
+ELF hash, the installed cap bitmask, and `POLICY_EPOCH`, so rebuilding the capsule
+(new BLAKE3 over the ELF), changing the granted caps, or moving the policy epoch
+all invalidate a proof that previously verified. The way to tell that apart from a
+genuinely absent enrolled secret is whether the capsule bytes or its grant changed
+since the proof was produced. A live read of the boot-chain result is available
+through the `MkAttestStatus` syscall (`src/syscall/microkernel/attest.rs`), which
+any valid token can call.
+
+One honest caveat belongs here. A `[ZK-ATTEST] FAIL` or `none` in a build with
+`nonos-zk-rollout` is logged and then ignored: the gate returns `Ok` and the
+capsule spawns anyway. That rollout feature is mutually exclusive with
+`nonos-production` (`src/lib.rs:39`, a `compile_error!`), so a production build
+cannot be built fail-open, but during a rollout window a failing attestation is
+not why a spawn fails, and this marker should be read as advisory, not as a gate.
+
+## Source map
 
 ```
-  src/kernel_core/process_spawn/capsule_spawn/runner/attest_gate.rs  the gate and feature flags
-  src/security/capsule_attest/verify.rs   verify_capsule_attestation and the context
+  src/kernel_core/process_spawn/capsule_spawn/runner/attest_gate.rs  the gate, the markers, and the feature flags
+  src/kernel_core/process_spawn/capsule_spawn/from_vfs/load.rs       the [RUNTIME-LOAD] reason= mapping
+  src/security/capsule_attest/verify.rs   verify_capsule_attestation and the 48-byte context
   src/security/capsule_attest/trailer.rs  the NZKCAPS2 trailer format
   src/security/capsule_attest/layout.rs   POLICY_TREE_DEPTH, POLICY_EPOCH
   src/security/capsule_attest/policy_root.rs  the committed policy root
-  src/security/capsule_attest/error.rs    AttestError
-  src/crypto/zk_kernel/                     verify_enrolled and EnrolledSecretProof
+  src/security/capsule_attest/error.rs    AttestError and its as_str messages
+  src/crypto/zk_kernel/attest/verify.rs   verify_enrolled, the constant-time group check
+  src/lib.rs                              the nonos-production / nonos-zk-rollout exclusivity
 ```
+
+The zero-knowledge construction verified above, and the adversarial fuzzing that
+confirms the verifier rejects garbage, are on the
+[proof system](../subsystems/proof-system/pedersen-attestation.md) page; the
+signature chain that produces the other `reason=` values is on the
+[verified spawn](capsules-and-trust.md) page.

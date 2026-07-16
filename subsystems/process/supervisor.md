@@ -106,7 +106,55 @@ pointing at a pid that is about to be freed. This is the standard orphan-reparen
 process model needs, run at the moment the parent is finalized rather than left for the
 children to discover.
 
-## Source
+## Security analysis
+
+The supervisor and reaper sit at two trust levels, and the split is the point: init is unprivileged
+userspace that only spawns and observes, while the reaper is the kernel half that actually reclaims and
+scrubs. Three properties matter.
+
+**The reaper never blocks the timer.** `drain` runs in the timer interrupt via
+`drain_pending_teardowns` (`timer_trampoline.rs:193`) and takes the pending list with `try_lock`, not a
+blocking lock (`pending.rs:26`): if it cannot take the list this tick it simply reaps on the next one.
+This is the same interrupt discipline the [usercopy](../memory/usercopy.md) and preemption paths use, a
+path that runs at interrupt priority must never wait on a lock, and it means a contended pending list
+delays a reap by one tick rather than wedging the timer.
+
+**Finalize revokes and scrubs, idempotently.** `finalize_teardown` (`finalize.rs:11`) repeats every
+broker release from teardown, the device claim, IRQ, DMA, and PIO `release_all_for_pid` calls, so nothing
+the process held survives even if teardown was partial, and it clears the pid's saved interrupt and FPU
+state (`clear_interrupt_context`, `clear_fpu_state`) so no stale register state is carried by a reused
+pid. Its first step, `address_space::lifecycle::release`, is where the frames are actually freed and
+zeroed, which is the mechanism behind the [ZeroState guarantee](../memory/zeroization.md). It also
+unregisters the pid's service endpoints and IPC inbox before removing it from the table, so no message
+can be routed to a dead process.
+
+**No live children left pointing at a freed parent.** `reparent_orphans(pid)` (`core/init.rs:40`) runs
+before the parent leaves the table, moving any surviving children to a live parent, so a process that
+exits with children does not leave them referencing a pid about to be freed. The honest boundary: init's
+liveness model is passive by design. It does not probe capsules; a dead capsule is observed on its next
+IPC through the state machine that already tracks it, so a capsule that exits and is never contacted
+again is simply never noticed as dead by init, and it is the reaper, driven by the exit path enqueueing
+it, not init, that reclaims its memory. Init running at `Priority::Low` means it never competes with the
+capsules it launched, but it also means a busy system can starve the once-per-second lifecycle tick,
+which the fairness discussion on the [selection](../scheduler/selection.md) page frames.
+
+## Debugging the supervisor and reaper
+
+A process wedged in `Zombie` and never reaching `Terminated` is the headline reaper failure: the
+pending list is not draining. The two causes are the timer not firing `drain_pending_teardowns` at all,
+no ticks, or the `try_lock` in `drain` losing every tick to a held pending-list lock, in which case
+zombies pile up but each individual reap still eventually runs. Because `drain` reaps all pending pids it
+manages to take in one pass, a single stuck zombie is more likely a `finalize_teardown` that faulted
+partway than a drain that never ran. A capsule's memory not being scrubbed after exit points at
+`finalize_teardown`'s first step, `address_space::lifecycle::release`, not reaching the frame free, since
+that is the only place the zeroing happens. A message routed to a dead pid, or an endpoint that still
+resolves after exit, means `unregister_endpoints_for_pid` or `unregister_for_pid` did not run, which is a
+finalize that returned early. On the init side, a system that boots but a later capsule never starts is a
+spawn-order problem in `run_init` (`entry.rs:20`), a dependency spawned after the capsule that needs it,
+and a lifecycle tick that stops advancing is init being starved at `Priority::Low` rather than the loop
+itself failing.
+
+## Source map
 
 ```
   src/userspace/init/entry.rs                    run_init, the capsule spawn order
@@ -114,4 +162,11 @@ children to discover.
   src/process/exit/pending.rs                     the zombie pending-list and drain
   src/process/exit/finalize.rs                    finalize_teardown
   src/interrupts/isr/timer_trampoline.rs          the timer-driven reap
+  src/process/core/init.rs                        reparent_orphans
 ```
+
+Every reference above is verified against those trees. The first phase of exit that enqueues the zombie
+is on the [lifecycle](lifecycle.md) page; the broker releases finalize repeats are on the
+[claim](../hardware-broker/claim.md) page; the frame zeroing behind reclaim is on the
+[zeroization](../memory/zeroization.md) page; and the `Priority::Low` fairness note ties to the
+[selection](../scheduler/selection.md) page.

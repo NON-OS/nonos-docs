@@ -778,3 +778,26 @@ Where each subsystem lives, for jumping straight into the tree:
 This is the whole map. The pages under `abi/`, `security/`, and `subsystems/`
 zoom into each box with the same standard: cite the code, draw the real shape,
 no claims that the tree does not back.
+
+## Where to go deeper
+
+Each numbered section above has a matching deep page. The pointers below route
+from a section to the page that expands it.
+
+| Section | Deep page |
+|---------|-----------|
+| 4 Boot sequence | [subsystems/boot/](../subsystems/boot/README.md) |
+| 5 Memory model | [subsystems/memory/](../subsystems/memory/README.md) |
+| 6 The capsule, 7 Verified spawn | [security/capsules-and-trust.md](../security/capsules-and-trust.md), [subsystems/elf-loader/](../subsystems/elf-loader/README.md) |
+| 8 Capability model | [security/capabilities-and-tokens.md](../security/capabilities-and-tokens.md) |
+| 9 Syscall ABI | [subsystems/syscall/](../subsystems/syscall/README.md), [abi/](../abi/) |
+| 10 IPC | [subsystems/ipc/](../subsystems/ipc/README.md) |
+| 11 Scheduler | [subsystems/scheduler/](../subsystems/scheduler/README.md), [subsystems/process/](../subsystems/process/README.md) |
+| 12 Hardware broker | [subsystems/hardware-broker/](../subsystems/hardware-broker/README.md), [subsystems/interrupts/](../subsystems/interrupts/README.md) |
+| 13 Input path | [subsystems/input/](../subsystems/input/README.md) |
+| 14 Graphics and surface path | [subsystems/graphics/](../subsystems/graphics/README.md) |
+| 15 Crypto stack | [subsystems/crypto/](../subsystems/crypto/README.md), [subsystems/proof-system/](../subsystems/proof-system/README.md) |
+
+The [subsystems index](../subsystems/README.md) lists every deep page, and the
+[security index](../security/README.md) covers the admission and enforcement
+pipeline in full.

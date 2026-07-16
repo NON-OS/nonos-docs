@@ -44,13 +44,62 @@ own capsule. A decode failure returns an error rather than a partial surface.
 ## Honest scope
 
 The service is stateless and holds no session between requests; the returned surface lives in the shared
-surface registry. The one stated limit is the pixel budget: the decode buffer caps the output size (a
-16K-pixel limit), so a very large image is not decoded in one call, and there is no streaming decode.
+surface registry. The one stated limit is the pixel budget: the decode buffer is `MAX_PIXELS = 16384`
+32-bit pixels (`src/server/handlers/decode.rs:23`), so a very large image is not decoded in one call, and
+there is no streaming decode. The IPC payload cap is 128 KiB (`IPC_PAYLOAD_MAX = 131072`,
+`src/protocol/limits.rs:17`), which bounds the compressed input a single request can carry.
 
-## Source
+## Security analysis
+
+The mask is `0x1819` (`CAPSULE_REQUIRED_CAPS` in `userland/capsule_image_codec/Capsule.mk`), decoding to
+`CoreExec | IPC | Memory | GraphicsDisplayQuery | GraphicsSurfaceCreate` against
+`src/capabilities/types.rs`. It has `GraphicsSurfaceCreate` because a decode ends by registering the
+decoded pixels as an ARGB surface and returning the handle (`src/server/handlers/surface.rs:48`,
+`mk_surface_register`), so the caller gets a surface it can hand to the compositor rather than a raw copy
+of the pixels back over IPC. It does not hold `GraphicsSurfaceMap` or `GraphicsPresent`: the codec creates
+surfaces, it does not map arbitrary ones or paint to the screen.
+
+The reason this capsule exists at all is isolation, and the mask is what makes the isolation worth having.
+
+- **Untrusted input, contained blast radius.** Every image is attacker-influenced bytes, and the decoders
+  are real format parsers (`nonos_toolkit::image::{png, bmp, jpeg, lz4_raw}`) running over them, which is
+  exactly the class of code that has parser bugs. The mask has no `FileSystem`, no `Network`, no
+  `Hardware`, and no `Crypto`, so a decoder that is subverted by a malformed image is trapped in a capsule
+  that can create a surface and reply, and nothing else. It cannot read a file, open a socket, or reach a
+  device off the back of a parser exploit.
+- **Bounded output.** The fixed `MAX_PIXELS` buffer means a crafted image cannot make the codec allocate an
+  unbounded surface, and a decode that would overflow the budget fails rather than truncating into a partial
+  surface (`src/server/handlers/decode.rs`).
+- **Stateless.** No session is carried between requests, so one caller's image cannot influence another's
+  decode; the only shared thing produced is the surface, which is owned by the surface registry once
+  registered.
+
+## Debugging
+
+The codec registers as `image_codec` on port 4412 and is reached by `mk_service_lookup("image_codec")`.
+The kernel spawn marker is:
 
 ```
-  userland/capsule_image_codec/src/server/runner.rs     the loop
-  userland/capsule_image_codec/src/server/handlers/decode.rs   the format dispatch + surface register
+  [SPAWN] name=image_codec pid=0x... caps=0x1819 entry=0x...
+```
+
+`caps=0x1819` confirms it was admitted with `CoreExec | IPC | Memory | GraphicsDisplayQuery |
+GraphicsSurfaceCreate`; if a build ever changed the requested caps, that number is where it shows.
+
+The failure signatures are on the wire. A decode that fails (a truncated or malformed image, or one that
+exceeds the pixel budget) returns an error status through `fail` rather than a surface handle
+(`src/server/handlers/decode.rs:36`), so a caller that gets a nonzero status and no handle is looking at a
+bad image, not a dead codec. An op outside 1..5 is rejected. A request whose compressed body exceeds the
+128 KiB payload cap is refused before decode. Because the service is stateless, a codec that decodes one
+image and fails the next is behaving correctly on two different inputs, not degrading.
+
+## Source map
+
+```
+  userland/capsule_image_codec/src/server/runner.rs            the 128 KiB-buffer loop
+  userland/capsule_image_codec/src/server/handlers/decode.rs   format dispatch, MAX_PIXELS, fail path
+  userland/capsule_image_codec/src/server/handlers/surface.rs  register the decoded ARGB surface
+  userland/capsule_image_codec/src/protocol/{ops.rs, limits.rs} the GMIN ops and IPC_PAYLOAD_MAX
+  userland/capsule_image_codec/Capsule.mk                      CAPSULE_REQUIRED_CAPS = 0x1819, endpoint 4412
   (decoders) nonos_toolkit::image::{png, bmp, jpeg, lz4_raw}
 ```

@@ -131,6 +131,34 @@ global.
   are non-sensitive.
 - **Fail-closed decode**: a malformed frame is `EINVAL`, not a dropped request.
 
+The capability mask is `0x39` (`Capsule.mk`, `CAPSULE_REQUIRED_CAPS`), which decodes to CoreExec (1), IPC
+(8), Memory (16), and Crypto (32), the same set as the [keyring](keyring.md) and the [crypto pool](crypto.md).
+It holds Crypto because `RDRAND` and the kernel-routed RNG are reached through the crypto/random syscall
+path; it holds IPC and Memory to be a service. It holds no hardware capability (no Driver, Mmio, Irq, Dma,
+Pio), which is worth stating precisely because `RDRAND` *is* a hardware source: the instruction is executed
+in the capsule's own context under a `target_feature` gate, not by claiming a device through the broker, so
+no device claim, MMIO map, or IRQ binding is involved and none is granted. It holds no FileSystem and no
+Network, so the random bytes it serves cannot be written to disk or shipped off-box by this capsule. Its
+isolation is trivial because it holds no per-caller state and no secret: there is nothing to leak between
+callers, and the four observability counters are non-sensitive. The honest boundary is that the mask does
+not gate `GET_STATS`, so any caller can read the counters, and there is no boot-time health check of the
+source, as the [gaps](#honest-gaps) note.
+
+## Debugging
+
+The service is `entropy_pool` on port 4100 (`Capsule.mk`, `service:4100:entropy_pool`), reply endpoint
+`0x1_0000_0003`, brought up at `spawn_plan/core.rs:54` as `boot::capsule("ENTROPY", "entropy", ...)` from
+`src/security/entropy_capsule/`. It prints `[ENTROPY] capsule spawned` through `capsule_boot::boot` on
+success, or a `[ERROR]` line with the `SpawnError` (framebuffer under `NONOS_FBCONSOLE=1`). A present
+marker means `mk_service_lookup("entropy_pool")` resolves for callers; an absent one means the pool never
+registered. The distinctive failure signature here is hardware, not policy: a healthy request returns
+exactly the requested bytes, but if `rdrand_fill` gives up after 32 retries on a stalled source, `pool.fill`
+returns `-5` and the handler answers `EIO`, and the `source_failures` counter increments. So the way to
+tell a dead entropy source from a busy one is `GET_STATS`: a rising `source_failures` count with `EIO`
+replies is the CPU generator failing, which surfaces at request time rather than at boot because there is
+no startup probe. An oversize draw is `EMSGSIZE` (over the 4096 ceiling) and a short or malformed frame is
+`EINVAL`, both distinct from the `EIO` that means the hardware itself refused.
+
 ## Honest gaps
 
 Stated plainly: there is no boot-time health check of `RDRAND` availability, so a persistent hardware

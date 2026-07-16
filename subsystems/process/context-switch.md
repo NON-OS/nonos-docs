@@ -99,7 +99,56 @@ and the resume path. The scheduler that decides which pid to switch to, and call
 here, is arch-neutral; this file is where its decision becomes an actual ring transition
 on x86_64.
 
-## Source
+## Security analysis
+
+A context switch is a privilege boundary as much as a scheduling event: it decides where the CPU
+lands next and in which address space, so a mistake here reads or runs one capsule's state under
+another capsule's authority. Three properties keep it honest.
+
+**No privilege escalation on entry.** The one path that drops to ring 3 is `try_first_entry`
+(`first_entry.rs:28`), and it enters user mode only through `return_to_usermode`, an `iretq` over a
+frame the process was created with, never a synthesised one. Before that `iretq` it makes the kernel
+stack a hard precondition: `kernel_stack_top` of zero means no landing pad for the next trap, and rather
+than enter ring 3 with nowhere for a syscall or interrupt to return, the process is marked
+`Terminated(-1)` and the switch aborts. The TSS RSP0 is set to that stack (`gdt::set_kernel_stack`)
+before the transition, so a trap from the new ring-3 code lands on a kernel stack the kernel chose, not
+on whatever the capsule left in RSP.
+
+**Address-space isolation is re-established before the process runs.** `try_first_entry` loads the
+process's own page-table root, `switch_to_process_address_space(pid)` for a real address space
+(`api/address_space.rs:40`) or the inherited CR3 loaded directly for a thread, and only then sets state
+`Running` and does the `iretq`. The CR3 is switched while still in the kernel half, so the incoming
+capsule sees only its own low-half user mappings plus the shared high-half kernel; it cannot observe the
+outgoing capsule's user pages because the root that mapped them is no longer live. A thread is the one
+deliberate exception: it shares its parent's CR3 on purpose, which the resume comment states outright.
+
+**The kernel continuation cannot be skipped.** The dispatch order in
+`switch_to_user_pcb_x86_64` (`dispatch.rs:39`) checks `INTERRUPT_SAVED_CONTEXTS` for a saved kernel
+context before it tries the user resume, because a pid that blocked inside a syscall can hold both a
+stale user-mode trap snapshot and a live kernel resume context at once. Resuming the stale user frame
+would re-enter ring 3 at an arbitrary old RIP and skip the syscall continuation, which is the bug the
+ordering exists to prevent. The honest boundary: this file is the x86_64 realisation only. The
+FPU/SIMD restore is state-clearing, not a covert-channel scrub, and cross-CPU consistency of the saved
+contexts rests on the map's own locking, not on anything this path adds.
+
+## Debugging the context switch
+
+The dispatcher emits a `[DISPATCH]` serial trace (`dispatch.rs:26`) that names which of the three ways
+in it took for a given pid: `kernel ctx`, `user ctx`, or `fallback kernel`. The trace is gated to a
+handful of pids and the first 64 events, so it is a bring-up aid, not a running log, but it is the first
+thing to read when a process is entered wrong. A capsule that was mid-syscall and comes back running at
+the wrong instruction is the classic symptom of the priority rule being violated: expect `kernel ctx`
+in the trace, and a `user ctx` there for a pid that should have resumed in the kernel is the bug. A
+process that vanishes the instant it is first scheduled, never reaching its ELF entry, is almost always
+the kernel-stack precondition firing: `try_first_entry` marks it `Terminated(-1)` when
+`kernel_stack_top` is zero or `gdt::set_kernel_stack` fails, so the process is dead before the `iretq`,
+and the thing to check is whether creation allocated its kernel stack. A fault taken during the switch
+itself, a page fault as the new CR3 loads or the `iretq` frame is read, points at a corrupt
+`pending_user_entry` or a CR3 that does not map the entry point; because the FPU is brought up from a
+clean `init_fpu` when the process has no saved state (`first_entry.rs:61`), a floating-point capsule
+that traps immediately on entry instead points back at the MXCSR init, not at the switch.
+
+## Source map
 
 ```
   src/arch/x86_64/context/switch/dispatch.rs     the dispatch and its priority rule
@@ -108,3 +157,9 @@ on x86_64.
   src/arch/x86_64/context/switch/kernel_thread.rs  resuming a kernel context
   src/process/scheduler/selection/switching.rs     the scheduler-side switch
 ```
+
+Every reference above is verified against those trees. The PCB fields this path consumes,
+`pending_user_entry`, `saved_user_context`, `kernel_stack_top`, `cr3`, are documented on the
+[PCB](pcb.md) page; the scheduler decision that calls in here is on the
+[selection](../scheduler/selection.md) and [preemption](../scheduler/preemption.md) pages; and the
+address-space root it loads is set up during creation on the [lifecycle](lifecycle.md) page.

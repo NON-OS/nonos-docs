@@ -12,14 +12,13 @@ not work, this page points to the exact source path that should be inspected.
 ## 1. Boot to runqueue
 
 The boot path starts in `run_init`, runs the proof and RAMFS phases, spawns core
-services, drivers, VFS, network, the launcher broker, desktop, market, validation
-tests, then enters the supervisor loop (`src/userspace/init/entry.rs:25`,
-`src/userspace/init/entry.rs:27`, `src/userspace/init/entry.rs:28`,
+services, display core, drivers, VFS, network, desktop, market, and the app
+fleet, then enters the supervisor loop (`src/userspace/init/entry.rs:25`,
+`src/userspace/init/entry.rs:26`, `src/userspace/init/entry.rs:27`,
+`src/userspace/init/entry.rs:28`, `src/userspace/init/entry.rs:29`,
 `src/userspace/init/entry.rs:30`, `src/userspace/init/entry.rs:31`,
 `src/userspace/init/entry.rs:32`, `src/userspace/init/entry.rs:33`,
-`src/userspace/init/entry.rs:34`, `src/userspace/init/entry.rs:35`,
-`src/userspace/init/entry.rs:36`, `src/userspace/init/entry.rs:37`,
-`src/userspace/init/entry.rs:42`).
+`src/userspace/init/entry.rs:38`).
 
 The spawn planner groups work by dependency. Driver startup calls virtio, bus,
 input, NIC, USB, and storage groups in order
@@ -83,46 +82,22 @@ endpoint, and adds the pid to the runqueue
 
 ## 2. App launch workflow
 
-The launcher broker is registered before desktop startup. It creates a
-kernel-owned inbox for `desktop.launcher`, registers service port `4700`, and
-requires IPC capability on the endpoint (`src/userspace/init/entry.rs:34`,
-`src/userspace/init/entry.rs:35`, `src/userspace/init/launcher/register.rs:19`,
-`src/userspace/init/launcher/register.rs:20`,
-`src/userspace/init/launcher/register.rs:21`,
-`src/userspace/init/launcher/register.rs:23`,
-`src/userspace/init/launcher/register.rs:24`,
-`src/userspace/init/launcher/register.rs:25`).
+The apps are spawned once at boot by `spawn_apps`, so there is no launch broker
+and a taskbar click never has to start anything
+(`src/userspace/init/spawn_plan/apps.rs:17`). The desktop shell launcher table
+carries nine entries, each an icon, a label, and a service name: terminal, files,
+editor, settings, process manager, about, calculator, snake, and wallet
+(`userland/capsule_desktop_shell/src/state/apps.rs:36`).
 
-The desktop shell launcher table carries seven launch ids and service names:
-terminal, file manager, text editor, settings, process manager, about, and
-calculator (`userland/capsule_desktop_shell/src/state/apps.rs:35`). A launcher
-request looks up the service pid first. If the target exists, shell sends a
-focus control frame to that pid. If the target does not exist, shell sends an
-8-byte launch frame to `desktop.launcher`
-(`userland/capsule_desktop_shell/src/server/handlers/launcher_request/request.rs:19`,
-`userland/capsule_desktop_shell/src/server/handlers/launcher_request/request.rs:20`,
-`userland/capsule_desktop_shell/src/server/handlers/launcher_request/request.rs:21`,
-`userland/capsule_desktop_shell/src/server/handlers/launcher_request/request.rs:23`,
-`userland/capsule_desktop_shell/src/server/handlers/launcher_request/launch_frame.rs:17`).
-
-The init broker drains messages from its inbox on every supervisor loop
-iteration. It authorizes only the current `desktop_shell` pid, decodes the
-`NLAU` frame, and calls the allowlist spawn function
-(`src/userspace/init/supervisor/loop_impl.rs:29`,
-`src/userspace/init/launcher/drain.rs:17`, `src/userspace/init/launcher/drain.rs:21`,
-`src/userspace/init/launcher/drain.rs:24`, `src/userspace/init/launcher/drain.rs:27`,
-`src/userspace/init/launcher/authorize.rs:19`,
-`src/userspace/init/launcher/authorize.rs:26`,
-`src/userspace/init/launcher/authorize.rs:29`). The allowlist checks whether the
-target app is already alive before spawning it
-(`src/userspace/init/launcher/spawn.rs:17`, `src/userspace/init/launcher/spawn.rs:19`,
-`src/userspace/init/launcher/spawn.rs:20`, `src/userspace/init/launcher/spawn.rs:21`,
-`src/userspace/init/launcher/spawn.rs:22`, `src/userspace/init/launcher/spawn.rs:23`,
-`src/userspace/init/launcher/spawn.rs:24`, `src/userspace/init/launcher/spawn.rs:25`,
-`src/userspace/init/launcher/spawn.rs:26`, `src/userspace/init/launcher/spawn.rs:27`,
-`src/userspace/init/launcher/spawn.rs:28`, `src/userspace/init/launcher/spawn.rs:29`,
-`src/userspace/init/launcher/spawn.rs:30`, `src/userspace/init/launcher/spawn.rs:31`,
-`src/userspace/init/launcher/spawn.rs:32`).
+A launcher click resolves to `launcher_request::request`, which looks up the
+app's service pid through `mk_service_lookup`. If the service resolves to a live
+pid, the shell sends that pid an eight-byte `NCTL` focus frame through
+`mk_ipc_send_to_pid`; if the lookup fails, the request returns false and the
+click does nothing, because the app was never spawned or has exited
+(`userland/capsule_desktop_shell/src/server/handlers/launcher_request.rs:26`,
+`userland/capsule_desktop_shell/src/server/handlers/launcher_request.rs:32`,
+`userland/capsule_desktop_shell/src/server/handlers/launcher_request.rs:42`,
+`userland/capsule_desktop_shell/src/server/handlers/launcher_focus.rs:24`).
 
 ```
 +------------------+
@@ -135,10 +110,10 @@ target app is already alive before spawning it
     |          |
     | found    | missing
     |          |
-+---+---+  +---+----------------+
-| NCTL  |  | NLAU to init       |
-| focus |  | verified spawn     |
-+-------+  +--------------------+
++---+---+  +---+------+
+| NCTL  |  | ignored  |
+| focus |  |          |
++-------+  +----------+
 ```
 
 ## 3. Window open and render workflow
@@ -594,7 +569,7 @@ client calls the NIC driver service with an RX op and parses the payload
 | Symptom | First source path to inspect | Why |
 |---------|------------------------------|-----|
 | Capsule appears in boot log but client sees dead service | `src/services/lifecycle/state/liveness.rs:36` and `src/services/lifecycle/transport.rs:142` | Liveness checks pid state and transport rejects dead generation before enqueue. |
-| Launcher click does nothing | `userland/capsule_desktop_shell/src/server/handlers/launcher_request/request.rs:19` and `src/userspace/init/launcher/authorize.rs:19` | Shell either focuses an existing service or sends `NLAU`, and init rejects unauthorized senders. |
+| Launcher click does nothing | `userland/capsule_desktop_shell/src/server/handlers/launcher_request.rs:26` and `userland/capsule_desktop_shell/src/server/handlers/launcher_request.rs:32` | Apps are spawned at boot, so a click only focuses a live app; the service lookup returned no pid, meaning the app was never spawned or has exited. |
 | App opens but no pixels update | `userland/compositor/src/server/handlers/damage_commit.rs:21` and `userland/compositor/src/frame_pacer/tick.rs:23` | Damage must accumulate and frame pacer must transfer and flush the dirty rect. |
 | Keyboard reaches no app | `userland/capsule_input_router/src/route/keyboard.rs:25` and `userland/capsule_wm/src/server/handlers/window_focus.rs:22` | Keyboard uses WM focus and subscription mask before delivery. |
 | Pointer click misses windows | `userland/capsule_input_router/src/route/pointer/topmost_target.rs:20` and `userland/capsule_wm/src/server/handlers/query_topmost.rs:27` | Pointer routing depends on WM topmost hit testing. |

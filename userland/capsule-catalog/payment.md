@@ -89,6 +89,34 @@ append-then-drain; there is no persistence across a restart, and a full outbox r
   receipt with the same nonce.
 - **Bounded outbox**: the 1024-record cap bounds memory.
 
+The capability mask is `0x19` (`Capsule.mk`, `CAPSULE_REQUIRED_CAPS`), decoding to CoreExec (1), IPC (8),
+and Memory (16). This is the correct mask for a capsule that touches neither keys nor funds: it holds no
+Crypto, because it delegates all signing to the [keyring](keyring.md) and only marshals the receipt fields;
+no Network, because it does not settle on-chain itself but queues records for an off-capsule drainer; no
+FileSystem, so the outbox is RAM-only with no persistence; and no hardware capability of any kind. The
+least-privilege reading is that a settlement rail is built here without any of the authority you would fear
+in one, no key custody, no fund custody, no wire access. Its isolation from the keyring is the design: the
+payment capsule reaches the keyring over IPC by resolving its port, and the keyring signs only for the
+caller's own wallet, so payment never sees a private key. The honest boundary, stated in the
+[gaps](#honest-gaps), is that the inbox has no caller attestation, so the authorization that a wallet
+actually consented lives in whether the caller holds the wallet and the keyring's owner-pid check, not in
+this capsule.
+
+## Debugging
+
+The service is `payment` on port 4110 (`Capsule.mk`, `service:4110:payment`), reply endpoint
+`0x1_0000_0010`. Unlike the core service pools, this capsule is built into the image (the Makefile includes
+`userland/capsule_payment/Capsule.mk`) but is *not* spawned by the kernel init spawn plan, so there is no
+`[PAYMENT] capsule spawned` marker in the boot fleet the way there is for ramfs or keyring; it is launched
+on demand and registers under its manifest endpoint. So the way to tell it is up is not a boot marker but
+whether `mk_service_lookup("payment")` resolves, which is exactly what the [installer](installer.md)'s paid
+path does: if payment is not reachable that path returns `EAGAIN`, and that `EAGAIN` on a paid install is
+the clearest signal the capsule is not registered. Once running, the request-time failure signatures are
+`EAGAIN` when the keyring port cannot be resolved (so the receipt cannot be signed) or when the outbox is
+full at its 1024-record cap, and `EINVAL` when the wall clock reads zero (no time base for the epoch and
+expiry) or the 124-byte `pay` payload is malformed. A `pay` that returns a 32-byte `struct_hash` succeeded;
+anything else is one of those two errnos.
+
 ## Honest gaps
 
 Stated plainly: the payment capsule has **no caller attestation**, its inbox is a public port, so any

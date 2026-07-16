@@ -59,8 +59,52 @@ claims not held by a given pid and is called from the process exit path so a dyi
 cannot leak a device claim. The [revocation](revocation.md) page covers how the claim drop is
 coordinated with dropping the grants that depended on it.
 
-## Source
+## Security analysis
+
+The claim is the root of the hardware-authority tree, so its two properties propagate to every grant in
+the system. Every [MMIO](mmio.md), [DMA](dma.md), [IRQ](irq.md), and [PIO](pio.md) path opens with the
+same `lookup(device_id)` then `pid` then `epoch` check, which means a weakness in the claim would be a
+weakness in all four. Three properties hold it.
+
+**Exclusivity.** `AlreadyClaimed` guarantees a device has at most one holder, so two capsules can never
+both be issued grants for the same hardware. This is what makes a driver capsule's ownership of its
+device meaningful: nothing else can be mapping its BARs or taking its interrupts underneath it.
+
+**The epoch is the anti-stale linchpin.** It is a single monotonic counter bumped on every successful
+claim, and every grant carries the epoch it was issued under. When a device is released and re-claimed,
+by the same capsule or a different one, the new claim gets a fresh epoch, so any grant handle quoting the
+old epoch fails `StaleEpoch` at its own path. This closes the use-after-release window a capability system
+must close: a stale grant from a prior ownership cannot be replayed against the device after it changed
+hands. The check is verbatim at the head of all four grant classes, so there is exactly one place the
+rule lives.
+
+**Holder-only mutation.** `release` refuses a `pid` that is not the recorded holder (`NotHolder`), so a
+capsule cannot drop or churn another capsule's claim to force a re-claim. The claim table is a single
+global mutex, so claim and release are serialized and the epoch counter never races. The involuntary
+path, `release_all_for_pid` from process exit, guarantees a dying capsule leaks no claim.
+
+## Debugging device claims
+
+The four `ClaimError` variants each name a distinct situation, and two of them are the common bring-up
+failures. A driver whose claim retry loop never exits (the yield-and-retry in every driver's `main.rs`)
+is being refused one of two ways. **`AlreadyClaimed`** means another capsule already holds the device:
+either two drivers were spawned for the same hardware, or a previous instance did not release it. This
+is a spawn-plan problem, not a device problem. **`UnknownDevice`** means the `device_id` is not in the
+broker table at all, which is a discovery problem one layer down: the device was never enumerated from
+PCI or recovered from ACPI, so no driver can claim it. The tool for the second case is a
+`NONOS_DEVICE_CENSUS=1` build, which renders the broker device table to the framebuffer and holds, so you
+can read off whether the device is present before any driver runs. Separately, a `StaleEpoch` seen not at
+claim but at a *grant* means the device changed hands between the claim and the grant, a release race
+worth tracing. `NotHolder` and `NotClaimed` on a release are the mirror: releasing a device you do not
+hold, or one nobody holds.
+
+## Source map
 
 ```
-  src/hardware/broker/claim.rs   Claim, the epoch counter, claim / release / release_all_for_pid
+  src/hardware/broker/claim.rs   Claim, the epoch counter, claim / release / release_all_for_pid,
+                                 and the ClaimError variants
 ```
+
+Every reference above is verified against that file. The four grant classes that re-check this claim and
+epoch are on the [MMIO](mmio.md), [DMA](dma.md), [IRQ](irq.md), and [PIO](pio.md) pages; the exit wiring
+that calls `release_all_for_pid` is on the [revocation](revocation.md) page.

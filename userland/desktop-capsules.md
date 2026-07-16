@@ -280,3 +280,73 @@ healthcheck, theme apply, theme get, animation tick, and component render
 | Wallpaper does not apply | `userland/capsule_wallpaper/src/server/runner/dispatch.rs:27` | Wallpaper changes enter through set wallpaper, policy, or fade handlers. |
 | Decoded image has no surface handle | `userland/capsule_image_codec/src/server/handlers/decode.rs:36` | Decode must register an ARGB surface before replying. |
 | Toolkit colors do not update | `userland/toolkit/src/server/dispatch.rs:28` | Theme apply is the toolkit path that mutates theme state. |
+
+## 5. Security analysis
+
+The desktop is deliberately not one privileged process, and the capability masks show
+why that matters. The compositor is the only desktop service that carries graphics
+authority beyond surface create; its mask is `0x7919`, which adds `GraphicsSurfaceMap`
+and `GraphicsPresent` on top of the display-query and surface-create bits, because it is
+the one capsule that maps shared surfaces and presents pixels to the display backend
+(`src/capabilities/types.rs:54`). The WM and the input router carry only `0x19`, CoreExec
+plus IPC plus Memory, because they move metadata and route events, not pixels; neither can
+present to the display even if it wanted to. The desktop shell sits at `0x1819`, the same
+app-class mask its clients hold. So the trust is split: the compositor is trusted with the
+framebuffer, the WM is trusted with window geometry and focus, the router is trusted with
+input routing, and no single one of them holds all three. A fault in the WM cannot corrupt
+the framebuffer, and a fault in the compositor cannot silently re-route input.
+
+The state split enforces this at the data level, not just the process level. The
+compositor owns scenes, damage, focus, cursor, and surface attach state; the WM owns
+window lifecycle, geometry, z-order, and focus; the input router owns subscriptions,
+grabs, and delivery. A capsule that wants to change window geometry has to go through the
+WM's move and resize handlers, and a capsule that wants input has to subscribe through the
+router; there is no shared mutable desktop state any of them can reach directly. Input
+grabs are the sharpest instance: the router reserves exclusive keyboard and pointer grabs
+to three named system capsules and refuses everyone else with `E_ACCES`, so the desktop
+shell and ordinary apps see only the events routed to them by focus and hit test, never an
+exclusive capture (the gate is on the [input router page](capsule-catalog/input-router.md)).
+
+Login is the session-authority capsule, and it holds ports to the keyring, the desktop
+shell, and the compositor plus a locked-or-unlocked session flag
+(`userland/capsule_login/src/state/context/types.rs:16`). It is the capsule that decides
+when a session is live, and it is separate from the shell it gates, so the lock state is
+not something the shell or an app can flip on its own.
+
+## 6. Debugging the desktop
+
+The desktop is a set of services with separate state tables, so the debugging rule is to
+follow the service that owns the state you are observing, which is exactly what the Failure
+Map in section 4 encodes. A surface that appears but never repaints is a damage-commit
+question at the compositor, not a paint bug in the app; a window that cannot move is the
+WM's geometry path; an input subscription that has no effect is the router, not the
+compositor or WM. Each row of that table names the first source line to open for a specific
+symptom, and the reason it points where it does.
+
+Two failure shapes cross service boundaries and are worth naming separately. A window that
+draws but does not receive input is usually a focus or subscription mismatch: the router
+delivers by the WM's focus answer, so if the WM reports a different window focused than the
+one on screen, keys go to the wrong place. And a desktop that boots but shows nothing is a
+spawn-order problem, not a render problem; the desktop fleet spawns GUI core first, then
+WM, wallpaper, shell, and services (`src/userspace/init/spawn_plan/desktop_fleet.rs:17`),
+so a blank screen with the compositor up but the WM down is a different failure than one
+where the compositor never spawned. The `capsule spawned` boot marker for each service is
+the ground truth for which of them actually started.
+
+## 7. Source map
+
+```
+  userland/compositor/src/server/runner/dispatch.rs      scenes, damage, focus, cursor, present
+  userland/capsule_wm/src/server/runner/dispatch.rs       window lifecycle, geometry, z-order
+  userland/capsule_input_router/src/server/drain_ipc.rs   subscribe, grab, and delivery
+  userland/capsule_desktop_shell/src/{state/context.rs, server/dispatch.rs}  tray, notify, spotlight
+  userland/capsule_login/src/state/context/types.rs       the locked/unlocked session state
+  userland/capsule_clipboard/src/{state/clipboard/types.rs, server/handlers/router.rs}  bounded history
+  userland/capsule_wallpaper/, capsule_wallpaper_catalog/  wallpaper apply and catalog chunks
+  userland/capsule_image_codec/src/server/                png, bmp, jpeg, lz4 decode to a surface
+  userland/toolkit/src/{theme/store/state.rs, server/dispatch.rs}  theme colors and render
+```
+
+The capability masks and endpoints for these services are in
+[the capsule inventory](capsules.md); the window and input contracts between them are on
+[the GUI contracts page](gui-contracts.md).

@@ -55,9 +55,57 @@ modules exist so the kernel builds and links, guaranteed complete by the fail-to
 It follows the same plan: architecture-ready, then QEMU, then hardware. This page documents the code that
 is there.
 
-## Source
+## Security analysis
+
+The security statement mirrors [aarch64](aarch64.md), scoped by the same maturity. riscv64 implements the
+full `ArchOps` contract, so the two isolation primitives are real on this target: `switch_address_space`
+writes `satp` and `flush_tlb_one` issues `sfence.vma`, and the fail-to-link discipline of the
+[boundary](boundary.md) guarantees they exist rather than silently no-opping. The kernel's isolation
+model depends on those two calls doing real work, and on riscv64 they do.
+
+The same caveat applies as on ARM: the Sv39/Sv48 translation regime, the PLIC routing that backs the
+[hardware broker's](../subsystems/hardware-broker/irq.md) IRQ grants on RISC-V, and the trap and
+interrupt handling have not been through runtime bring-up and hardware validation. The isolation
+properties are asserted by construction, not proven on silicon. Read x86_64 as the enforced path and
+riscv64 as architecture-ready.
+
+Two RISC-V specifics are worth noting for a security reader. First, SBI is a call into machine-mode
+firmware for the console, inter-hart interrupts, and the timer; that firmware sits below the supervisor
+the kernel runs in, so it is part of the trusted base on this target in a way x86 direct hardware access
+is not. Second, the CPU id is the hart id, the hardware thread identifier the PLIC and the IPI path
+reason about, so the same route-by-the-id-you-observe correctness edge holds as on the other backends.
+
+## Debugging
+
+riscv64 is pre-runtime, so its failure modes today are compile-and-link shaped, with hardware-shaped ones
+expected once bring-up starts.
+
+**A link failure on an `ArchOps` method for riscv64.** The fail-to-link discipline again: the backend
+must implement every primitive. The delegation layout maps a missing primitive to a specific module (the
+`satp` switch in `address_space`, `sfence.vma` in `tlb`, the SIE bit in `irq_enable`), and the fix is to
+complete that module, not to add a default.
+
+**No console output on bring-up.** The console can come up two ways on RISC-V: the `uart` module for a
+memory-mapped serial device, or SBI console calls into firmware. A silent bring-up points at whichever
+one the platform uses. On a fresh target the console is the first thing to prove and the primary
+debugging instrument.
+
+**A trap storm or an unhandled trap.** RISC-V funnels exceptions and interrupts through a trap vector;
+the `interrupts` module owns it. A repeating trap that is not decoded points there rather than at the
+generic layers above, which are written once and reach the platform through the arch seam.
+
+## Source map
 
 ```
-  src/arch/riscv64/abi/archops.rs   the ArchOps backend (delegating to the modules below)
-  src/arch/riscv64/plic/, sbi/, mmu/, timer/, interrupts/, uart/   the RISC-V machinery
+  src/arch/riscv64/abi/archops.rs   the ArchOps backend, delegating to the modules below
+  src/arch/riscv64/abi/             the per-primitive modules (cpu_id, time, tlb, address_space, irq_*)
+  src/arch/riscv64/plic/            the Platform-Level Interrupt Controller, the IRQ backend on RISC-V
+  src/arch/riscv64/sbi/             the Supervisor Binary Interface (console, IPI, timer)
+  src/arch/riscv64/mmu/             the Sv39/Sv48 page-table format behind the shared paging manager
+  src/arch/riscv64/timer/, interrupts/, uart/   mtime, trap handling, serial console
+  src/arch/fdt/                     the flattened-device-tree platform discovery this backend uses
 ```
+
+The `ArchOps` contract is on the [boundary](boundary.md) page, the device-tree discovery is on the
+[platform discovery](platform-discovery.md) page, and the PLIC's role as the IRQ backend is on the
+[IRQ](../subsystems/hardware-broker/irq.md) page. Every reference is verified against `src/arch/riscv64/`.

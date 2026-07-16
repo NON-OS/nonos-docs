@@ -20,7 +20,7 @@ Pages in this section:
 | [Desktop Service Capsules](desktop-capsules.md) | Compositor, WM, input router, shell, wallpaper, image, clipboard, login, and toolkit internals. |
 | [GUI Contracts](gui-contracts.md) | Window placement, move, resize, close, focus, cursor, and input delivery contracts. |
 | [Protocol Atlas](protocols.md) | IPC op tables, app control frames, launch frames, and per-family protocol surfaces. |
-| [Lifecycle and Launch](lifecycle.md) | Init spawn order, verified spawn, lifecycle tracking, supervisor loop, and desktop launch broker. |
+| [Lifecycle and Launch](lifecycle.md) | Init spawn order, verified spawn, lifecycle tracking, supervisor loop, and taskbar focus. |
 | [Runtime Workflows](workflows.md) | End-to-end boot, launch, render, input, window, storage, network, and debug workflows. |
 | [Capsule Inventory](capsules.md) | Complete userland capsule inventory with handles, endpoints, caps, entrypoints, and protocol refs. |
 | [Applications](apps.md) | App skeleton contract, app manifests, deterministic window geometry, input masks, and direct GUI apps. |
@@ -92,13 +92,12 @@ payloads, and requested capability bits, then calls `spawn_verified`
 ## 2. Init sequence
 
 The init capsule starts in `run_init`. Its ordered spawn sequence is RAMFS,
-RAMFS validation, core services, drivers, VFS, network, launcher registration,
-desktop, market, validation checks, then the supervisor loop
-(`src/userspace/init/entry.rs:25`). The source
-spells the sequence directly: `spawn_ramfs`, `spawn_core_after_ramfs`,
-`spawn_drivers`, `spawn_vfs`, `spawn_network`, `launcher::register`,
-`spawn_desktop`, and `spawn_market` are called before `init_loop`
-(`src/userspace/init/entry.rs:28`).
+core services, display core, drivers, VFS, network, desktop, market, apps, then
+the supervisor loop (`src/userspace/init/entry.rs:25`). The source spells the
+sequence directly: `spawn_ramfs`, `spawn_core_after_ramfs`, `spawn_display_core`,
+`spawn_drivers`, `spawn_vfs`, `spawn_network`, `spawn_desktop`, `spawn_market`,
+and `spawn_apps` are called before `init_loop`
+(`src/userspace/init/entry.rs:25`, `src/userspace/init/entry.rs:33`).
 
 The orchestrator splits those phases into small entry points. Drivers are
 grouped as virtio, bus, input, NIC, USB, and storage
@@ -126,11 +125,11 @@ desktop shell, and desktop services (`src/userspace/init/spawn_plan/desktop_flee
 +------------+-------------+
              |
 +------------+-------------+
-| desktop launcher broker  |
+| desktop and market       |
 +------------+-------------+
              |
 +------------+-------------+
-| desktop and market       |
+| app fleet (spawn_apps)   |
 +------------+-------------+
              |
 +------------+-------------+
@@ -145,22 +144,20 @@ desktop shell, and desktop services (`src/userspace/init/spawn_plan/desktop_flee
 | Driver groups | `src/userspace/init/spawn_plan/orchestrator.rs:29` |
 | VFS | `src/userspace/init/entry.rs:32` |
 | Network stack | `src/userspace/init/spawn_plan/network.rs:17` |
-| Launcher broker | `src/userspace/init/entry.rs:34` |
 | Desktop stack | `src/userspace/init/spawn_plan/desktop_fleet.rs:17` |
 | Market | `src/userspace/init/spawn_plan/core.rs:35` |
+| App fleet | `src/userspace/init/spawn_plan/apps.rs:17` |
 
 ## 3. Supervisor loop
 
 After spawning, init lowers its own priority and yields one hundred times before
-entering the supervisor loop
-(`src/userspace/init/entry/lower_init_priority.rs:17`,
-`src/userspace/init/entry/yield_after_spawns.rs:17`). The loop ticks the
-lifecycle registry once per second, drains the launcher inbox, and then yields
-(`src/userspace/init/supervisor/loop_impl.rs:25`,
-`src/userspace/init/supervisor/loop_impl.rs:29`).
-With the setup wizard feature enabled, the same loop waits until the setup
-wizard is no longer alive, then calls `spawn_post_wizard`
-(`src/userspace/init/supervisor/loop_impl.rs:35`).
+entering the supervisor loop (`src/userspace/init/entry.rs:73`,
+`src/userspace/init/entry.rs:82`). The loop ticks the lifecycle registry once
+per second, then yields (`src/userspace/init/supervisor/loop_impl.rs:31`,
+`src/userspace/init/supervisor/loop_impl.rs:40`); it does not drain any launcher
+inbox, since the apps are already running from boot. With the setup wizard
+feature enabled, the same loop waits until the setup wizard is no longer alive,
+then calls `spawn_post_wizard` (`src/userspace/init/supervisor/loop_impl.rs:35`).
 
 The lifecycle state is capsule-local. The desktop shell mirror holds a static
 `CapsuleState`, records the pid after spawn, and exposes a shared accessor
@@ -184,3 +181,82 @@ Install registers the reply inbox, creates the process, registers a per-process
 inbox, loads the ELF, installs caps, allocates kernel and user stacks, builds
 the first user context, registers the service endpoint, and adds the pid to the
 runqueue (`src/kernel_core/process_spawn/capsule_spawn/runner/install/install.rs:30`).
+
+## 5. Security analysis
+
+The security of the whole userland rests on a single property: nothing runs that
+was not verified first. Preflight is the gate, and it runs before the ELF is ever
+loaded. It decodes and verifies the NØNOS-ID certificate against the production
+policy and trust anchor, then verifies the manifest against the certificate, the
+verified identity, the trust anchor, the ELF bytes, the target triple, the
+requested caps, and the declared endpoints
+(`src/kernel_core/process_spawn/capsule_spawn/runner/preflight.rs:29`). Only if all
+of that holds does install load the binary. A capsule whose ELF does not match the
+hash in its signed manifest, whose target triple is wrong, or whose certificate is
+rejected never reaches the loader; the spawn returns a `SpawnError` and init logs
+it (`src/kernel_core/process_spawn/capsule_spawn/spec.rs:48`).
+
+The capability model is least privilege by construction, and the construction is
+the part that matters. The caps installed on the process come from the verified
+manifest result, not from the `requested_caps` the spawn site passed in
+(`src/kernel_core/process_spawn/capsule_spawn/runner/verified.rs:23`). The comment
+on that function states the rule directly: `requested_caps` is only the upper bound
+the spawn site is willing to grant for optional caps, and the installed set is what
+the signed manifest actually asked for. The manifest verifier enforces its own
+ceiling on top of that, rejecting a manifest whose caps exceed the certificate's
+grant with `CapsExceedCeiling` (`src/security/capsule_manifest/error.rs:50`). So a
+capsule cannot widen its own authority by asking for more at the spawn site, and it
+cannot ship a manifest that asks for more than its publisher was licensed to grant.
+The twenty-two capability bits (`src/capabilities/types.rs:81`) are the vocabulary;
+the manifest is the binding contract for which of them a given capsule holds.
+
+Isolation between capsules is the address-space boundary plus the named-endpoint
+boundary. Each capsule is a separate process with its own address space and its own
+per-process inbox, so one capsule cannot read another's memory or receive another's
+messages. They cooperate only through the service endpoints they registered and the
+reply inboxes they own, which is why the input router, the compositor, and the WM
+are separate services rather than one process: a fault or a compromise in one does
+not reach into the others.
+
+## 6. Debugging spawn and boot
+
+Every capsule that boots emits one marker. The init boot helper logs `capsule
+spawned` on success and registers the capsule with the lifecycle registry; on
+failure it logs the mapped error string and does not register
+(`src/userspace/init/capsule_boot/run.rs:29`,
+`src/userspace/init/capsule_boot/run.rs:32`). So the first question for a missing
+capsule is whether that line appeared. If it did not, the spawn failed, and the
+error string names which stage: `capsule binary not embedded (feature off)` means
+the mirror was built without its embed feature, `capsule ELF load failed` is a
+loader problem, `service endpoint registration failed` is an endpoint collision,
+and the certificate and manifest rejections carry their own reason
+(`src/userspace/init/capsule_boot/error.rs:21`). A capsule that spawned but then
+disappears is a runtime exit, not a spawn failure, and the lifecycle registry tick
+is what notices its pid went away
+(`src/userspace/init/supervisor/loop_impl.rs:25`).
+
+The init spawn order is deterministic and is the map for a boot that stalls partway.
+The sequence is RAMFS, core services, display core, drivers, VFS, network, desktop,
+market, then the app fleet (`src/userspace/init/entry.rs:25`). A boot that reaches the
+desktop markers but shows no window is a desktop-fleet problem; one that never
+reaches them stalled earlier, and the last `capsule spawned` line tells you which
+phase. Because each capsule's caps are logged as part of its identity, an `EPERM`
+seen at runtime traces back to the manifest that phase installed.
+
+## 7. Source map
+
+```
+  src/userspace/init/entry.rs                        run_init and the ordered spawn sequence
+  src/userspace/init/spawn_plan/                      the per-phase spawn entry points
+  src/userspace/init/capsule_boot/run.rs, error.rs   the boot marker and the error strings
+  src/kernel_core/process_spawn/capsule_spawn/spec.rs        CapsuleSpecVerified and SpawnError
+  src/kernel_core/process_spawn/capsule_spawn/runner/preflight.rs  cert and manifest verification
+  src/kernel_core/process_spawn/capsule_spawn/runner/verified.rs   install_caps from the manifest
+  src/kernel_core/process_spawn/capsule_spawn/runner/install/install.rs  the install steps
+  src/security/capsule_manifest/error.rs             the manifest rejection reasons
+  src/capabilities/types.rs                          the 22 capability bits
+```
+
+The syscall boundary each capsule compiles against is on
+[the syscall ABI page](../abi/syscalls.md); the lifecycle and launcher detail is on
+[the lifecycle page](lifecycle.md).

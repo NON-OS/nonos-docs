@@ -125,11 +125,50 @@ epoch and revocation checks and the signatures. Only after all of these pass doe
 verification check the anchor's signatures over the certificate, which is where
 the anchor keys above are used.
 
-## Source
+## Debugging an anchor rejection
+
+Everything the anchor decides against a certificate is an `IdCertVerifyError`, and
+at the capsule loader it collapses to `[RUNTIME-LOAD] FAILED reason=id_cert`, so
+the reason string does not tell you which anchor rule fired. The variant does, and
+the order in `checks::run` (`nonos_id_cert/verify/checks.rs:22`) is the key to
+reading it, because these run before the signature and short-circuit on the first
+hit.
+
+`EpochStale` is the anti-rollback rule: the certificate's `trust_anchor_epoch` is
+below the baked policy's `trust_anchor_epoch`, so it was issued under a retired
+generation. This is the expected failure right after an anchor epoch bump, and it
+means the certificate is not tampered, it is simply old; the fix is a certificate
+reissued under the current epoch, not a re-sign. `Revoked` and `NonosIdRevoked` are
+the anchor lists: the certificate's serial or its `nonos_id` is in
+`revoked_cert_serials` or `revoked_nonos_ids`, checked by `cert_serial_revoked` and
+`nonos_id_revoked` (`schema.rs:57`). `NotYetValid` and `Expired` are the validity
+window, and they only fire when the caller supplied a real clock; a boot path with
+no trusted time passes `None` and never produces these two, which is why a machine
+with an unset RTC does not see spurious `Expired` rejections.
+
+Only when all of those pass does the anchor reach the signature, and a failure
+there is `TrustAnchorPolicy` when the policy carried no key for the required
+algorithm, or `TrustAnchorBadSig(alg)` when a signature under that algorithm
+matched no anchor key (`verify/dispatch.rs:44`). So a `TrustAnchorBadSig` is the
+one anchor failure that genuinely means "wrong signing key or altered certificate
+bytes", cleanly separated from the epoch, revocation, and window rejections that
+never reached the signature at all. The third anchor list,
+`revoked_publisher_key_ids`, does not fire here; it is consulted one layer down
+when a manifest's publisher signature is checked, so a leaked manifest key surfaces
+as a [manifest](manifest-schema.md) rejection, not a certificate one.
+
+## Source map
 
 ```
   src/security/nonos_trust_anchor/baked.rs      the include_bytes policy constant
-  src/security/nonos_trust_anchor/schema.rs     NonosTrustAnchorPolicy, TrustAnchorKey
+  src/security/nonos_trust_anchor/schema.rs     NonosTrustAnchorPolicy, TrustAnchorKey, the revocation tests
   src/security/nonos_id_cert/verify/checks.rs   the epoch, revocation, and validity checks
   src/security/nonos_id_cert/verify/dispatch.rs the anchor signature verification
+  src/security/nonos_id_cert/error.rs           the IdCertVerifyError variants each check returns
 ```
+
+The certificate schema these checks read is on the
+[certificate page](certificate-schema.md); the pipeline that maps these into the
+`[RUNTIME-LOAD] reason=id_cert` line is on the
+[verified spawn](capsules-and-trust.md) page; the manifest-key revocation the
+anchor also carries is on the [revocation](revocation.md) page.

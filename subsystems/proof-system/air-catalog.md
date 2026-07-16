@@ -63,7 +63,59 @@ transitions are the Poseidon rounds and the absorb steps, and its boundary const
 input and the final squeezed challenge. So the recursive verifier does not trust the transcript; it
 proves it, which closes the gap a public-input challenge would leave open.
 
-## Source
+## Security analysis
+
+The catalog is not a boundary on its own; its security is what its gadgets let the [STARK](stark.md) prove
+soundly, and the sharp edge is the difference between an honest gadget and one that leaves a gap.
+
+**The consequential gadgets are exactly a verifier's operations, which is what makes recursion sound.**
+`poseidon` proves a preimage, `merkle_membership` and `multi_membership` prove openings under a committed
+root, `fri_fold` and `trace_fold` prove folds, and `fiat_shamir` proves a transcript challenge was
+squeezed. Those are the steps a STARK verifier performs, so a proof that all of them hold, wired together,
+is a proof that a verification ran. The soundness of the recursion is inherited from the soundness of
+these constraints being enforced, the same components the STARK page describes, not from anything the
+catalog adds on top.
+
+**The in-circuit Fiat-Shamir closes the gap a naive recursion leaves open.** The subtle failure mode of a
+recursive verifier is trusting the transcript challenges as public inputs. `fiat_shamir` (`air/fiat_shamir.rs`)
+instead makes the sponge state the trace, the Poseidon rounds and absorbs the transitions, and pins the
+first input and the squeezed challenge with boundary constraints, so the challenge is proven rather than
+trusted. This is the property that matters most in the catalog: without it the recursion would be verifying
+a computation whose challenges an adversary could have chosen, and with it the challenges are forced to be
+the honest hash of the transcript.
+
+**The honest boundary is that these are constructions, not certified circuits.** Each gadget is an `Air`
+whose `transition` and `boundary` are the claimed constraints; the guarantee is that a trace satisfying
+them satisfies the stated relation, and that guarantee is only as good as the constraints being complete
+and correct. The catalog ships no machine-checked proof that, say, `merkle_membership`'s constraints admit
+exactly the valid openings and no others. As with the STARK itself, the negative testing that exists lives
+on the [attestation verifiers](pedersen-attestation.md); the gadgets are built to be right, and their
+degrees are stated so the prover handles each, but "built to be right" is the claim, not "formally proven
+complete."
+
+## Debugging the AIR catalog
+
+A gadget bug shows up as a proof that will not verify, and because each gadget is a distinct `Air` with a
+distinct constraint set, the first move is to identify which gadget's constraints are in play.
+
+**Localize by the gadget and its degree.** The [STARK verifier](stark.md) checks shape before algebra, so a
+proof whose trace width or length does not match the `Air` it is verified against fails the early shape
+check, which usually means the wrong gadget or a mismatched configuration, not a bad witness. A proof that
+passes shape but fails the constraint recomputation has a witness that violates one gadget's transition or
+boundary, and the constraint degrees in the table are the cue: a failure in a degree-7 gadget (`poseidon`,
+`merkle_membership`, `fiat_shamir`) is in the hashing or membership algebra, while a degree-1 or degree-2
+failure is in a fold or a permutation gadget.
+
+**Cross-region wiring is where the fused and wired AIRs fail specifically.** `fused` (`air/fused.rs`)
+selects one gadget's constraints per row and `wired` (`air/wired.rs`) then binds values across regions with
+copy constraints, so a value produced in the `fiat_shamir` region must equal the one consumed in the
+`fri_fold` region. If the individual gadgets each verify in isolation but the composite does not, the fault
+is in that cross-region binding: the copy constraint is forcing an equality the trace does not actually
+satisfy, which is the signature of the challenge not flowing from the transcript into the fold as a real
+verifier would run it. That is the wiring, not the arithmetic, and it is the reason `wired` is the piece
+most worth isolating when a recursive proof breaks.
+
+## Source map
 
 ```
   src/crypto/stark/air/fibonacci.rs, squaring.rs, power_chain.rs   the arithmetic gadgets
@@ -73,3 +125,8 @@ proves it, which closes the gap a public-input challenge would leave open.
   src/crypto/stark/air/fiat_shamir.rs                              the in-circuit transcript
   src/crypto/stark/air/fused.rs, wired.rs                          fusion and the mega-AIR backbone
 ```
+
+Every reference above is verified against those trees. The prover and verifier that operate on these AIRs,
+and the shape-then-algebra check a bad witness fails, are on the [STARK](stark.md) page; the field and the
+Poseidon permutation the degree-7 gadgets are built over are on the [field and hash](field-and-poseidon.md)
+page; and the fuzzed negative testing is on the [Pedersen attestation](pedersen-attestation.md) page.

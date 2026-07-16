@@ -52,11 +52,57 @@ These gates are the honest form of multi-architecture support: where a capabilit
 arch-specific, the kernel exposes it where it exists and fails cleanly where it does not, rather than
 pretending every architecture is the same.
 
-## Source
+## Security analysis
+
+Discovery is the point where untrusted firmware data first reaches the kernel, so it is a hardening
+surface regardless of which model a target uses. Both the ACPI tables and the device-tree blob are
+provided by firmware or the bootloader, before any capsule runs, and both are walked to extract the
+interrupt topology, the processor inventory, and the MMIO addresses the kernel will later program. A
+malformed table or a lying property is untrusted input, and the parsers are written to walk structure
+rather than trust embedded lengths and pointers blindly. The addresses discovery yields (the IO-APIC and
+LAPIC on x86, the GIC or PLIC on ARM and RISC-V) are not dereferenced as raw firmware pointers; on x86
+they are mapped into the upper half during `init_unified_vm`, after the kernel half is confirmed, so a
+bad address faults on a controlled mapping rather than reading arbitrary physical memory in place.
+
+The arch gates are themselves a security posture. PIO is an x86 instruction class and does not exist on
+the other targets, so rather than emulate it the kernel compiles the PIO broker only on x86_64 and the
+PIO syscalls fail closed with `ENOSYS` elsewhere. Failing closed is the honest choice: a capsule that
+asks for port IO on ARM gets a clean refusal, not a silent success against hardware that has no such
+concept. The same logic runs through the whole section: where a capability is genuinely arch-specific,
+the kernel exposes it where it exists and refuses it where it does not, so no code path pretends a
+missing mechanism is present.
+
+## Debugging
+
+Discovery failures are early and total: if the kernel misreads its own machine, almost nothing above it
+works, so the symptoms are broad and the cause is narrow.
+
+**No processors beyond the boot CPU, or an IRQ that routes nowhere.** Both trace back to discovery
+handing the layers above it wrong topology. The [SMP](../subsystems/smp/README.md) bring-up reads the
+processor list to start the application processors, and the
+[interrupt](../subsystems/interrupts/README.md) layer reads the IO-APIC and override data (or the GIC or
+PLIC node) to route device lines. A missing core or a misrouted line points at the MADT parse on x86 or
+the device-tree walk on the other targets, not at SMP or the interrupt layer themselves.
+
+**A device-tree property read as the wrong width or endianness.** The FDT encoding is big-endian, and the
+parser decodes the header, token stream, string table, and properties against that. On a little-endian
+host a byte-swap mistake shows up as a nonsensical address or size. This is the ARM and RISC-V analogue
+of a bad ACPI length, and it is why the parser is a from-scratch decoder rather than a cast over raw
+bytes.
+
+**A PIO syscall returning `ENOSYS`.** On aarch64 or riscv64 this is not a bug; it is the arch gate
+working. Port IO does not exist off x86, the PIO broker is not compiled in, and the syscall fails closed.
+A driver that needs to reach a device on those targets does so through MMIO instead.
+
+## Source map
 
 ```
-  src/arch/fdt/mod.rs          the flattened-device-tree parser (aarch64, riscv64)
+  src/arch/fdt/mod.rs           the flattened-device-tree parser (aarch64, riscv64)
   src/arch/x86_64/acpi/mod.rs   the ACPI tables (x86_64)
-  src/arch/mod.rs               the FDT arch gating
-  src/hardware/broker/mod.rs    the PIO arch gate
+  src/arch/mod.rs               the FDT arch gating (compiled only for aarch64, riscv64)
+  src/hardware/broker/mod.rs    the PIO arch gate (x86_64 only)
 ```
+
+The ACPI side and the machinery it feeds are on the [x86_64 backend](x86_64.md) page, the boundary the
+whole section sits under is on the [boundary](boundary.md) page, and the PIO broker this page gates is on
+the [PIO](../subsystems/hardware-broker/pio.md) page. Every reference is verified against those trees.

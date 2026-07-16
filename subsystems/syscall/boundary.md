@@ -105,13 +105,95 @@ The boundary here is where that chain is invoked; the capability model is where 
 defined. On success the router runs; the [router](router.md) page covers the dispatch to
 the per-family handlers.
 
-## Source
+## Security analysis
+
+The syscall entry is the one place ring 3 turns into ring 0, so it is the trust boundary for the whole
+capsule model. Everything a capsule passes in registers is untrusted, and the boundary is built so that
+untrusted input cannot reach a handler without first clearing a decode, a capability check, and (for any
+pointer) a page walk. Three properties draw that line.
+
+**A handler cannot run without proof of the capability check.** The mechanism is the `Capability` type
+(`src/syscall/contract/capability.rs:30`), a struct that wraps a `CapabilityToken` behind a private field
+whose only constructor is `Capability::resolve` (`capability.rs:35`). User-space cannot build one, and
+neither can in-kernel code outside the contract module, because the field is private. `dispatch`
+(`dispatch.rs:31`) is the sole caller of `resolve`, and its doc comment states there is no other path that
+runs it. If `resolve` returns `None` the dispatch logs a `CAP-DENY` and returns `EPERM` before `invoke` is
+ever reached (`dispatch.rs:34`). So the check is not a convention a handler might forget; it is encoded in the control
+flow, and a handler that needs a capability takes the witness as evidence the five-step resolver chain ran.
+
+**The number is decoded before anything else touches it.** `syscall_handler`
+(`src/arch/x86_64/syscall/manager/entry.rs:22`) turns the raw `RAX` value into a typed `SyscallNumber` with
+`from_u64`, and an unrecognised tag returns `-ENOSYS` immediately (`entry.rs:31`) without building
+`SyscallArgs` or entering the contract. A malformed number therefore cannot select a handler by index or
+walk off the end of a table, because there is no table index in play: the decode is a lookup that yields
+either a known enum variant or nothing.
+
+**No user pointer is dereferenced on the strength of the register value alone.** The boundary passes the
+six argument registers through untouched as a `SyscallArgs` array; it does not itself interpret any of them
+as a pointer. When a handler needs to read or write a user buffer, it goes through the usercopy layer
+(`src/usercopy/`), where `check_range` (`policy.rs:35`) rejects a null pointer, a length over the 64 MiB
+`MAX_COPY_SIZE` cap, an address that overflows on `addr + len`, or a range crossing the canonical user
+limit `0x0000_7FFF_FFFF_FFFF`, and then `validate` (`validate.rs:34`) walks every page in the range to
+confirm it is present, user-accessible, and (for a write) writable before a single byte moves. The copy
+itself runs through the direct map (`copy.rs`), so the kernel never dereferences the user virtual address
+directly. A capsule passing a kernel pointer, an unmapped pointer, or a read-only pointer to a write gets
+`EFAULT`, not a kernel fault.
+
+The honest limit is that the boundary itself trusts the assembly stub to have switched `GS` and the stack
+and to have saved user state correctly; that stub (`entry.rs` in the arch tree, set up by `init.rs`) is the
+small amount of hand-written code the whole model rests on, and it is arch-specific rather than covered by
+the type-level guarantees above.
+
+## Debugging the boundary
+
+Every rejection at or just past the boundary comes back to the capsule as a negative errno in `RAX`, and
+the errno alone tells you which stage refused the call:
 
 ```
-  src/arch/x86_64/syscall/manager/entry.rs   syscall_handler, the arch bridge
-  src/arch/x86_64/syscall/manager/init.rs     LSTAR/STAR/SFMASK setup
-  src/syscall/contract/dispatch.rs             the contract gate
-  src/syscall/contract/capability.rs           the Capability witness and resolve
-  src/syscall/contract/resolver/               the ordered resolve chain
-  src/syscall/numbers/                         SyscallNumber and from_u64
+  -ENOSYS (38)   the number did not decode           entry.rs, before the contract
+  -EPERM  (1)    the capability resolve failed        dispatch.rs, CAP-DENY logged
+  -EFAULT (14)   a user pointer failed validation     usercopy, inside a handler
+  -EINVAL (22)   a handler rejected the arguments     inside a handler
+  -ENOMEM (12)   a handler could not allocate         inside a handler
 ```
+
+The first distinction to draw is `ENOSYS` versus `EPERM`. `ENOSYS` means the tag in `RAX` is not a
+registered syscall at all, so the fix is in the caller's number, not its capabilities. `EPERM` means the
+number decoded fine but the resolver chain rejected the token, and this one leaves a trace: `dispatch`
+calls `log_deny` (`dispatch.rs:43`), which prints `[CAP-DENY] pid=… syscall=…` with the pid and the typed
+syscall name. So an `EPERM` is diagnosed by reading that line, then checking which resolver step failed:
+the chain is token MAC, then boot-session binding, then address-space binding, then revocation epoch, then
+the per-syscall bit (`resolver/resolve.rs:31`), and the corresponding `ResolverError` variant
+(`resolver/error.rs`) names the reason (`TokenRevoked`, `BootSessionMismatch`, `AsidMismatch`,
+`RevocationEpochStale`, or `SyscallNotPermitted`).
+
+The second distinction is `EFAULT` versus `EPERM`, which are the two failures most easily confused because
+both look like "the kernel refused me." `EPERM` is authority: the capsule does not hold the capability the
+syscall requires, and it is caught at the contract before the handler runs, so no `CAP-DENY`-free path
+reaches it. `EFAULT` is memory: the capability passed, the handler ran, and a user pointer argument failed
+`validate_user_read` or `validate_user_write`. So the trace is different in kind. An `EPERM` with no
+`CAP-DENY` line is impossible; an `EFAULT` never prints `CAP-DENY` because it happens after the gate. To
+narrow an `EFAULT` further, the underlying `UsercopyError` (`src/usercopy/error.rs`) distinguishes
+`NullPointer`, `PageNotMapped`, `PageNotUser`, and `PageNotWritable`, all of which map to errno 14, so the
+question "is the buffer unmapped, kernel-owned, or read-only for a write" is answerable from the variant
+even though the errno collapses them to one number.
+
+## Source map
+
+```
+  src/arch/x86_64/syscall/manager/entry.rs   syscall_handler, the arch bridge and ENOSYS decode
+  src/arch/x86_64/syscall/manager/init.rs    LSTAR/STAR/SFMASK setup
+  src/syscall/contract/dispatch.rs           the contract gate, log_deny, invoke
+  src/syscall/contract/capability.rs         the Capability witness and resolve
+  src/syscall/contract/resolver/             the ordered five-step resolve chain and ResolverError
+  src/syscall/numbers/                        SyscallNumber and from_u64
+  src/usercopy/policy.rs                      check_range, the null/overflow/limit/size rules
+  src/usercopy/validate.rs                    validate_user_read / validate_user_write, the page walk
+  src/usercopy/copy.rs                        copy_from_user / copy_to_user through the direct map
+  src/usercopy/error.rs                       UsercopyError and its i32 errno mapping
+```
+
+Every reference above is verified against those trees. The ordered resolve chain and the per-syscall
+capability table are on the [capabilities page](../../security/capabilities-and-tokens.md), the tag
+encoding is on the [numbers](numbers.md) page, and the family dispatch past the gate is on the
+[router](router.md) page.

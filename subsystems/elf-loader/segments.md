@@ -71,11 +71,74 @@ midway through a segment does not leak physical memory. The pages are written th
 direct map rather than through the user mapping, so the loader never dereferences a user virtual
 address it just created.
 
-## Source
+## Security analysis
+
+Segment loading is where untrusted file contents become executable memory, so its invariants are the
+ones that decide whether a capsule can turn a data buffer into code or read a previous tenant's bytes.
+Three properties hold.
+
+**W^X by construction, not by later check.** `input_fields`
+(`src/elf/loader/core/load_segment/validate.rs:20`) rejects a segment carrying both the writable and
+executable flags with `WXViolation` before the segment is ever planned, and `pte_perms_from_phdr`
+(`load_segment/pte_flags.rs:20`) derives permissions from the flags such that `WRITE` and `EXECUTE` are
+never both set, since the gate already ran. There is no code path that maps a `W|X` segment, so the
+classic writable-executable region does not exist for a loaded capsule. This is the same invariant the
+[paging manager](../memory/paging-manager.md) enforces at the PTE level, checked here at load time so a
+hostile segment header is refused rather than mapped and then caught.
+
+**File contents cannot escape the image, and memory cannot exceed the declared size.** The gate refuses a
+segment whose `p_filesz` exceeds its `p_memsz` (`SegmentDataOutOfBounds`), whose alignment is not a power
+of two (`AlignmentError`), whose virtual and file offsets are not congruent modulo the alignment, or
+whose `file_offset + file_size` runs past the end of the image, again with `checked_add`. So the slice
+`&elf_data[plan.file_offset..plan.file_end]` that `load_segment` (`load_segment/run.rs:28`) copies from is
+always inside the buffer, and a malicious header cannot point the copy source at bytes the image does not
+contain.
+
+**Every page is zeroed before file bytes land, so `.bss` and page tails never leak.** `populate_page`
+(`load_segment/populate_page.rs:28`) allocates a frame, maps it into the target ASID with the segment's
+permissions, then does `write_bytes(dst, 0, PAGE)` across the whole page through the direct map before
+copying any file bytes, and it clamps the copy length to the space remaining in the page. A segment whose
+`p_memsz` exceeds its `p_filesz` therefore gets zeroed `.bss` for free, with no separate handling, and the
+tail of the last file page is zero rather than whatever the frame held before. If the mapping fails, the
+just-allocated frame is freed before returning `MemoryAllocationFailed`, so an error midway through a
+segment leaks no physical memory. The write goes through the kernel direct map, not the user mapping, so
+the loader never dereferences a user virtual address it just created.
+
+## Debugging segment loading
+
+The segment path raises the same `ElfError` variants (`src/elf/errors/types/state.rs:17`) the rest of the
+loader uses, and on a spawn they are printed after the capsule's debug tag
+(`.../install/load_elf_into_pid.rs:27`), so a segment failure names its own cause:
+
+```
+  Segment requested both writable and executable permissions   WXViolation             a W|X program header
+  Segment data out of bounds                                    SegmentDataOutOfBounds  filesz > memsz, or file bytes past the image
+  Alignment requirements not met                                AlignmentError          p_align not a power of two, or vaddr/offset not congruent
+  Memory allocation failed                                      MemoryAllocationFailed  no frame, or the per-page map into the ASID failed
+```
+
+The useful split is between a *rejected* segment and an *exhausted* one. `WXViolation`,
+`SegmentDataOutOfBounds`, and `AlignmentError` all come out of `input_fields` before any frame is touched,
+so they mean the program header itself is malformed or hostile and the load never started allocating.
+`MemoryAllocationFailed` is different: it comes from `populate_page` after validation passed, so it means
+the image was fine but either the frame allocator was empty or the map into the target ASID failed
+partway through a segment. A capsule that loads on one boot and fails with `MemoryAllocationFailed` on
+another is a memory-pressure signal, not a bad image, whereas a `WXViolation` is a property of the binary
+that will fail every time until the binary is rebuilt without a writable-executable segment. On the
+top-level spawn path all of these surface as `reason=elf_load` (`.../from_vfs/load.rs:99`); the `ElfError`
+string that precedes that line is what tells the two apart.
+
+## Source map
 
 ```
   src/elf/loader/core/load_segment/validate.rs      the W^X gate and segment validation
   src/elf/loader/core/load_segment/pte_flags.rs      permission derivation from p_flags
   src/elf/loader/core/load_segment/run.rs            the per-page load loop
   src/elf/loader/core/load_segment/populate_page.rs  frame alloc, map, zero-fill, copy
+  src/elf/errors/types/state.rs                      the ElfError variants raised here
 ```
+
+Every reference above is verified against those trees. The header checks that run before any segment is
+loaded are on the [validation](validation.md) page, the paging layer that enforces these permissions in
+the page tables is the [paging manager](../memory/paging-manager.md), and the load orchestration that
+calls `load_segment` per program header is on the [layout](layout.md) page.

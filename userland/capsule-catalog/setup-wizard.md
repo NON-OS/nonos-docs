@@ -53,11 +53,57 @@ no masking or strength check, the `persist_sel` choice is recorded in policy but
 itself configure or encrypt a persistent store, policy is optional (if its port is absent the wizard
 still completes but the settings are lost), and there is no abort-and-reboot from the final review.
 
-## Source
+## Security analysis
+
+The mask is `0x1819` (`CAPSULE_REQUIRED_CAPS` in `userland/capsule_setup_wizard/Capsule.mk`), decoding to
+`CoreExec | IPC | Memory | GraphicsDisplayQuery | GraphicsSurfaceCreate` against `src/capabilities/types.rs`.
+It is the same graphics-client mask as the other full-screen capsules: it queries the display, registers one
+surface (`src/setup/mod.rs:44`), submits it to the compositor, and drives it from keyboard events. It holds
+no `GraphicsPresent`, and no crypto, hardware, filesystem, or network capability.
+
+- **The authority here is policy write, not the caps.** The wizard's power is not in its capability mask,
+  which is ordinary; it is that the [policy](policy.md) service trusts this capsule by name to write. The
+  review screen (`src/render/screens/review.rs:21`) commits every choice with `policy::set_*` and those
+  writes take effect because the wizard is one of the two names policy allows to write (the other is the
+  settings app). So the boundary that matters is on policy's side, not the wizard's: policy is what decides
+  the wizard may write, and the wizard cannot grant itself any other authority through that channel.
+- **Trusted keyboard grabber.** The wizard is one of the three names the [input router](input-router.md)
+  allows to take an exclusive grab (as `app.setup_wizard`), and it grabs the keyboard so first-run entry
+  cannot be observed by a background subscriber. That grant is the router's, gated by name.
+- **Honest boundary: the wizard records intent, it does not enact secrets.** As the state note says, the
+  keygen screen advances a UI stage without generating keys, the passphrase entry has no masking or strength
+  check, and the persistence choice is recorded in policy without the wizard configuring or encrypting a
+  store. So the security-sensitive parts of first-run (key material, an encrypted persistent store) are
+  deferred to other capsules; the wizard collects and commits the configuration, it does not itself hold or
+  create the secrets those choices imply.
+
+## Debugging
+
+The wizard runs as `app.setup_wizard` on port 4794. Its setup discovers the compositor, input router, and
+policy by name; the input router and compositor must be up for it to grab the keyboard and paint, while
+policy is optional (if its port is absent the wizard still completes but the settings are lost, per the
+honesty note). The kernel spawn marker is:
 
 ```
-  userland/capsule_setup_wizard/src/server/runner.rs      the key-driven loop
-  userland/capsule_setup_wizard/src/render/screens/       the ten screens
-  userland/capsule_setup_wizard/src/render/screens/review.rs   the policy commit
-  userland/capsule_setup_wizard/src/state.rs              the collected configuration
+  [SPAWN] name=app.setup_wizard pid=0x... caps=0x1819 entry=0x...
+```
+
+`caps=0x1819` confirms the admitted mask. The clearest live signal is the grab: the wizard calls
+`input_router::grab_keyboard` at the top of its loop (`src/server/runner.rs`), and if the router refuses
+(the wizard is not resolved as a trusted grabber, or the keyboard is already held) that grab comes back
+`E_ACCES` or `E_BUSY` from the [input router](input-router.md) and the wizard receives no keys. A wizard on
+screen that does not respond to Enter or Escape is that grab failing, not the state machine wedging. The
+failure signature at the end is clean exit: reaching the review and advancing past `DONE` calls `mk_exit(0)`
+(`src/server/runner.rs`), so a wizard that completes disappears rather than lingering, and its policy commits
+are visible as the settings other capsules then read.
+
+## Source map
+
+```
+  userland/capsule_setup_wizard/src/server/runner.rs           the key-driven loop, grab_keyboard, mk_exit
+  userland/capsule_setup_wizard/src/setup/mod.rs               surface register + compositor submit
+  userland/capsule_setup_wizard/src/render/screens/            the ten screens
+  userland/capsule_setup_wizard/src/render/screens/review.rs   the policy commit (the trusted write)
+  userland/capsule_setup_wizard/src/state.rs                   the collected configuration
+  userland/capsule_setup_wizard/Capsule.mk                     CAPSULE_REQUIRED_CAPS = 0x1819, endpoint 4794
 ```

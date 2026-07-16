@@ -74,7 +74,67 @@ path can raise (`SegmentDataOutOfBounds`, `MemoryAllocationFailed`, `MemoryMappi
 path uses. The load path converts an `ElfError` into a spawn failure; the specific variant is
 logged so a rejected capsule is diagnosable.
 
-## Source
+## Security analysis
+
+The header parser is the loader's first contact with an untrusted image, and everything downstream
+assumes it did its job. Two properties hold, and one boundary is worth stating plainly.
+
+**Every read is size-checked before it happens.** `parse_elf_header` (`parse_header/header.rs:18`)
+refuses an image smaller than `ElfHeader::SIZE` with `FileTooSmall` before it reads a single byte, and
+it reads unaligned because the caller's buffer is arbitrary bytes rather than a placed struct. The
+program-header table is bounds-checked the same way: `program_header_bounds` (`parse_header/bounds.rs:18`)
+computes `ph_entsize * ph_count` and `ph_offset + table_bytes` with `checked_mul` and `checked_add`, and
+requires the end to lie inside the image, so a header claiming a table that runs past the buffer is
+refused with `ProgramHeadersOutOfBounds` rather than read out of bounds. `parse_program_header_at`
+(`parse_header/program_entry.rs:19`) re-checks the index against the count and recomputes each entry
+offset with checked arithmetic, so no individual entry read can escape the image either. The image is
+treated as hostile input: the header claims a shape, and the loader confirms that shape fits the bytes
+it was actually given before trusting any field.
+
+**The entry-size pins make later fixed-stride indexing sound.** `has_native_program_header_size` and
+`has_native_section_header_size` (`parse_header/validate.rs:17`) require the program- and section-header
+entry sizes to equal the native struct sizes (56 and 64 bytes). Because the loader later indexes those
+tables at a fixed stride, pinning the stride here is what makes that indexing correct by construction
+rather than by hope, and it also rejects an object built for a different ABI up front. Alongside them the
+class, endianness, machine, and type checks confine the loader to a little-endian 64-bit x86_64 `ET_EXEC`
+or `ET_DYN` object; a relocatable object or a core file is refused with `InvalidType`.
+
+The boundary worth naming: these checks establish that the image is a *well-formed* x86_64 ELF whose
+tables fit inside the buffer. They do not establish that it is *trustworthy*. Authenticity, the publisher
+signature and the manifest, is a separate gate that runs before the loader is ever called, described on
+the [integration](integration.md) page. Header validation is structural safety, not attestation, and the
+two are deliberately different layers.
+
+## Debugging ELF validation
+
+Every rejection here is one variant of `ElfError` (`src/elf/errors/types/state.rs:17`) with a fixed
+string form (`src/elf/errors/types/strings.rs:20`), and on the spawn path that string is printed after
+the caller's debug tag when a load fails (`.../install/load_elf_into_pid.rs:27`). For a driver capsule the
+tag is the `[DRIVER-*] load_elf_executable error:` line the spawn site passes in (for example
+`src/hardware/nvme_capsule/spawn.rs:58`), so a failed load reads as a named stage:
+
+```
+  [DRIVER-NVME] load_elf_executable error:
+  ELF file too small                 FileTooSmall                  the buffer is shorter than a header
+  Invalid ELF magic number           InvalidMagic                  not 0x7F "ELF"
+  Invalid ELF class (not 64-bit)     InvalidClass                  not ELFCLASS64
+  Invalid ELF machine type ...       InvalidMachine                not EM_X86_64
+  Invalid ELF type (not EXEC or DYN) InvalidType                   a relocatable object or core file
+  Invalid ELF program header ...     InvalidProgramHeaderSize      e_phentsize is not the native size
+  Program headers out of bounds      ProgramHeadersOutOfBounds     the table runs past the buffer
+```
+
+The distinction these give you is between a *malformed* image and an *unexpected* one.
+`FileTooSmall`, `ProgramHeadersOutOfBounds`, and the `InvalidProgramHeaderSize` from the bounds check
+mean the bytes do not describe a coherent object, which points at truncation or corruption in the
+artifact. `InvalidMachine` and `InvalidType` mean the object is well-formed but built for the wrong
+target or as the wrong kind of file, which points at a build or packaging mistake, not a damaged file. On
+the top-level spawn path the same failure also surfaces as `reason=elf_load`
+(`.../from_vfs/load.rs:99`), so a `[RUNTIME-LOAD] FAILED ... reason=elf_load` line tells you the image got
+as far as the loader, meaning it had already passed verification, and the specific `ElfError` string that
+precedes it says which structural check refused it.
+
+## Source map
 
 ```
   src/elf/loader/core/parse_header/header.rs         parse_elf_header, the size floor
@@ -82,4 +142,10 @@ logged so a rejected capsule is diagnosable.
   src/elf/loader/core/parse_header/bounds.rs          program-header table bounds
   src/elf/loader/core/parse_header/program_entry.rs   per-entry bounds-checked read
   src/elf/errors/types/state.rs                       the ElfError enum
+  src/elf/errors/types/strings.rs                     ElfError::as_str, the logged strings
 ```
+
+Every reference above is verified against those trees. The segment W^X gate these checks hand off to is
+on the [segment loading](segments.md) page, the load orchestration that calls them in order is on the
+[layout](layout.md) page, and the verify-then-load gate that runs before any of this is on the
+[integration](integration.md) page.

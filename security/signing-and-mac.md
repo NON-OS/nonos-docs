@@ -206,16 +206,61 @@ refusal:
 None of these can be turned off by a capsule, and none can be reached in a
 half-initialised state that would accept a token it should not.
 
-## Source
+## Debugging a MAC or signing failure
+
+The MAC layer fails in a deliberately quiet way, and that is the thing to know
+first: `verify_token` (`verify.rs:24`) returns a bare `false` for every reason it
+can fail, whether the key is unset, the material differs, or the tag was forged. It
+does not distinguish them, by design, so there is no informative error to read off
+a verify failure directly. What a verify-false becomes downstream is a
+`ResolverError::TokenSignatureInvalid` at the first resolver step
+(`check_token`), which the syscall path turns into `[CAP-DENY]` and `EPERM`. So a
+MAC problem looks like any other capability denial at the syscall boundary; the way
+to know it is the MAC and not a later binding check is that `check_token` runs
+first, so if the signature is wrong none of the session, ASID, or epoch checks are
+even reached.
+
+Two of the failures are fail-closed guards worth separating from a genuine tag
+mismatch. If the signing key was never set, both signing and verifying refuse:
+`sign_token` returns `"No signing key"` (`sign.rs`) and `verify_token` returns
+`false` outright (`verify.rs`, the `None` branch). If the boot session nonce was
+never latched, minting fails earlier still, at `create_token` returning
+`ERR_BOOT_NONCE` ("boot session nonce not initialized", `create.rs`), so a token is
+never produced to begin with. A kernel that reaches capsule spawn without either of
+these initialised is a boot-ordering bug, and the production boot path is written to
+halt rather than proceed keyless (`core_init.rs`); the symptom would be no capsule
+ever spawning, not a specific denial.
+
+A real tag mismatch, key set and nonce latched but the sixty-four bytes not
+matching, is the interesting case, and there are only a few ways to reach it
+honestly. The material covers `boot_session_nonce` and the key is per-boot, so a
+token from a prior boot mismatches: that is the cross-boot revocation working, and
+it shows as verify-false plus, if it got past `check_token`, a
+`BootSessionMismatch` one step later. The material also covers `subject_asid`, so a
+token lifted into another address space mismatches. And because the bitmask fed to
+the MAC is recomputed from the `permissions` vector by `caps_to_bits` at verify
+time rather than read from a stored field, editing the permissions vector without
+re-signing produces a mismatch by construction. If none of those apply, a
+verify-false with a set key is either a corrupted token or a forgery attempt, and
+the constant-time `ct_eq_64` (`compare.rs:51`) guarantees the attacker learned
+nothing from the timing of the rejection.
+
+## Source map
 
 ```
-  src/capabilities/token/signing_key.rs   the write-once 32-byte key
+  src/capabilities/token/signing_key.rs   the write-once 32-byte key and its errors
   src/capabilities/token/material.rs       the 128-byte material and mac64
-  src/capabilities/token/create.rs         the token mint constructors
-  src/capabilities/token/sign.rs           sign_token
-  src/capabilities/token/verify.rs         verify_token
+  src/capabilities/token/create.rs         the token mint constructors and ERR_BOOT_NONCE
+  src/capabilities/token/sign.rs           sign_token and its "No signing key" error
+  src/capabilities/token/verify.rs         verify_token, the fail-closed false
   src/capabilities/token/nonce.rs          default_nonce, secure_nonce_128
   src/security/boot_session.rs             the per-boot nonce
   src/crypto/util/constant_time/compare.rs the constant-time comparisons
   src/crypto/hash/blake3/                   the keyed BLAKE3 used by mac64
+  src/syscall/contract/resolver/error.rs   TokenSignatureInvalid, what a verify-false becomes
 ```
+
+The resolver step a verify-false lands on, and its `[CAP-DENY]`/`EPERM` surface,
+are on the [capability model](capabilities-and-tokens.md) page; the delegation MAC
+that reuses this key with a different domain tag is on the
+[delegation](delegation.md) page.

@@ -181,6 +181,39 @@ it is never left in a freed allocation or a stale request buffer.
 - **The wiping discipline** minimizes the lifetime of cleartext key material in memory.
 - **Generation quality**: keys come from the kernel secure RNG and are validated as proper scalars.
 
+The capability mask is `0x39` (`Capsule.mk`, `CAPSULE_REQUIRED_CAPS`), which decodes to CoreExec (1), IPC
+(8), Memory (16), and Crypto (32). This is the least-privilege argument that matters most in the whole
+tree, because the keyring is the sole private-key holder. It holds Crypto because it signs and generates
+keys through the kernel crypto and RNG syscalls; it holds IPC and Memory to be a service with a heap. It
+holds *nothing else*, and the absence is the security property: no Driver, Mmio, Irq, Dma, or Pio, so the
+capsule that holds every private key cannot touch a device or program a DMA engine that could exfiltrate
+those keys over hardware; no FileSystem, so it cannot write a key to a storage surface (keys are RAM-only
+by construction, not by discipline alone); no Network, so it cannot open a socket and ship a secret off the
+machine; no Debug, so it cannot open a serial surface or emit `MkDebug` that could leak key bytes to a log.
+Its isolation from the [wallet](wallet-nonos.md) is the whole design: the wallet holds none of these
+either, and reaches the keyring only over IPC, so compromising the wallet exposes its UI and network path
+but not a key. The honest boundary is that the mask cannot forbid a *logic* leak, a signing handler that
+returned key bytes in a reply body would defeat it, which is why the signers return signatures and hashes,
+never the secret, and wipe the scratch immediately.
+
+## Debugging
+
+The service is `keyring` on port 4098 (`Capsule.mk`, `service:4098:keyring`), reply endpoint
+`0x1_0000_0002`, and it is brought up in the boot fleet at `spawn_plan/core.rs:48` as
+`boot::capsule("KEYRING", "keyring", ...)` from the kernel embed `src/security/keyring_capsule/`. Through
+`capsule_boot::boot` that prints `[KEYRING] capsule spawned` on the boot log (framebuffer under
+`NONOS_FBCONSOLE=1`), or a `[ERROR]` line with the `SpawnError`. A present marker means the service
+registered under its manifest endpoint and `mk_service_lookup("keyring")` resolves for the wallet and the
+[payment](payment.md) capsule; an absent marker means every wallet operation and every paid receipt will
+fail because their signer never started. Because this capsule deliberately holds no Debug cap, it emits no
+diagnostic output of its own by design (the NO LOGS invariant on the [attest](attest.md) page), so
+debugging it is done from the boot marker and the caller side. The request-time failure signatures are the
+tell: `EACCES` is `resolve_caller` refusing a payload pid that did not match the attested sender, or the
+owner-pid check on a key that belongs to another capsule; `EBUSY` is a retrieve against a locked key;
+`EINVAL` from `wallet_generate` means rejection sampling failed to draw a valid secp256k1 scalar in 32
+tries (a degraded RNG). A wallet that can display an address but cannot sign is the owner-pid boundary
+doing its job against a caller acting on a key it does not own.
+
 ## Honest gaps
 
 Stated plainly: the `expires_at` timestamp is stored but not enforced, so a key does not expire on its

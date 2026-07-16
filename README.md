@@ -19,35 +19,37 @@ revision.
 
 ```
 nonos-docs/
-├── architecture/      System model, boot, memory, scheduling, the whole map
-├── abi/               Syscall numbers, calling convention, per-call contracts
+├── architecture/      System model in one document: the whole map
+├── subsystems/        Per-subsystem deep dives (broker, input, graphics, ipc, ...)
 ├── security/          Trust anchor, capsule signing, capabilities, tokens
-├── subsystems/        Per-subsystem deep dives (broker, input, graphics, ipc)
-└── assets/            Diagrams and figures
+├── userland/          The capsule userland model, the SDK, the desktop stack
+├── arch/              The x86_64, aarch64, and riscv64 backends
+├── abi/               Syscall numbers, calling convention, per-call contracts
+└── build/             The toolchain, the cargo and Make build, capsule signing
 ```
 
 ## Start here
 
-Read the architecture overview first. It is the map the rest of the
-documentation hangs off.
+Read the [mission](architecture/mission.md) first: what NONOS is for, the problem it solves, why it
+differs from monolithic OSes, other microkernels, and "secure OS" products, and the crypto and Ethereum
+use case. Then the [architecture overview](architecture/overview.md), the map the rest of the
+documentation hangs off: one document that walks the arch boundary, the privilege model, the boot order,
+memory, capsules, verified spawn, capabilities, syscalls, IPC, scheduling, the hardware broker, and the
+input and graphics paths. Every other page zooms into one box of it. Then the
+[verification](architecture/verification.md) page, which states exactly what NONOS proves and does not
+prove, and how to reproduce every claim.
 
-| Page | What it covers |
-|------|----------------|
-| [the-nonos-path.md](the-nonos-path.md) | The single institutional and engineering document: what NØNOS is today, the microkernel and capsule model, the SDK and the GUI, the true path to build on both, the cryptographic spine, the NOX settlement layer, and the road to x402 and agentic payments on Base. |
-| [architecture/overview.md](architecture/overview.md) | The full system in one document: the arch boundary, privilege model, boot order, memory, capsules, verified spawn, capabilities, syscalls, IPC, scheduling, the hardware broker, and the input and graphics paths. |
+After that, pick a wing:
 
-### Reference
-
-| Section | Page | What it covers |
-|---------|------|----------------|
-| ABI | [abi/syscalls.md](abi/syscalls.md) | Every syscall: calling convention, numbers, capability, and semantics. |
-| ABI | [abi/errors.md](abi/errors.md) | The error codes, the return convention, and what causes each. |
-| Security | [security/capsules-and-trust.md](security/capsules-and-trust.md) | Capsule format, signing, the trust anchor, and the verified-spawn gate. |
-| Security | [security/capabilities-and-tokens.md](security/capabilities-and-tokens.md) | The capability bits, their enforcement, and the capability token. |
-| Subsystems | [subsystems/](subsystems/) | Per-subsystem deep dives: boot, memory, process model, ELF loader, scheduler, SMP, IPC, broker, interrupts, input, graphics, networking, storage, time, crypto. |
-| Userland | [userland/](userland/) | The capsule userland model, the nonos_libc SDK, and the desktop stack. |
-| Build | [build/](build/) | The toolchain, the cargo and Make build, and the capsule signing pipeline. |
-| Architecture | [arch/](arch/) | The x86_64, aarch64, and riscv64 backends behind the arch boundary. |
+| Area | Where | What it covers |
+|------|-------|----------------|
+| Architecture | [architecture/](architecture/) | The mission and use cases, the whole-system model in one overview, and the honest verification scope (Lean, Verus, Kani, known-answer proofs). |
+| Subsystems | [subsystems/](subsystems/) | Per-subsystem deep dives: boot, memory, process model, ELF loader, scheduler, SMP, syscall, IPC, hardware broker, interrupts, input, graphics, networking, storage, time, crypto, proof system. |
+| Security | [security/](security/) | The trust anchor, capsule signing and MAC, the certificate and manifest schemas, capabilities and tokens, delegation, revocation, and attestation. |
+| Userland | [userland/](userland/) | The capsule userland model, the capsule catalog, the SDK and nonos_std, the desktop stack, and how to write an app. |
+| Arch | [arch/](arch/) | The arch boundary, platform discovery, and the x86_64, aarch64, and riscv64 backends behind it. |
+| ABI | [abi/](abi/) | Every syscall with its calling convention, number, capability, and semantics; the error codes; and the driver-broker ABI. |
+| Build | [build/](build/) | The toolchain, the cargo and Make workflows, and the capsule signing pipeline. |
 
 Each page follows the same rule as the overview: code-accurate, cross
 referenced, and verifiable against the tree.

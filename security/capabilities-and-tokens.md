@@ -276,18 +276,72 @@ The capability system and the [verified-spawn gate](capsules-and-trust.md) are
 the two halves of one story: spawn decides what a capsule is allowed to hold, and
 the token enforces it on every call thereafter.
 
-## Source
+## Debugging a capability denial
+
+A capsule that is running but has a syscall refused is failing the resolver, and
+the marker is `[CAP-DENY]`. `dispatch` (`src/syscall/contract/dispatch.rs:31`)
+calls `Capability::resolve`, and on any failure it logs
+`[CAP-DENY] pid=<pid> syscall=<name>(<number>)` (`dispatch.rs:45`) and returns
+`EPERM`, which is `1` (`src/syscall/types/errnos/posix.rs:18`). So a userspace
+call that comes back as `-EPERM` with a matching `[CAP-DENY]` line naming the
+syscall is a capability or token-binding refusal, and the syscall name in the log
+tells you which call was denied.
+
+The log does not tell you which of the five resolver steps failed, and that is
+worth knowing when reading it. `Capability::resolve`
+(`src/syscall/contract/capability.rs:44`) runs the ordered chain and collapses any
+`ResolverError` into `None` with `.ok()?`, so the `[CAP-DENY]` line records the
+syscall but not the reason. The underlying `ResolverError`
+(`src/syscall/contract/resolver/error.rs:18`) distinguishes eight causes,
+`TokenSignatureInvalid`, `TokenExpired`, `TokenRevoked`, `BootSessionNotLatched`,
+`BootSessionMismatch`, `AsidMismatch`, `RevocationEpochStale`, and
+`SyscallNotPermitted`, but only the first of the five checks that a step names is
+surfaced past the `.ok()`. To reason about which one fired, walk the fixed order:
+a token that fails at all after a re-mint is `RevocationEpochStale`, a token that
+worked last boot is `BootSessionMismatch`, and a syscall the held bits simply do
+not cover is `SyscallNotPermitted`, the last check.
+
+To decode which bit a syscall needs, read the `Mk` table
+(`src/syscall/contract/cap_table/mk.rs`) reproduced above: `MkMmioMap` needs
+`Mmio`, `MkIrqBind` needs `Irq`, `MkDeviceClaim` needs `Driver`, and so on. Then
+compare against the bits the capsule actually holds, which are the powers of two in
+`src/capabilities/types.rs` decoded by `bits_to_caps` (`src/capabilities/bits.rs:29`)
+from the token's `permissions`. A `[CAP-DENY]` on `MkIrqBind` from a capsule whose
+grant did not include `Irq` (`262144`) is a manifest problem, not a runtime bug:
+the capsule was admitted without the bit it is now trying to use, and the fix is in
+its declared `required_caps`, not in the kernel. A separate case is a broker call
+that passes the capability check but names a grant the capsule does not own; that
+`EPERM` comes from the broker, not the resolver, and there is no `[CAP-DENY]` for
+it, as the [hardware broker](../subsystems/hardware-broker/README.md) page covers.
+
+One more distinction, because it is the common confusion: a capsule that never
+starts at all is not a `[CAP-DENY]`. A denial is a running capsule losing one
+syscall. A capsule that fails to spawn because its requested caps exceed the
+manifest or certificate ceiling fails much earlier, at
+[verified spawn](capsules-and-trust.md), and shows up as
+`[RUNTIME-LOAD] FAILED name=<name> reason=manifest:caps_ceiling` or
+`reason=manifest:grant`, not as a runtime `EPERM`.
+
+## Source map
 
 ```
   src/capabilities/types.rs             the Capability enum and bit mapping
-  src/capabilities/bits.rs              the bitmask algebra
+  src/capabilities/bits.rs              caps_to_bits, bits_to_caps, the bitmask algebra
   src/capabilities/token/types.rs       the CapabilityToken and predicates
   src/capabilities/token/material.rs    the 128-byte MAC material and mac64
   src/capabilities/token/verify.rs      verify_token
   src/capabilities/token/validate.rs    is_token_valid
   src/capabilities/token/revocation.rs  the revoked (owner, nonce) set
   src/capabilities/delegation/          delegation and its depth bound
-  src/syscall/contract/dispatch.rs      the pre-handler gate
+  src/syscall/contract/dispatch.rs      the pre-handler gate and the [CAP-DENY] log
+  src/syscall/contract/capability.rs    Capability::resolve, where ResolverError becomes None
   src/syscall/contract/resolver/        the ordered resolve chain
+  src/syscall/contract/resolver/error.rs the eight ResolverError variants
   src/syscall/contract/cap_table/mk.rs  the syscall-to-capability table
+  src/syscall/types/errnos/posix.rs     EPERM = 1
 ```
+
+The spawn side that decides the bits a capsule may hold, and its own
+`[RUNTIME-LOAD]` reason strings, are on the
+[verified spawn](capsules-and-trust.md) page; the signing key and MAC underneath
+the token are on the [signing and MAC](signing-and-mac.md) page.

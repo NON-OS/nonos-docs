@@ -149,6 +149,67 @@ TLB shootdown through the manager's shootdown wrappers
 the manager state, so a mapping removed on one CPU is invalidated on the others
 that share the address space rather than lingering in their TLBs.
 
+## Security analysis
+
+The paging manager is the single choke point through which every mapping in the system is installed,
+so its properties are the ones the rest of the memory subsystem builds on. Four hold.
+
+**W^X by construction.** The install path `map_page_in_asid` rejects a permission set that is both
+`WRITE` and `EXECUTE` with `PagingError::WXViolation` before it computes a PTE, so no writable-executable
+page is ever installed into any address space. The predicate `is_wx_violation` (`flags.rs:60`) is where
+that rule is named; the [hardening](hardening.md) page covers the gate itself. Because it is the same
+`map_page` every helper and every fault handler funnels through, the invariant is total: there is one
+place mappings are made, and that place enforces it.
+
+**The device helpers are non-executable and correctly cached.** `map_device_memory`, `map_user_mmio`,
+and `map_user_dma` (`api/mapping.rs`) never set `EXECUTE`, so a device register window or a DMA buffer
+is not a code page by construction. The MMIO helpers set `NO_CACHE` because device registers must not
+be cached; the DMA helper deliberately does not, because on x86_64 PCI devices snoop the cache and a
+coherent DMA buffer is write-back cacheable. Marking a snooped DMA buffer uncached would be a
+correctness bug, not extra safety, and the helper gets it right.
+
+**Partial mappings roll back.** `map_user_mmio` and `map_user_dma` unmap the pages they already
+installed if a later page in the range fails (`api/mapping.rs`), so a failed range mapping never
+leaves a partial window exposed to a capsule. The same discipline is why the install is the
+transaction boundary.
+
+**The interrupt discipline prevents self-deadlock.** Every map and unmap entry point runs the manager
+lock inside `without_interrupts` (`api/mapping.rs:24`). The manager is a `spin::Mutex`, and if a timer
+interrupt fired while the lock was held, the preemption path would call
+`switch_to_process_address_space`, which takes the same lock, and the CPU would deadlock on its own
+mutex. Disabling interrupts across the critical section closes that window and, on the unmap path, keeps
+the per-ASID TLB shootdown consistent with the `active_asid` it reads. The honest boundary the source
+records: `map_user_mmio` does not itself consult the broker tables, so the [hardware broker](../hardware-broker/README.md)
+is trusted to confirm the physical range belongs to a BAR the calling process claimed. The manager
+enforces W^X, NX, caching, and rollback; it does not re-check the broker's authority decision.
+
+## Debugging the paging manager
+
+Every mapping and unmapping failure is a `PagingError` variant (`error/types.rs`), and the manager
+carries a string form for each (`error/impls.rs`) so a failure reads as a sentence:
+
+```
+  NotInitialized        "Paging manager not initialized"          used before init
+  NoActivePageTable     "No active page table"                    no CR3 recorded yet
+  FrameAllocationFailed "Failed to allocate page table frame"     no frame for an intermediate table
+  WXViolation           "W^X violation: RW+X not allowed"         a writable-executable request
+  PageNotMapped         "Page not mapped"                         unmap or translate of an absent page
+  Pml4NotPresent ...    "PML4/PDPT/PD/PT entry not present"        the walk stopped at a missing level
+  AlreadyMapped         "Page already mapped"                     a double map at the same VA
+  UnhandledPageFault    "Unhandled page fault"                    the fault path could not classify it
+  KernelSpaceViolation  "Kernel space violation"                  a user helper aimed at the kernel half
+```
+
+The two that name a hardening or isolation problem are `WXViolation` and `KernelSpaceViolation`: the
+first is a caller asking for a W+X page and being refused at the gate (and it also bumps the hardening
+`wx_violations` counter), the second is a user-mapping helper pointed at a kernel-half address. The
+`Pml4NotPresent` family tells you exactly which level of the four-level walk found a missing entry,
+which is how a translate failure is localised to a level rather than left as "not mapped". A
+`FrameAllocationFailed` here is subtle: it is not the leaf frame but an *intermediate page table* the
+manager could not allocate, so it is physical exhaustion surfacing during a deep map. `PAGING_STATS`
+records page faults, demand loads, and cow faults, so the ratio of demand loads to ordinary faults is
+the runtime signal for a capsule that is faulting more than its eager mappings should require.
+
 ## Where this connects
 
 The manager is brought up, and the kernel's own mappings established, by the
@@ -159,12 +220,18 @@ W^X invariant named here is enforced and its guarantees stated on the
 [hardening](hardening.md) page. And every intermediate page table this manager
 allocates comes from the [physical frame allocator](physical-frames.md).
 
-## Source
+## Source map
 
 ```
   src/memory/paging/manager/core/types.rs        the PagingManager state
   src/memory/paging/types/permissions/flags.rs   PagePermissions and is_wx_violation
   src/memory/paging/types/address_space.rs       the AddressSpace record
-  src/memory/paging/manager/api/mapping.rs        map_page and the typed helpers
-  src/memory/paging/manager/shootdown.rs          the per-ASID TLB shootdown
+  src/memory/paging/manager/api/mapping.rs       map_page and the typed helpers
+  src/memory/paging/manager/shootdown.rs         the per-ASID TLB shootdown
+  src/memory/paging/error/types.rs               the PagingError variants and their strings
 ```
+
+Every reference above is verified against those trees. The W^X gate that this permission model feeds is
+on the [hardening](hardening.md) page, the lazy bits are populated by the [fault handler](faults.md),
+the intermediate tables come from the [physical frame allocator](physical-frames.md), and the broker
+authority the device helpers trust is on the [hardware broker](../hardware-broker/README.md) page.

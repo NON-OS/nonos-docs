@@ -86,7 +86,75 @@ re-exports the `enable_interrupts`, `disable_interrupts`, `without_interrupts`, 
 itself is immutable after construction, so loading it on each CPU installs the same vetted
 set of gates.
 
-## Source
+## Security analysis
+
+The IDT is the entire attack surface between ring 3 and ring 0: it names every way the CPU can enter
+the kernel, and it is the first thing a capsule would want to bend if it could. It cannot, and four
+properties draw that line.
+
+**One user-reachable gate, and it is the syscall gate.** `build_idt` sets every descriptor at ring 0
+except one. `configure_syscall` (`table.rs:171`) is the sole call to `set_privilege_level(Ring3)`, on
+vector `0x80`. Every other gate keeps the default ring-0 DPL, so a capsule that executes `int 3`,
+`int 14`, or any vector other than `0x80` takes a general protection fault rather than invoking the
+handler, because the CPU checks the gate DPL against the caller's CPL. The exceptions the CPU itself
+raises still deliver, but a capsule cannot *software-invoke* an arbitrary vector to reach a handler it
+should not.
+
+**The table is immutable after build.** `IDT` is a `lazy_static` built once (`table.rs:25`) and never
+mutated; `load` (`load.rs`) only re-points the IDTR at that same vetted table on each CPU. There is no
+runtime path a capsule can reach to install, replace, or redirect a vector. A driver that wants an
+interrupt does not touch the IDT at all: it binds through the broker, and the broker installs only into
+the pre-reserved broker vector slots (`install_broker_irq_entries`, `table.rs:162`), which point at
+fixed `extern "x86-interrupt"` entries in kernel text. This is the in-kernel half of the guarantee the
+[broker IRQ](../hardware-broker/irq.md) page makes from the capsule side: the capsule programs nothing,
+and there is nothing in the IDT for it to program.
+
+**The fragile faults run on private stacks.** Six exceptions carry an IST index (`table.rs`), so the CPU
+switches to a dedicated stack before pushing the trap frame. The point is isolation of the cases where
+the interrupted stack cannot be trusted: `#DF` recovers from a stack overflow that has already made the
+normal stack unusable, `#GP` on a ring-3 entry must not land on a `TSS.RSP0` that is being torn during a
+context switch, `#PF` needs a known-good stack to run guard-page handling, and `#DB`, `NMI`, and `#MC`
+each have their own reentrancy or timing hazard. The IST assignment subtracts one from the GDT constant
+because `set_stack_index` is zero-based over one-based hardware slots (`table.rs:54`), and getting that
+off-by-one wrong would silently aim a fatal fault at the neighbouring stack, so it is called out in the
+handler's own safety comment.
+
+**swapgs before any per-CPU read.** The user-reachable exceptions are installed by address as naked
+trampolines rather than as compiler wrappers precisely so the kernel GS base is loaded before a handler
+dereferences `gs`-relative state. An exception from ring 3 arrives on the user GS base, and a handler
+that read the per-CPU block first would fault on its own access and storm; the [trampolines](trampolines.md)
+close that window. The honest boundary is that this is a discipline enforced by hand-written entry code,
+not by the hardware: the correctness of every gs read downstream rests on the trampoline having swapped
+first, which is why the trampoline split, not the handler body, is the security-relevant part of the
+table.
+
+## Debugging the IDT
+
+Two failure shapes show up here, and they look nothing alike.
+
+**A vector faults instead of running.** If a capsule (or kernel code) invokes a vector it may not, the
+CPU raises `#GP`, and the general-protection trampoline dumps a line on the serial console (or the
+framebuffer on a `NONOS_FBCONSOLE=1` build) through `dump_trap`:
+
+```
+  [TRAP GP] cpl=3 rip=… rsp=… cs=… ss=… rflags=… cr3=… asid=… pid=… err=…
+```
+
+The `cpl=3` says the fault came from user mode and the `err=` carries the selector index of whatever the
+CPU refused, so a capsule that tried to `int` a ring-0 gate is diagnosed directly from the trap line
+rather than from a mysterious hang. A `#GP` at `cpl=0` with a vector-shaped error code instead points at
+a mis-built gate: a null handler (caught early by `validate_handler_address`) or an IST index out of the
+zero-to-six range (`validate_ist_index`, which returns `"IST index must be 0-6"`).
+
+**A vector runs on the wrong stack.** The IST off-by-one is the classic silent IDT bug. If an assignment
+used the raw GDT constant without the `- 1`, the fault would deliver onto the adjacent IST slot, and the
+symptom is not a clean panic but a corrupted trap frame or a nested fault when the fatal handler itself
+runs on memory another handler owns. The tell is a double fault whose `[TRAP` line and
+`dump_stack_info` report a stack pointer inside the wrong IST region; the fix is in `table.rs`, not in the
+handler. Because the table is immutable, an IDT-level bug is always a build-time bug, so the first check
+is always `build_idt` and its three configure passes, never a runtime mutation.
+
+## Source map
 
 ```
   src/interrupts/idt/vectors.rs   the vector map and classification tables
@@ -94,3 +162,8 @@ set of gates.
   src/interrupts/idt/entry.rs     GateType, EntryOptions, the validators
   src/interrupts/idt/load.rs      load and the interrupt-flag primitives
 ```
+
+Every reference above is verified against those trees. The naked entry code the user-reachable vectors
+point at is on the [trampolines](trampolines.md) page, the handler bodies past the trampoline are on the
+[handlers](handlers.md) page, the broker vectors this table reserves are on the
+[broker IRQ](../hardware-broker/irq.md) page, and the IST slots come from the [GDT](../smp/README.md).

@@ -187,3 +187,73 @@ of which writable surfaces were present.
 | Storage capsule path | Source audit of mount, encryption, block I/O, flush, cleanup, and recovery paths. |
 | Security, entropy, crypto, keyring | Trust verification plus source audit of key lifetime, entropy source, and capability gates. |
 | Release candidate | Production boot evidence, hardware dossier, attestation receipts, and closed blockers from this page. |
+
+## 8. Troubleshooting
+
+The lanes above fail in a few characteristic ways, and the message tells you which
+lane caught the problem.
+
+**The static lane fails on an arch leak.** `nonos-mk-static` runs the CI static
+script (`Makefile:1428`), which counts `cfg(target_arch)` and `crate::arch::x86_64::`
+uses outside `src/arch/` and fails if they grow. A build that fails here has
+generic code naming an architecture directly, the thing the
+[architecture boundary](../arch/boundary.md) exists to prevent. The fix is to
+route through `Arch::` or the appropriate seam, not to raise the baseline.
+
+**The symbol scan fails on a forbidden symbol.** `nonos-mk-scan` dumps the
+microkernel image with `nm` and fails if it finds a legacy module-path fragment
+(old filesystem, storage, desktop, graphics, shell, or service-engine symbols),
+`Makefile:1442`. A failure means a kernel-resident implementation of something
+that should be a capsule leaked back into the image. The scan also fails outright
+if the microkernel binary does not exist, printing the build-first hint
+(`Makefile:1444`); that is an ordering problem, not a leak, so build the baseline
+first.
+
+**Trust verification fails.** `nonos-mk-verify-trust` builds the desktop GUI
+production profile and then runs the host trust-chain tests, the on-disk artifact
+tests, and the baked-artifact SHA-256 ledger check (`Makefile:588`). A failure
+here is a mismatch between what was signed and what the kernel would verify: a
+stale or unsigned capsule artifact, a manifest that no longer verifies against its
+certificate, or a baked trust file whose hash does not match the ledger. This is
+the same class of failure the [signing](signing.md) page's troubleshooting covers,
+surfaced by the verify lane rather than at capsule sign time.
+
+**A lane passed but the OS still misbehaves at runtime.** This is the point
+section 1 opens with: static checks are not runtime proof. `nonos-mk-verify` green
+means the static gates, trust, and symbol scan all passed, but it does not boot
+the OS. Only the QEMU harnesses in `nonos-mk-test` (`Makefile:1478`) and the
+interactive run lanes exercise the running system. A change that compiles, signs,
+and scans clean can still fault at boot; the runtime-evidence workflow in section
+6 exists for exactly that gap.
+
+**The run lane never reaches the desktop.** `nonos-mk-run` depends on the
+production desktop build, ESP packaging, a block image, and writable OVMF vars
+(`Makefile:1282`). A boot that stalls before the desktop is usually a runtime
+fault in a capsule or a driver that did not claim its device, not a build failure;
+the serial log (`QEMU_SERIAL_LOG`, default `target/qemu-serial.log`) is the first
+place to look, and the debug run lane with GDB on port 1234 is the second. A
+desktop that comes up but ignores a laptop's built-in input is the profile
+problem from the [toolchain](toolchain.md) page: `microkernel-desktop-gui` has no
+i2c input drivers, `microkernel-full-gui` does.
+
+## 9. Source map
+
+```
+  Makefile
+    :588   nonos-mk-verify-trust    build desktop-gui-prod, then host + on-disk + ledger trust checks
+    :1282  nonos-mk-run             production build, ESP, block image, OVMF vars, then QEMU
+    :1427  nonos-mk-static          runs nonos-ci/run-static-checks.sh
+    :1442  nonos-mk-scan            nm symbol dump and forbidden-fragment scan
+    :1470  nonos-mk-verify-fast     static gates only
+    :1473  nonos-mk-verify          static + trust + scan
+    :1478  nonos-mk-test            verify + the required QEMU boot harnesses
+  nonos-ci/run-static-checks.sh     the arch-leak, shape, and contract static gates
+  nonos-mk/capsule.mk               the per-capsule sign and verify rules (see signing.md)
+```
+
+The capsule sign and verify rules these lanes depend on are on the
+[signing](signing.md) page, the target files and build ordering are on the
+[toolchain](toolchain.md) page, and the arch-leak gate enforces the boundary
+documented under [arch/](../arch/boundary.md). The anchors in this map are
+verified against the current `Makefile`; a few `file:line` citations in the older
+sections above predate small Makefile edits.

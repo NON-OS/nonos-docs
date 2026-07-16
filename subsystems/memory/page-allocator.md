@@ -100,14 +100,94 @@ and the actual map and unmap, over the [frame allocator](physical-frames.md) and
 code reach through `alloc` is the separate [heap](heap.md); the page allocator is for
 page-granular kernel ranges.
 
-## Source
+## Security analysis
+
+The page allocator carves whole kernel virtual ranges, including per-process kernel stacks, so its
+job is to hand those out clean and bounded and to refuse to tear down a range it did not create.
+Three properties hold that.
+
+**Zero on both ends.** `allocate_page` writes the whole range to zero before returning it
+(`alloc.rs`), and `deallocate_page` zeroes it again before it unmaps it (`dealloc.rs:26`). A caller
+therefore never sees a previous tenant's bytes when a range is handed out, and reclaimed memory holds
+no readable content when it goes back. This is the page-granular half of the
+[zeroization](zeroization.md) posture, and it matters most for kernel stacks, where the previous
+occupant's saved registers and locals would otherwise linger.
+
+**Bounded above and in count.** A single request is capped at `MAX_ALLOCATION_SIZE` (1 GiB) and the
+number of live tracked allocations at `MAX_TRACKED_PAGES` (100000) (`constants.rs`), both checked at
+the top of `allocate_page` (`alloc.rs:27`). So neither one oversize request nor an unbounded stream
+of small ones can run the tracking `Vec` away or drain virtual space through this path; an
+over-request is refused with `InvalidSize` or `TooManyPages` before anything is allocated.
+
+**Free only what was allocated here.** `deallocate_page` looks the address up in its tracked set and
+returns `PageNotFound` if it is not there (`dealloc.rs:31`) rather than issuing a blind unmap. The
+allocator will not tear down a range it did not carve, so a bad or stale virtual address cannot be
+used to unmap arbitrary kernel memory through this interface. The honest boundary: the tracking is a
+`Vec` scanned by address, not a guarantee about what lies between two allocations, so this layer
+gives lifetime and provenance safety, not guard-page isolation between neighbouring ranges. Guard
+pages around stacks are the [hardening](hardening.md) subsystem's job.
+
+## Debugging page allocation
+
+Every failure is a `PageAllocError` variant (`error/types.rs`) returned to the caller, so a failed
+kernel-range allocation names its cause rather than faulting:
+
+```
+  NotInitialized        the allocator was used before unified-VM bring-up
+  InvalidSize           size == 0, or size > MAX_ALLOCATION_SIZE (1 GiB)
+  TooManyPages          the request exceeds the buddy allocator, or tracked pages >= 100000
+  FrameAllocationFailed the buddy layer could not back the virtual range with frames
+  MappingFailed         the pages could not be mapped
+  OutOfVirtualSpace     no contiguous virtual range of that size is free
+  PageNotFound          deallocate_page was given an address this allocator never carved
+  TranslationFailed     the backing frame could not be resolved for the tracking record
+```
+
+The two that read as a bug in the caller rather than resource pressure are `PageNotFound` and
+`InvalidSize`: `PageNotFound` on a free means the address is wrong or was already freed (a
+double-free or a stale handle), and `InvalidSize` is a zero or absurd request. `OutOfVirtualSpace`
+and `TooManyPages` are the ceilings biting, and `FrameAllocationFailed` under them is genuine
+physical exhaustion one layer down in the [frame allocator](physical-frames.md). The runtime view is
+`AllocatorStats` (`types/stats.rs`): total allocations and deallocations, live page count, total
+bytes, and a peak high-water mark maintained with a compare-exchange loop so a concurrent allocation
+cannot lose a peak update. A live page count that climbs and never falls is a leak in a caller that
+allocates a kernel range and never frees it; the monotonic `page_id` and TSC timestamp on each
+`AllocatedPage` make the leaking allocation identifiable in a dump.
+
+## Where it sits
+
+```
+  page_allocator   tracked virtual-range allocation, zero-on-alloc/free, stats
+      |
+      v
+  buddy_alloc      contiguous virtual pages, frame backing, mapping and unmapping
+      |
+      v
+  frame allocator  raw physical frames        paging manager  the mappings
+```
+
+The page allocator is the tracked, zeroing, size-bounded front the rest of the kernel calls
+for whole-range allocations; the buddy allocator underneath owns the virtual-range bookkeeping
+and the actual map and unmap, over the [frame allocator](physical-frames.md) and
+[paging manager](paging-manager.md). The general-purpose byte allocator capsules and kernel
+code reach through `alloc` is the separate [heap](heap.md); the page allocator is for
+page-granular kernel ranges, and the guard pages and canaries that protect the stacks it carves
+are on the [hardening](hardening.md) page.
+
+## Source map
 
 ```
   src/memory/page_allocator/manager/alloc.rs    allocate_page, zero-on-alloc
   src/memory/page_allocator/manager/dealloc.rs  deallocate_page, zero-on-free
   src/memory/page_allocator/manager/mapping.rs  buddy-allocator backing and translation
   src/memory/page_allocator/manager/api.rs      the public surface and init
-  src/memory/page_allocator/types/page.rs        AllocatedPage, PageInfo
-  src/memory/page_allocator/types/stats.rs       AllocatorStats and the peak high-water mark
-  src/memory/page_allocator/constants.rs         the size and tracking bounds
+  src/memory/page_allocator/types/page.rs       AllocatedPage, PageInfo
+  src/memory/page_allocator/types/stats.rs      AllocatorStats and the peak high-water mark
+  src/memory/page_allocator/error/types.rs      PageAllocError
+  src/memory/page_allocator/constants.rs        the size and tracking bounds
 ```
+
+Every reference above is verified against those trees. The frames come from the
+[physical frame allocator](physical-frames.md), the mapping goes through the
+[paging manager](paging-manager.md), the zeroing is the [zeroization](zeroization.md) posture, and
+the guard pages around carved stacks are on the [hardening](hardening.md) page.

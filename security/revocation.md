@@ -151,12 +151,53 @@ spawn](capsules-and-trust.md), because a capsule that is already running was
 admitted under an anchor state that has since changed, and it is the per-process
 and per-token mechanisms, not the anchor lists, that reach it.
 
-## Source
+## Debugging a revocation
+
+The symptom of a revocation is the same as any other token failure: the capsule's
+next syscall comes back `EPERM` with a `[CAP-DENY]` line, because all three runtime
+scopes land in the resolver chain. What separates a revoke from an unrelated denial
+is the resolver step that fired, and the eight `ResolverError` variants
+(`src/syscall/contract/resolver/error.rs`) name them even though the `[CAP-DENY]`
+log does not print which one. The three revocation scopes map to three of them.
+
+`TokenRevoked` is the per-token set: the token's `(owner, nonce)` pair is in
+`REVOKED` (`token/revocation.rs`), which `is_token_valid` consults through
+`is_token_not_revoked`. The full validator `validate_token_full`
+(`token/validate.rs`) is the tool here, since it returns the failure as the string
+`"Token revoked"` rather than a bare false, so a diagnostic path that calls it can
+tell a revoked token apart from an expired one (`"Token expired"`) or a forged one
+(`"Invalid signature"`). `RevocationEpochStale` is the per-process scope: the token
+authenticates and is not in the revoked set, but its `revocation_epoch` is behind
+the process's current counter because `revoke` (`process/caps.rs:99`) bumped the
+counter and re-minted. A capsule that suddenly loses several capabilities at once,
+all with the same `[CAP-DENY]` pattern, is the epoch case, not a per-token revoke,
+because one increment retires every outstanding token of the process. And
+`BootSessionMismatch` is the cross-boot scope: a token carried from a previous boot
+fails the session-nonce check against this boot's latched value.
+
+To confirm which fired without instrumentation, use the order. If the capsule was
+freshly re-minted (a grant or revoke just ran) and old handles fail while new ones
+work, it is the epoch. If a specific token dies but the process keeps working, it
+is the per-token set. If everything the capsule holds is dead from its first
+syscall, and this is the first boot after a reboot, it is the session nonce. The
+anchor lists never show up here at all: a revoked publisher or certificate is
+refused at [verified spawn](capsules-and-trust.md) as a `[RUNTIME-LOAD] FAILED
+reason=id_cert` (variant `Revoked` or `NonosIdRevoked`), before the capsule ever
+holds a token, so a running capsule losing authority is never the anchor list.
+
+## Source map
 
 ```
   src/capabilities/token/revocation.rs   the revoked (owner, nonce) set
-  src/capabilities/token/validate.rs     is_token_valid and the full validator
+  src/capabilities/token/validate.rs     is_token_valid and validate_token_full
   src/process/caps.rs                    new_token, grant, revoke, install_token
   src/security/nonos_trust_anchor/schema.rs  the anchor revocation lists
   src/syscall/contract/resolver/         where the runtime checks run
+  src/syscall/contract/resolver/error.rs the ResolverError variants a revoke maps to
 ```
+
+The resolver chain and the `[CAP-DENY]`/`EPERM` surface are on the
+[capability model](capabilities-and-tokens.md) page; the anchor-list revocations
+that fire at spawn are on the [trust anchor](trust-anchor.md) and
+[verified spawn](capsules-and-trust.md) pages; the parent-nonce binding a revoke
+breaks for delegations is on the [delegation](delegation.md) page.

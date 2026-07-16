@@ -63,14 +63,76 @@ signature verification from leaking, through timing, where a forged value first 
 capability MAC check, the HMAC verify, and the field-element comparisons inside the signature
 code all use it. There is a constant-time test in `userland/crypto_proofs/src/constant_time_tests.rs`.
 
-## Source
+## Security analysis
+
+These primitives are the foundation the capability MAC, the IPC MAC, and every signature check
+sit on, so the properties worth stating are correctness against the published standards and the
+timing posture of the comparisons that decide verification.
+
+**Correctness is anchored to published vectors, not asserted.** Each in-tree hash has a
+known-answer test that compiles the real primitive source and runs it against a standard vector
+set: SHA-256 and SHA-512 against the NIST FIPS 180-4 vectors, Keccak-256 against the SHA-3
+vectors, BLAKE3 against the official BLAKE3 vectors across the plain, keyed, derive-key, and XOF
+modes, and HMAC and HKDF against their own KAT files under `userland/crypto_proofs/src/`. So the
+claim that these match the standard is something the test tree checks rather than a comment in the
+source.
+
+**MAC and secret comparisons fold the whole input before deciding.** The constant-time helpers
+`ct_eq` and the fixed-width `ct_eq_16` / `ct_eq_32` / `ct_eq_64`
+(`src/crypto/util/constant_time/compare.rs:20`) accumulate the byte-wise XOR difference into one
+register and only test it for zero after the loop, with a `compiler_fence` so the fold is not
+reordered away. There is no early return on the first mismatched byte, which is what keeps a MAC
+or signature check from leaking through timing where a forged value first diverges. HMAC's own
+`hmac_verify` (`src/crypto/util/hmac/core.rs:79`) uses the same fold-then-compare shape.
+
+**Key material is scrubbed inside the constructions that touch it.** HMAC volatile-zeros the
+padded key, the inner pad, and the outer pad as soon as each is consumed
+(`hmac/core.rs:53`), and the Keccak sponge zeros its 25-lane state and its buffer on drop with
+volatile writes and a `SeqCst` fence (`hash/sha3/keccak.rs:144`), so a hash of secret input does
+not leave the sponge state readable on the stack after it is done.
+
+The honest boundary is that these are portable reference implementations in Rust, not
+hardware-accelerated or formally constant-time throughout. The compression functions and the
+Keccak permutation are straight-line over fixed-size state, so their timing does not depend on
+secret values, but the `ct_eq` slice form still branches once on length before the fold, and the
+guarantee the code makes is limited to the equal-length MAC-comparison path where it is actually
+used. There is no AES-NI-style hardware path here; correctness against the vectors is proven,
+constant-time behaviour is argued from the code shape rather than measured.
+
+## Debugging hashes
+
+A hash or MAC problem shows up in one of two places, and they mean different things. At build and
+test time, a primitive that has drifted from the standard fails its known-answer test in
+`userland/crypto_proofs/src/` (the SHA, Keccak, BLAKE3, HMAC, and HKDF suites), and because those
+suites compile the real primitive source, a KAT failure means the shipping code disagrees with the
+published vector, not that a test fixture is stale. That is the signal for a wrong constant or a
+wrong round in the primitive itself.
+
+At runtime, a hash never fails; it just produces a digest. The failure surfaces one level up, in
+whatever compares the digest. A MAC or signature mismatch comes back as a plain `false` from
+`ct_eq` / `hmac_verify`, or as `CryptoError::AuthenticationFailed` / `VerificationFailed`
+(`src/crypto/error.rs`) from the callers that wrap it, with no detail about where the bytes
+diverged, which is the point of the constant-time path. So the way to tell the two apart is where
+the failure lands: a KAT failing under `crypto_proofs` is a broken primitive, while a `false` from
+a verify at runtime is a real MAC or key mismatch on correct primitives. If a MAC check fails for
+inputs you believe should match, the usual cause is a key-derivation or domain-separation
+difference (which BLAKE3 mode, which HKDF info string) rather than the hash, because the hash
+itself is the part covered by the vectors.
+
+## Source map
 
 ```
-  src/crypto/hash/blake3/            the in-tree BLAKE3 (capability MAC path)
-  src/crypto/hash/unified/sha256.rs  SHA-256
-  src/crypto/hash/sha512/            SHA-512 and SHA-384
-  src/crypto/hash/sha3/keccak.rs     Keccak-256
-  src/crypto/util/hmac/              HMAC and HKDF
-  src/crypto/util/constant_time/     constant-time comparison
-  userland/crypto_proofs/src/        the known-answer tests
+  src/crypto/hash/blake3/             the in-tree BLAKE3 (capability MAC path)
+  src/crypto/hash/unified/sha256.rs   SHA-256
+  src/crypto/hash/sha512/             SHA-512 and SHA-384
+  src/crypto/hash/sha3/keccak.rs      the Keccak sponge and its drop-time zeroization
+  src/crypto/util/hmac/core.rs        HMAC, the key scrub, and hmac_verify
+  src/crypto/util/constant_time/compare.rs  ct_eq and the fixed-width forms
+  src/crypto/error.rs                 the CryptoError variants a verify returns
+  userland/crypto_proofs/src/         the known-answer tests
 ```
+
+Every reference above is verified against those trees. The capability MAC that keys off BLAKE3 is
+on the [signing and MAC](../../security/signing-and-mac.md) page, the IPC MAC is on the
+[IPC envelope](../ipc/envelope.md) page, and the secure random path the keys come from is on the
+[randomness](randomness.md) page.

@@ -1,11 +1,12 @@
 # Security
 
-How NØNOS decides what code may run and what running code may do. The section
-divides into two halves of one story: admission, the pipeline that verifies a
-capsule before it becomes a process, and enforcement, the authority a capsule
-holds afterward and how every syscall is checked against it. Read the admission
-pages first, since the capabilities a capsule holds are the output of the
-admission pipeline.
+How NØNOS decides what code may run and what running code may do. Start with the
+[security model](security-model.md): the whole story on one page, the threat model, the end-to-end
+trust chain, the isolation guarantees, what is machine-checked, and the honest boundaries. This section
+then divides into two halves of that story: admission, the pipeline that verifies a capsule before it
+becomes a process, and enforcement, the authority a capsule holds afterward and how every syscall is
+checked against it. Read the admission pages first, since the capabilities a capsule holds are the
+output of the admission pipeline.
 
 ## Admission
 

@@ -21,7 +21,7 @@ capsule fleet does the work, which is the whole design of the system in one boot
 
 ## Sources
 
-The handoff types are `src/boot/handoff/`, the firmware init is `src/boot/firmware/`, the kernel init
+The handoff types are `src/boot/handoff/`, the firmware init is `src/boot/firmware.rs`, the kernel init
 sequence is `src/kernel_core/init/`, and the userspace supervisor is `src/userspace/init/`. The
 bootloader that verifies the kernel and produces the handoff is the separate `nonos-bootloader` crate.
 Every page is verified against those trees with `file:line` references.

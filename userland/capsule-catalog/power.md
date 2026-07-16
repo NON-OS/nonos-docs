@@ -71,6 +71,34 @@ power capsule holds. So the guarantee that only an authorized party can power th
 capsules granted the capability to reach the power service can request it, enforced by the kernel's
 routing, not by a check inside this capsule.
 
+The capability mask is `0x219` (`Capsule.mk`, `CAPSULE_REQUIRED_CAPS`), which decodes to CoreExec (1), IPC
+(8), Memory (16), and Admin (512). Admin is the whole reason this capsule exists: `mk_admin_reboot` and
+`mk_admin_shutdown` are privileged admin syscalls, and the kernel only honors them from a caller holding
+the Admin capability, which is exactly the elevated bit in this mask. The least-privilege reading is that
+Admin is the only power beyond the service baseline: it holds no Crypto, no FileSystem, no Network, and no
+hardware capability at all, so the capsule that can reset the machine cannot read a key, write a file, open
+a socket, or touch a device. That is the correct shape for a reset button, one privileged verb and nothing
+else. This mask is the same `0x219` the [policy](policy.md) capsule holds, and for the same structural
+reason: both hold exactly one Admin-class power and are otherwise minimal. The honest boundary, stated in
+the [gaps](#honest-gaps), is that there is no caller attestation, so the real gate on who may power the
+machine is the capability to *reach* port 4448, not any check inside the handler.
+
+## Debugging
+
+The service is `power` on port 4448 (`Capsule.mk`, `service:4448:power`), and the runner waits on that
+fixed port with `mk_ipc_recv_from(4448, ...)` and replies directly to the attested sender
+(`src/server/runner.rs:25`). Like [payment](payment.md), the power capsule is built into the image (the
+Makefile includes `userland/capsule_power/Capsule.mk`) but is not spawned by the kernel init spawn plan, so
+there is no `[POWER] capsule spawned` marker in the boot fleet; it is launched on demand and registers
+under its manifest endpoint, so the test that it is up is whether `mk_service_lookup("power")` resolves
+rather than a boot line. The behavior to expect when debugging a reboot that appears to hang is by design:
+`reboot` builds its success reply *before* calling `mk_admin_reboot`, and the machine resets before that
+reply can be delivered, so a caller should not wait on a reboot ack. `shutdown` is the opposite, it calls
+`mk_admin_shutdown` and returns that syscall's `rc` as the status, so a nonzero status back from a shutdown
+means the admin syscall itself refused (the caller reached the service but the kernel did not honor the
+admin verb), which is the signature of a caller that reached port 4448 without the Admin authority the
+syscall requires.
+
 ## Honest gaps
 
 Stated plainly: the power capsule has **no caller attestation**, so any capsule that can reach port 4448

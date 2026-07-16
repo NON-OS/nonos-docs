@@ -96,3 +96,47 @@ The broker ABI does not parse device protocols, implement NIC/storage/GPU
 drivers in the kernel, persist hardware state, or allow arbitrary physical
 memory access. Protocol state belongs in driver capsules and higher service
 capsules.
+
+## Debugging a driver against the broker
+
+The claim is where most bring-up problems surface, because every grant call
+checks it. A driver whose claim never succeeds is being refused one of two ways.
+`EBUSY` on `MkDeviceClaim` means the device is already claimed: either two drivers
+were spawned for the same hardware, or a previous instance did not release it on
+exit, which is a spawn-plan question rather than a hardware one. `EINVAL` with an
+unknown device id means the device is not in the broker table at all, which is a
+discovery problem one layer down; the device was never enumerated, so no `device`
+argument will ever name it. A `NONOS_DEVICE_CENSUS=1` build renders the broker
+device table to the framebuffer and holds, so the device list can be read off
+before any driver runs.
+
+Once claimed, the common grant failure is `EPERM`, and it has two independent
+causes that look identical from the return value. Either the capsule's manifest
+did not declare the capability the call needs, `Mmio` for a map, `Irq` for a bind
+or poll, `Dma` for a pin, so the capability gate refused it; or the manifest
+declared the bit but the call named a grant or claim it does not own, or presented
+a stale epoch after a release-and-reclaim cycle. When a driver gets `EPERM` on
+`MkIrqPoll`, check both that the manifest carried `Irq` and that the poll names
+the grant id the bind returned. Interrupts that bind cleanly but never seem to
+arrive are usually a poll-and-ack question rather than a routing one: the line
+stays masked between delivery and acknowledgement, so a driver that binds and
+polls but never calls `MkIrqAck` sees the sequence advance once and then stall.
+`MkIrqWait` is reserved and has no handler, so a driver written against it gets
+`ENOSYS` and makes no progress; the poll-and-ack loop is the supported path today.
+
+## Source map
+
+```
+  src/hardware/broker/claim.rs      the claim table, the epoch, claim/release,
+                                    and release_all_for_pid from process exit
+  src/hardware/broker/mmio/         MkMmioMap/Unmap and the BAR range validation
+  src/hardware/broker/irq/          MkIrqBind/Poll/Ack/Unbind and the mask policy
+  src/hardware/broker/dma/          MkDmaMap/Unmap and the buffer pin
+  src/hardware/broker/pio/          the x86_64-only port grants (cfg-gated)
+  src/syscall/microkernel/irq/out.rs   IrqBindOut and IrqPollOut, the reply shapes
+  src/hardware/broker/device/record.rs the DeviceRecord returned by MkDeviceList
+```
+
+The capability each broker call requires is on [the syscall page](syscalls.md);
+the claim and epoch model these grants hang off is on
+[the hardware broker page](../subsystems/hardware-broker/claim.md).

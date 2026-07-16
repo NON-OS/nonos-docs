@@ -70,13 +70,75 @@ each backend implements the same operations against its platform's controller. R
 `ack_grant`, `release_for_device`, and `release_all_for_pid`, unbinds the vector and, for MSI-X,
 tears the table entry down; see [revocation](revocation.md).
 
-## Source
+## Security analysis
+
+An interrupt is a direct line into the kernel, so a userspace driver model is most dangerous here, and
+it is made safe by one rule: the capsule programs nothing. Every controller write, the IO-APIC
+redirection entry, the MSI-X table entries, the vector allocation, is done by the kernel; the capsule
+receives only a grant id and a base vector and drives interrupts through `wait`, `poll`, and `ack`. Four
+properties follow.
+
+**No vector programming.** The capsule never sees or writes the MSI-X table: the [MMIO](mmio.md) clamp
+withholds those pages and the IRQ path programs them. So a compromised driver cannot redirect its
+interrupt to another vector, aim it at another CPU, or point it at a vector another capsule owns; it
+cannot manufacture an interrupt aimed at a victim.
+
+**One device, one binding.** A GSI or device already bound is refused with `AlreadyBound`, so a capsule
+cannot steal the interrupt line of a device it does not hold, and an MSI-X bind is all-or-nothing per
+device per pid.
+
+**Handler in ring 3.** When a broker vector fires, the kernel entry records the pending interrupt against
+the grant and wakes the capsule; the handling runs in ring 3, driven by syscalls, never in interrupt
+context. A buggy or slow driver handler cannot corrupt kernel interrupt state or hold off other
+interrupts, because it does not run at interrupt priority.
+
+**No leaked vectors.** Every failure path frees what it allocated: a failed IO-APIC program frees the
+vector slot, a failed MSI-X run frees the whole contiguous allocation, and exit revocation unbinds every
+vector a pid held. Combined with the MMIO MSI-X clamp, the split is complete: the driver drives the
+device, the kernel owns the vectors.
+
+## Debugging interrupts
+
+Interrupt failures come in two shapes, diagnosed very differently.
+
+**The bind is refused.** `MkIrqBind` returns one `IrqBindError` (`irq/types.rs`), each a specific cause:
+
+```
+  NotClaimed / StaleEpoch      the pid does not hold a current claim on the device
+  NotDeviceIrq                 the device has no interrupt pin/line to bind
+  AlreadyBound                 the GSI or device is already bound (by this or another pid)
+  NoVector                     the broker vector pool is exhausted
+  NotIntx / NoMsixCap          the flags asked for a mode the device does not have
+  BadMsixBar / BadVectorCount  a malformed MSI-X request (bad table BAR, zero or over-large count)
+  MsixProgramFailed            the controller write itself failed
+```
+
+**The bind succeeds but the interrupt never fires.** This is the hard one, and it only appears on real
+hardware. The grant is valid, `poll` reports nothing, and the driver waits forever. It is not a broker
+bug; it is a device or routing state the bind cannot see. The usual causes: on x86 INTx, the IO-APIC
+redirection entry routes the GSI to a LAPIC destination that is not the CPU actually running (the boot
+CPU's APIC id is not always 0, and a redirect delivered to destination 0 lands on a core that never
+services it); the device's PCI command register has bus-master or INTx disabled, so it never asserts the
+line; an MSI-X device whose global enable bit was never set; or a line left masked. The tool is `poll`:
+if `poll` shows the interrupt pending but `wait` never returned, the wakeup path is at fault; if `poll`
+never shows it pending, the interrupt is not reaching the vector and the fault is in the controller
+routing or the device's own enable bits, which the driver inspects through its [MMIO](mmio.md) register
+window and its PCI config. This is exactly the shape of "the driver claimed the device and bound the IRQ
+but no events arrive" on a laptop, where an i2c or xHCI interrupt routes to a destination the running CPU
+is not listening on.
+
+## Source map
 
 ```
   src/hardware/broker/irq/mod.rs        arch backend selection and the public surface
-  src/hardware/broker/irq/bind.rs        INTx and MSI-X bind (x86)
-  src/hardware/broker/irq/validate.rs    the pure MSI-X validators and error order
-  src/hardware/broker/irq/dispatch.rs    interrupt delivery to the waiting capsule
-  src/hardware/broker/irq/aarch64/       GICv3 backend
-  src/hardware/broker/irq/riscv64/       PLIC backend
+  src/hardware/broker/irq/bind.rs       INTx and MSI-X bind (x86)
+  src/hardware/broker/irq/validate.rs   the pure MSI-X validators and error order
+  src/hardware/broker/irq/types.rs      the request/grant types and the IrqBindError variants
+  src/hardware/broker/irq/dispatch.rs   interrupt delivery to the waiting capsule
+  src/hardware/broker/irq/aarch64/      GICv3 backend
+  src/hardware/broker/irq/riscv64/      PLIC backend
 ```
+
+Every reference above is verified against those trees. The kernel-side vector entry is on the
+[IDT](../interrupts/idt.md) page, the MSI-X table pages this path keeps out of the capsule are on the
+[MMIO](mmio.md) page, and the exit revocation wiring is on the [revocation](revocation.md) page.

@@ -107,7 +107,56 @@ security is the security of these well-studied components as implemented here. T
 that does exist is on the [attestation verifiers](pedersen-attestation.md), which are fuzzed to reject
 random proofs over thousands of adversarial inputs.
 
-## Source
+## Security analysis
+
+The STARK's job is to be a verifier a dishonest prover cannot fool, and the way it fails is as important
+as the way it passes.
+
+**The verifier recomputes, it never trusts.** `stark_verify` (`air/verify.rs:40`) redraws every
+Fiat-Shamir challenge from the transcript itself, recomputes the composition value at the out-of-domain
+point from the AIR's own algebra, and checks each query's Merkle openings against the committed roots. It
+does not read a claimed pass/fail from the proof. This is what makes soundness structural rather than
+polite: a proof is accepted only because the verifier reran the constraint algebra and it matched, so a
+forged evaluation has to survive the recomputation, not just be asserted.
+
+**Every check is fail-closed, and the return is a bare `bool`.** `stark_verify` returns `false` the
+moment anything is off: the wrong shape (`air/verify.rs:52`, the root, frame, and query counts must match
+the AIR), a Merkle opening that does not reconstruct, or a FRI query that does not match. FRI itself
+requires the final layer to be a single constant (`fri/verify.rs:63`) and rejects otherwise, which is the
+low-degree conclusion, because a high-degree codeword folds to a non-constant with overwhelming
+probability. There is no partial-credit path and no exception that leaves the proof half-accepted; the
+function is a total predicate that says yes only when everything held.
+
+**The honest boundary is that soundness is inherited, not proven in-tree.** As the scope section states,
+this system ships no machine-checked proof of its own soundness and, being `no_std`, carries no in-tree
+unit tests of the STARK itself. Its security is the security of low-degree extension, Merkle commitment,
+random-coefficient composition, DEEP out-of-domain binding, and the FRI test as implemented here. The
+negative testing that does exist is on the [attestation verifiers](pedersen-attestation.md), fuzzed to
+reject random proofs over thousands of adversarial inputs. So the claim is "a faithful implementation of
+sound components," not "a formally verified verifier," and this page says so rather than implying more.
+
+## Debugging the STARK
+
+Because `stark_verify` returns only `true` or `false`, a rejection carries no message of its own; you
+localize it by the shape check it fails and by the runtime path that consumes the result.
+
+**Where a rejection actually surfaces.** In the running kernel the STARK and zk verifiers are reached
+through capsule attestation, and that path prints. The [attestation gate](../../security/attestation.md)
+emits `[ZK-ATTEST] ok`, `[ZK-ATTEST] FAIL`, or `[ZK-ATTEST] none` on the serial console with the capsule
+name (`src/kernel_core/process_spawn/capsule_spawn/runner/attest_gate.rs`), so a proof that fails to
+verify shows up there, not inside the prover. That marker is the first thing to read when a signed capsule
+will not spawn.
+
+**Splitting a bare `false` by cause.** The early shape check (`air/verify.rs:52`) rejects a proof whose
+root count, out-of-domain frame length, or query count does not match what the AIR declares, which is the
+signature of a proof built against a different AIR shape than the one verifying it, a serialization or
+version mismatch rather than a soundness failure. A proof that passes the shape check but still returns
+`false` failed either a Merkle opening or the FRI consistency, meaning the committed data and the claimed
+evaluations do not agree, which is the genuine "this is not a valid proof of this statement" case. The
+constant-final-layer check in FRI (`fri/verify.rs:63`) is the specific spot a not-actually-low-degree
+codeword dies, so a prover bug that produces a too-high-degree quotient surfaces exactly there.
+
+## Source map
 
 ```
   src/crypto/stark/air/spec.rs         the Air trait
@@ -117,4 +166,10 @@ random proofs over thousands of adversarial inputs.
   src/crypto/stark/fri/                  the BLAKE3 FRI (prove, fold, verify)
   src/crypto/stark/fri_poseidon/         the recursion-friendly Poseidon FRI
   src/crypto/stark/transcript.rs, poseidon_transcript.rs   the Fiat-Shamir transcripts
+  src/kernel_core/process_spawn/capsule_spawn/runner/attest_gate.rs   the [ZK-ATTEST] marker a rejection surfaces through
 ```
+
+Every reference above is verified against those trees. The AIRs this prover and verifier operate on are
+cataloged on the [AIR catalog](air-catalog.md) page, the field and hash they are expressed over are on the
+[field and hash](field-and-poseidon.md) page, and the runtime gate that consumes a verification result and
+turns a `false` into a refused spawn is on the [capsule attestation](../../security/attestation.md) page.

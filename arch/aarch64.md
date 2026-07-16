@@ -57,9 +57,59 @@ runtime bring-up and hardware validation as x86_64. The plan is x86_64 in produc
 and riscv64 to architecture-ready, then QEMU bring-up, then hardware. This page documents the code that
 exists; it does not claim aarch64 is a proven runtime target yet.
 
-## Source
+## Security analysis
+
+The honest security statement for aarch64 is scoped by its maturity. The backend implements the same
+`ArchOps` contract as x86_64, so the same structural guarantees apply at the boundary: the two isolation
+primitives, `switch_address_space` (TTBR) and `flush_tlb_one`, exist and are real, because the
+fail-to-link discipline of the [boundary](boundary.md) would refuse to build the target if they did not.
+That is what "architecture-ready" buys on the security side: the isolation calls the kernel depends on
+are present and typed, not stubbed out to no-ops.
+
+What it does not yet buy is validated runtime enforcement. The ARM address-translation regime (the MMU
+module and its TTBR switch), the GICv3 interrupt routing that backs the
+[hardware broker's](../subsystems/hardware-broker/irq.md) IRQ grants on ARM, and the exception vector
+table have not been through the same runtime bring-up and hardware validation as the x86_64 path. The
+same isolation properties are intended to hold, but on aarch64 they are asserted by construction and not
+yet proven on hardware. Anyone reasoning about the trust boundary should read x86_64 as the enforced
+path and aarch64 as the architecture-ready one, exactly as the maturity ladder states.
+
+One structural point does carry over cleanly: the CPU id is derived from MPIDR affinity, the ARM
+analogue of the APIC id, so the same correctness edge as x86_64 applies. The id the kernel reasons about
+is the one the GIC routes by, which is what an interrupt-routing path needs to be safe.
+
+## Debugging
+
+Because aarch64 is pre-runtime, its failure modes are compile-and-link shaped today, with hardware-shaped
+ones expected once bring-up begins.
+
+**A link failure on an `ArchOps` method for aarch64.** This is the fail-to-link discipline: the backend
+must implement every primitive or the target does not build. The delegation layout is deliberate here, so
+a missing primitive maps to a specific module (interrupt masking in `irq_*`, the MPIDR id in `cpu_id`,
+the TTBR switch in `address_space`), and the fix is to complete that module, not to add a default.
+
+**No serial output on bring-up.** The first thing to come up on a new target is the console. The `uart`
+module is the ARM serial console; if it is misconfigured the kernel can be running with nothing to show
+for it. On this backend the console is the primary debugging instrument, the same role serial plays in
+the QEMU run lanes on the [workflows](../build/workflows.md) page.
+
+**Secondary CPUs never start.** PSCI is how aarch64 brings up secondary cores, where x86 uses the
+trampoline. A single-core-only bring-up on ARM points at PSCI rather than at the generic SMP layer, which
+is written once and calls through the arch seam.
+
+## Source map
 
 ```
-  src/arch/aarch64/abi/archops.rs   the ArchOps backend (delegating to the modules below)
-  src/arch/aarch64/gic/, psci/, mmu/, timer/, exceptions/, uart/   the ARM machinery
+  src/arch/aarch64/abi/archops.rs   the ArchOps backend, delegating to the modules below
+  src/arch/aarch64/abi/             the per-primitive modules (cpu_id, time, tlb, address_space, irq_*)
+  src/arch/aarch64/gic/             the Generic Interrupt Controller (GICv3), the IRQ backend on ARM
+  src/arch/aarch64/psci/            secondary-CPU power control
+  src/arch/aarch64/mmu/             the ARM page-table format behind the shared paging manager
+  src/arch/aarch64/timer/, exceptions/, uart/   generic timer, exception vectors, serial console
+  src/arch/fdt/                     the flattened-device-tree platform discovery this backend uses
 ```
+
+The `ArchOps` contract these delegate to is on the [boundary](boundary.md) page, the device-tree
+discovery is on the [platform discovery](platform-discovery.md) page, and the GIC's role as the IRQ
+backend is on the [IRQ](../subsystems/hardware-broker/irq.md) page. Every reference is verified against
+`src/arch/aarch64/`.

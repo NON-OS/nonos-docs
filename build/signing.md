@@ -95,3 +95,94 @@ anchor, ELF, target triple, requested caps, and declared endpoints
 (`src/kernel_core/process_spawn/capsule_spawn/runner/preflight.rs:29`).
 `spawn_verified` installs caps from the verified manifest result and passes that
 to process install (`src/kernel_core/process_spawn/capsule_spawn/runner/verified.rs:26`).
+
+## 6. Security analysis
+
+The signing pipeline is the build-time half of the trust boundary; the kernel's
+spawn-time verification is the runtime half, and the two are designed so the
+build cannot produce anything the kernel will later accept without the same
+evidence the kernel re-checks. Three properties are worth stating plainly.
+
+**The build verifies what it signs, on the same machine that signed it.** The
+manifest rule does not stop at signing. After `sign-manifest` it runs
+`verify-manifest` against the certificate and the sealed trust policy
+(`nonos-mk/capsule.mk:237`), so a capsule that signs but does not verify fails the
+build rather than shipping. This closes the gap where a signing bug produces an
+artifact that only fails much later, at spawn, on a real boot.
+
+**Two signature algorithms, not one.** Both the certificate and the manifest
+carry an Ed25519 and an ML-DSA-65 signature, a classical and a post-quantum
+signature over the same material. The kernel's preflight verifies every required
+algorithm over the signed region
+(`src/kernel_core/process_spawn/capsule_spawn/runner/preflight.rs:29`), and both
+must pass for a production capsule. A break in one algorithm does not by itself
+admit a forged capsule.
+
+**Private seeds never enter the kernel or the committed tree.** The trust anchor
+private seeds and the per-capsule publisher seeds live under `.keys`
+(`Makefile:488`), separate from the committed public keys, and only the public
+material is embedded into the kernel with `include_bytes`. The kernel verifies
+against the baked trust anchor policy; it never holds a signing key. This is what
+lets the trust anchor be a genuine root: possession of the kernel image does not
+grant the ability to mint a capsule the kernel will trust.
+
+The `nonos_id` binding is a fourth, quieter property. Each certificate's identity
+is recomputed from handle, domain, and recovery on every sign
+(`nonos-mk/capsule.mk:194`), so renaming a certificate file cannot silently
+rebind it to a different identity; the identity is derived, not stored and
+trusted.
+
+## 7. Troubleshooting
+
+The signing failures worth naming come from missing keys and from the
+build-verifies-what-it-signs discipline catching a mismatch.
+
+**Missing publisher key.** Before any capsule signs, `nonos-mk-check-<slug>-keys`
+asserts the Ed25519 and ML-DSA-65 seeds and public files exist
+(`nonos-mk/capsule.mk:184`). A missing file fails with an explicit
+`::error::missing <path>` and the exact `capsule-sign keygen` command to create
+it. The certificate and manifest rules take this check as an order-only
+prerequisite (`nonos-mk/capsule.mk:222`), so signing never runs against absent
+keys.
+
+**Manifest verification fails after signing.** The manifest rule's own
+`verify-manifest` step (`nonos-mk/capsule.mk:237`) checks the freshly signed
+manifest against the certificate and trust policy. A failure here usually means a
+mismatch the build should not ship: a `payload_hash` that no longer matches the
+ELF (the manifest depends on the ELF so a rebuild forces a re-sign, but a
+hand-edited or stale artifact defeats that), a namespace or caps ceiling outside
+what the certificate allows, or a certificate signed under a different trust
+anchor epoch than the sealed policy. The fix is to rebuild the capsule cleanly so
+the ELF, certificate, and manifest are consistent, not to skip the verify step.
+
+**A kernel that will not build because an embedded artifact is missing.** The
+kernel embeds each capsule's certificate and manifest with `include_bytes` from
+`nonos-data/trust/capsules/` (`src/userspace/capsule_desktop_shell/embed.rs:18`).
+If a capsule was not signed, those files do not exist and the kernel compile
+fails at the `include_bytes`. This is the build-ordering requirement from the
+[toolchain](toolchain.md) page: sign the capsules before building the kernel that
+embeds them.
+
+## 8. Source map
+
+```
+  nonos-mk/capsule.mk               the per-capsule cert/manifest sign and verify rules
+    :184  check-<slug>-keys         asserts publisher seeds and pubs exist
+    :204  sign-id-cert              signs the NØNOS-ID certificate
+    :224  sign-manifest             signs the manifest against the cert
+    :237  verify-manifest           re-verifies the signed manifest vs cert and policy
+  Makefile
+    :122  NONOS_TRUST_DIR           the committed trust root nonos-data/trust
+    :488  key layout                .keys/ holds private seeds, trust/keys/ the pubs
+    :603  mk-trust-policy           seals the trust anchor policy
+  src/security/capsule_manifest/    the manifest schema and kernel-side verify
+  src/security/nonos_id_cert/       the certificate schema
+  src/kernel_core/process_spawn/capsule_spawn/runner/preflight.rs   spawn-time verification
+```
+
+The build-ordering and signing-key requirements are on the [toolchain](toolchain.md)
+page, the verify lanes that re-check trust are on the [workflows](workflows.md)
+page, and the runtime spawn gate these artifacts feed is in the
+[architecture overview](../architecture/overview.md). Some line numbers in the
+prose above predate small Makefile edits; the anchors in this map are verified
+against the current `nonos-mk/capsule.mk` and `Makefile`.

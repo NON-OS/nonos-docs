@@ -240,26 +240,26 @@ client, compositor, and input route without `nonos_app_skeleton` in the middle.
 
 ## 6. App boot inclusion
 
-The current init entry path registers the launcher broker, then calls desktop
-and market after network
-(`src/userspace/init/entry.rs:33`, `src/userspace/init/entry.rs:34`,
-`src/userspace/init/entry.rs:35`, `src/userspace/init/entry.rs:36`). The
-spawn plan module imports desktop, desktop services, input probe, drivers,
-network, and core, but does not import the app fleet modules or
-export an app spawn entry (`src/userspace/init/spawn_plan/mod.rs:17`,
-`src/userspace/init/spawn_plan/mod.rs:41`). `apps.rs` and `apps_tools.rs`
-still define a source-level app fleet for input proof, about, calculator,
-terminal, file manager, text editor, settings, and process manager
-(`src/userspace/init/spawn_plan/apps.rs:17`,
-`src/userspace/init/spawn_plan/apps_tools.rs:17`). In the current tree those
-functions are not reached by `run_init`. Interactive launch goes through the
-desktop shell launcher and the init-owned `desktop.launcher` broker: shell
-focuses an existing app service when present, otherwise it sends a launch id to
-the broker, which authorizes the request against the current desktop shell pid
-and calls the allowlisted verified spawner
-(`userland/capsule_desktop_shell/src/server/handlers/launcher_request/request.rs:19`,
-`src/userspace/init/launcher/authorize.rs:19`,
-`src/userspace/init/launcher/spawn.rs:17`).
+The current init entry path spawns the app fleet directly. After network,
+desktop, and market, `run_init` calls `spawn_apps` before it drops its own
+priority and enters the residual loop (`src/userspace/init/entry.rs:31`,
+`src/userspace/init/entry.rs:32`, `src/userspace/init/entry.rs:33`). The spawn
+plan module exports `spawn_apps` from `app_orchestrator`, which walks the
+`apps.rs` and `apps_tools.rs` fleets (`src/userspace/init/spawn_plan/mod.rs:38`,
+`src/userspace/init/spawn_plan/apps.rs:17`). `spawn` in `apps.rs` brings up the
+input proof capsule, about, hello, calculator, snake, wallet, terminal, and
+file manager, then hands off to `apps_tools::spawn` for the process manager and
+the rest of the tool fleet (`src/userspace/init/spawn_plan/apps.rs:17`,
+`src/userspace/init/spawn_plan/apps_tools.rs:17`). Every one of these is a
+feature-gated call into `boot::capsule`, so a disabled feature simply drops the
+capsule from the fleet rather than failing the boot.
+
+Because the apps are already running, there is no launch broker. The desktop
+shell taskbar does not spawn anything on click. It looks up the clicked app's
+service pid and, if the app is alive, sends that pid an `NCTL` focus control
+frame; if the lookup fails it does nothing
+(`userland/capsule_desktop_shell/src/server/handlers/launcher_request.rs:26`,
+`userland/capsule_desktop_shell/src/server/handlers/launcher_focus.rs:24`).
 
 The setup wizard is spawned instead of the full desktop when
 `microkernel-setup-wizard` is enabled without input probe, and the full desktop
@@ -268,3 +268,84 @@ plus market is spawned after the wizard exits
 `src/userspace/init/spawn_plan/orchestrator.rs:63`). Input probe mode starts
 only input router, compositor, and input probe in that desktop phase
 (`src/userspace/init/spawn_plan/input_probe_fleet.rs:17`).
+
+## 7. Security analysis
+
+An application capsule is the least-trusted thing in the running system, and its
+capability mask reflects that. The eight skeleton apps carry `0x1819`, which is
+`CoreExec`, `IPC`, `Memory`, `GraphicsDisplayQuery`, and `GraphicsSurfaceCreate`
+(`userland/capsule_about/Capsule.mk:11` and the matching lines in the inventory).
+That is exactly enough to run, talk to the desktop services over IPC, query the
+display, register its own surface, and nothing more. An app holds no `Driver`,
+`Mmio`, `Irq`, `Dma`, `InputSource`, or `Admin` bit, so every device, interrupt, and
+admin syscall in the ABI returns `EPERM` for it at the gate
+(`src/capabilities/types.rs:54`). An app that tried to post its own input events or
+reboot the machine would be refused by the kernel, not by the desktop. The input proof
+capsule carries one extra bit, `0x1919` adds `Debug`, because it is a proof harness that
+emits debug markers; the ordinary apps do not.
+
+An app never grabs input for itself. Exclusive keyboard and pointer grabs are
+reserved to three named system capsules, the boot splash, the setup wizard, and the
+input probe, and the input router refuses a grab from anyone else with `E_ACCES`
+(the gate is on the [input router page](capsule-catalog/input-router.md)). So a
+skeleton app receives only the events the router routes to it by focus or hit test,
+and cannot monopolize the keyboard. Focus itself is the WM's decision, not the app's:
+the runner raises a focus request on button input, but the WM owns the focus state,
+so an app cannot steal focus by asserting it.
+
+The two direct GUI apps, the input probe and the setup wizard, are the exception that
+proves the rule. They do grab the keyboard, and they can only do so because they are
+on the router's trusted-grabber list by name. They still spawn through the same
+verified path as every other capsule, so being trusted to grab input does not make
+them trusted to skip signature and manifest verification.
+
+## 8. Debugging an app
+
+An app that launched but shows no window failed somewhere in boot, which opens the
+window, subscribes to input, and primes the first frame
+(`userland/app_skeleton/src/runner/boot.rs:33`). The order there is the debugging
+map: open allocates backing, registers and shares a surface, and announces to the
+WM (`userland/app_skeleton/src/setup/open.rs:26`); a window that never appears
+usually failed at the announce or the first scene submit rather than in the app's own
+paint. An app whose window appears but never repaints is almost always the first-paint
+handshake or a missing damage commit; the service frame ensures the first paint
+reached the compositor before it starts draining input
+(`userland/app_skeleton/src/runner/service_frame.rs:28`).
+
+An app that does not respond to keys is a subscription or focus question, not usually
+an app-logic bug. Each app requests a specific input kind mask in its manifest (the
+table in section 2), and the router delivers only kinds the app subscribed to, only
+when the WM reports it focused. The terminal, editor, settings, and process manager
+subscribe to key-down only, so pointer events reaching their handlers would be a
+router or WM problem. When an app should close but does not, the close path is shared:
+the runner treats a toolkit close-button hit and an `EventOutcome::Close` from the
+handler the same way, and teardown removes the scene, clears the subscription,
+releases the surface, unmaps backing, closes the WM window, and exits
+(`userland/app_skeleton/src/runner/teardown.rs:25`). A window that closes visually but
+leaves a stale service is a teardown that did not reach the exit.
+
+The clicked-but-nothing-happens case is the taskbar, not the app. On this branch the
+apps are already spawned at boot by `spawn_apps` (`src/userspace/init/spawn_plan/apps.rs:17`),
+so a taskbar click does not launch anything; it looks up the app's service pid and, if
+it resolves, sends that pid an `NCTL` focus frame
+(`userland/capsule_desktop_shell/src/server/handlers/launcher_request.rs:26`,
+`userland/capsule_desktop_shell/src/server/handlers/launcher_focus.rs:24`). A click that
+does nothing usually means the service lookup returned no pid, which means the app was
+never spawned or has exited, not that focus failed.
+
+## 9. Source map
+
+```
+  userland/app_skeleton/src/app/{behavior,manifest}.rs   the App trait and the manifest
+  userland/app_skeleton/src/runner/{entry,boot,service_frame,teardown}.rs  the run loop
+  userland/app_skeleton/src/setup/{open,announce}.rs     window open and WM announce
+  userland/app_skeleton/src/runner/{decorations,drain_ipc}.rs  close and focus handling
+  userland/capsule_<app>/src/<app>/{app,event,paint}.rs  each app's trait impl and handlers
+  userland/capsule_input_probe/, capsule_setup_wizard/   the two direct GUI apps
+  src/userspace/init/spawn_plan/apps.rs                   spawn_apps: the boot app fleet
+  userland/capsule_desktop_shell/src/server/handlers/launcher_{request,focus}.rs  taskbar focus
+```
+
+The per-app capability masks and endpoints are in
+[the capsule inventory](capsules.md); the input delivery contract is on
+[the input router page](capsule-catalog/input-router.md).

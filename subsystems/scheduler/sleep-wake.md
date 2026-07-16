@@ -89,10 +89,64 @@ future time, including a receive with a timeout, is woken when that time passes.
 way the process returns to `Ready` and rejoins the run queue, and the
 [selector](selection.md) picks it up on a later pass.
 
-## Source
+## Security analysis
+
+Sleep and wake are the liveness path: a blocked capsule must cost nothing while asleep and must reliably
+come back when its event arrives. The properties here are about not losing a wakeup and not corrupting
+state by waking the wrong thing. Three hold.
+
+**A sleeping process consumes no scheduling resource.** `sleep_until` (`sleep.rs:24`) records the pid,
+sets its state to `Sleeping`, and removes it from the run queue, all together, so the selector never
+considers it: it is not scanned, not dispatched, and not charged a slice. This is what makes a blocked
+capsule genuinely free rather than a spinner, and it is the mechanism underneath every IPC-receive,
+IRQ-wait, and timed sleep, so a capsule waiting on an event does not steal CPU from one doing work.
+
+**Waking is idempotent and state-guarded.** `wake_process` (`sleep.rs:33`) removes the sleeping entry
+and only flips the process to `Ready` and re-queues it if its state is actually `Sleeping`
+(`sleep.rs:39`). A spurious or duplicate wake of a process that is already running or ready does nothing.
+This is what makes wake safe to call from any path that might race another waker, an IPC delivery and a
+timeout expiring at nearly the same instant, without double-queuing the pid or dragging a running process
+back to `Ready` underneath itself.
+
+**The timer scan never deadlocks on the sleeping map.** `check_sleeping_processes` (`sleep.rs:68`)
+snapshots expired sleepers into a fixed 64-element array while holding only the read lock, then releases
+the lock before calling `wake_process`, which takes the write lock. So the deadline scan never calls a
+write-locking function while holding the read lock, and the fixed array means the timer-driven path
+allocates nothing. The honest boundary: the 64-entry cap means a burst of more than 64 sleepers expiring
+in the same instant is woken across several timer calls rather than all at once, so a heavily-loaded
+deadline instant is spread over a few ticks, which the following ticks resolve. And because the state
+guard in `wake_process` is the only thing that makes a wake take effect, a wakeup delivered to a process
+that is not yet `Sleeping`, a wake that races ahead of the `sleep_until` that would have parked it, is
+silently dropped, which is the classic lost-wakeup shape a caller has to order against.
+
+## Debugging sleep and wake
+
+A process that is stuck asleep forever is the headline failure, and there are two distinct causes. The
+lost wakeup: the waker called `wake_process` before `sleep_until` set the state to `Sleeping`, so the
+state guard (`sleep.rs:39`) saw a non-`Sleeping` process and did nothing, and the later `sleep_until`
+then parked the process with no one left to wake it. The fix is ordering, park before the event can be
+signalled, not in the wake path. The other cause is a timed sleeper whose deadline passed but who was in
+a burst of more than 64 expiring at once: it is woken a tick or two later, so a small delay under a
+thundering deadline is expected, but a permanent stall is not and points at `check_sleeping_processes`
+not being called from the timer at all. Use `is_sleeping(pid)` to confirm the process is actually in the
+sleeping set, and `get_remaining_sleep(pid)` to read its wake time: a wake time in the past with the pid
+still sleeping means the deadline scan is not running; no entry at all means it was already woken and the
+stall is elsewhere (likely it woke to `Ready` but selection is starving it, see
+[selection](selection.md)). The `wakeups` counter in `SCHEDULER_STATS` climbing without the target
+process becoming `Ready` means the wake landed on a process not in `Sleeping` state, the lost-wakeup
+signature again.
+
+## Source map
 
 ```
   src/process/scheduler/dispatch/sleep.rs    the sleeping set, sleep_until, wake_process,
                                               check_sleeping_processes
   src/process/scheduler/dispatch/wakeup.rs   wakeup helpers
 ```
+
+Every reference above is verified against those trees. The run queue a woken process rejoins and the
+selector that picks it up are on the [selection](selection.md) page; the timer that drives
+`check_sleeping_processes` is the same tick documented on the [preemption](preemption.md) page; the
+`Sleeping` and `Ready` states these transitions move between are on the
+[lifecycle](../process/lifecycle.md) page; and the IPC and IRQ waits that call `sleep_until` are the wait
+points noted on the [PCB](../process/pcb.md)'s `wchan`.

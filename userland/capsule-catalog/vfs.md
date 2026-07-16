@@ -231,6 +231,35 @@ code via `#[path]` and fuzzes normalization, the read-only guard, the protocol c
 attestation over millions of inputs. This is the one filesystem in the system whose access rules are
 machine-verified.
 
+The capability mask is `0x19` (`Capsule.mk`, `CAPSULE_REQUIRED_CAPS`), which decodes to CoreExec (1), IPC
+(8), and Memory (16). That is the whole grant, and the whole point. The filesystem service holds *no*
+hardware capability: no Driver, Mmio, Irq, Dma, or Pio, so a bug in path canonicalization or the protocol
+codec, the most-fuzzed surface here, cannot reach a device, program DMA, or take an interrupt. It holds no
+FileSystem cap either, because it *is* the RAM filesystem rather than a client of a lower storage surface,
+and no Crypto, because unlike the [ramfs](ramfs.md) it stores plaintext and relies on zeroization rather
+than at-rest encryption. It holds no Debug, so it cannot open a serial surface, and no RegisterService
+beyond the one endpoint its manifest declares. Its isolation from other capsules is the caller-attestation
+and fd-ownership pair documented above, both keyed on the kernel-attested `sender_pid` rather than any
+payload field. The honest boundary is that `mode` is stored but not enforced as a full permission model
+beyond the read-only `/capsules` guard and the per-descriptor writable flag, as the [gaps](#honest-gaps)
+state.
+
+## Debugging
+
+The service is `vfs_pool` on port 4104 (`Capsule.mk`, `service:4104:vfs_pool`), reply endpoint 4105, and
+it is one of the first capsules the kernel brings up, spawned at `spawn_plan/core.rs:32` as
+`boot::capsule("VFS", "vfs", ...)`. Through `capsule_boot::boot` that prints `[VFS] capsule spawned` on the
+boot log, or a `[ERROR]` line with the `SpawnError` if the spawn failed (mirrored to the framebuffer under
+`NONOS_FBCONSOLE=1`). Because so much of the desktop reads files, a missing `[VFS]` marker cascades: apps
+that resolve `mk_service_lookup("vfs_pool")` get no pid and their opens fail, so a boot that reaches the
+shell but where nothing can read a file is a vfs-did-not-register symptom, not an app bug. Once registered,
+the failure signatures are the POSIX errnos from `map_store_err`: `EACCES` from caller attestation means a
+payload pid that did not match the attested sender (an impersonation attempt), `EACCES` from the path guard
+means a write under `/capsules`, `EBADF` means an fd used by a pid that did not open it, and `ENOSPC` means
+one of the bounds (2048 files, 256 fds, 1 MiB per file) was hit. Because the kernel mirror also runs this
+code (`src/userspace/capsule_vfs/`), the same protocol is exercised by `fs_proofs` off-target, so a
+protocol regression usually shows up in the proof suite before it ships.
+
 ## Honest gaps
 
 Stated plainly: the namespace is flat (a file's name is its full path; there is no inode tree), so `list`

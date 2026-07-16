@@ -160,7 +160,55 @@ appropriate ordering. The lifecycle that creates and destroys a PCB is on the
 [lifecycle](lifecycle.md) page, and the table that holds every live PCB is on the
 [process table](process-table.md) page.
 
-## Source
+## Security analysis
+
+The PCB is where a process's authority lives, so most of its security weight is in the authority group
+and the kernel-to-user transition group, not the POSIX bookkeeping. Three properties matter.
+
+**Authority is single-sourced and epoch-checked.** The `capability_token`
+(`RwLock<Arc<CapabilityToken>>`, `pcb.rs:44`) is the source of truth; `caps_bits` is only a derived
+bitmap cache kept in sync by `process::caps` so hot readers do a single atomic load instead of taking the
+token lock. The two never disagree by construction because one mutator maintains both. Authority cannot
+be re-granted quietly: `caps_manifest_installed` is a one-shot `AtomicBool` that
+[verified spawn](../../security/capsules-and-trust.md)'s `install_spawn` flips exactly once to swap the
+inheritance-derived token for the manifest-derived one, so a stale spawn path cannot re-issue authority.
+And `revocation_epoch`, bumped by `process::caps::revoke` and minted into every token, lets the syscall
+[resolver](../../security/revocation.md) reject a token whose epoch predates the most recent revoke, so
+authority minted before a revoke is dead even if the token is still held.
+
+**Port-IO authority defaults to none.** `io_bitmap` (`pcb.rs:100`) is the 8 KiB x86 permission bitmap
+the CPU consults on `in`/`out`, and it is born all-ones, every port denied. A [PIO grant](../hardware-broker/README.md)
+works by clearing the specific bits it authorises, so a process with no grant can execute no port I/O at
+all. This is least-authority made concrete in hardware: the default is deny, and the broker grant is the
+only thing that opens a port.
+
+**The kernel-to-user fields are what make ring transitions safe.** `kernel_stack_top` of zero is
+meaningful (`pcb.rs:100`): it marks a process with no user mode expected, and the context-switch hook
+refuses to drop it to ring 3 without a kernel stack for the next trap to land on. `pending_user_entry`
+is consumed once on first entry so the transition is one-shot, and `syscall_user_rsp` exists precisely
+because a blocking syscall parks the user RSP in per-CPU state that another task on the same CPU would
+overwrite, so it has to be restored from the PCB. The honest boundary: the PCB is shared behind `Arc`
+with per-field synchronisation (atomics, a `Mutex` for state mutated together, an `RwLock` for the
+read-heavy token), so a field read outside its intended lock, or two fields expected to be consistent
+read across a transition, sees per-field atomicity, not a snapshot of the whole block. The invariants
+hold because each subsystem takes the field's own lock, not because the PCB is globally consistent.
+
+## Debugging the PCB
+
+Most PCB-level bugs surface as a mismatch between a field and the behaviour it should drive. A capsule
+that is refused an operation it was granted, or granted one it was not, is a `caps_bits` versus
+`capability_token` divergence: the token is authoritative, so read it, and if the bitmap disagrees the
+bug is a mutation that touched one and not the other outside `process::caps`. A syscall that fails with a
+revoked-authority error after the capsule believed it still held the capability is the `revocation_epoch`
+check firing: the token was minted before the last `revoke`, which is correct behaviour, and the trace
+to follow is who called `revoke`. A driver whose `in`/`out` faults with a general-protection despite
+holding a port grant points at `io_bitmap`, the grant cleared the wrong bits or was never applied, since
+the default of all-ones denies everything. A process that will not enter user mode is the
+`kernel_stack_top == 0` case, read on the [context switch](context-switch.md) page. The `terminate(code)`
+method (`pcb.rs:193`) sets `Terminated(code)` in one step, so a PCB in `Terminated` that skipped `Zombie`
+went through direct termination rather than the graceful two-phase exit, which narrows where to look.
+
+## Source map
 
 ```
   src/process/core/pcb.rs        the ProcessControlBlock and its methods
@@ -168,3 +216,9 @@ appropriate ordering. The lifecycle that creates and destroys a PCB is on the
   src/process/core/thread_group.rs   the shared ThreadGroup
   src/process/caps.rs             the authority-field mutators
 ```
+
+Every reference above is verified against those trees. The authority fields tie into the
+[capability model](../../security/capabilities-and-tokens.md) and [revocation](../../security/revocation.md);
+the transition fields are consumed on the [context switch](context-switch.md) page; the `io_bitmap`
+default is set during creation on the [process table](process-table.md) page; and the lifecycle that
+constructs and tears down a PCB is on the [lifecycle](lifecycle.md) page.

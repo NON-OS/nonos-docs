@@ -99,6 +99,67 @@ parse but will not act on.
 
 ---
 
+## Security analysis
+
+The error convention is part of the security boundary, not just an ergonomics
+detail. A syscall that touches user memory validates the pointer before it
+dereferences it, and any failure of that walk becomes `EFAULT` rather than a
+kernel fault. `validate_user_read` and `validate_user_write` confirm each page in
+the range is mapped, user accessible, and writable where the call needs to write
+(`src/usercopy`); the typed accessors add an alignment requirement, so a
+misaligned or null pointer is refused the same way. The consequence is that a
+capsule cannot use a bad pointer argument to make the kernel read or write memory
+it should not, and cannot distinguish, from the return value alone, a page it does
+not own from one that is merely unmapped. Both are `EFAULT`.
+
+`EPERM` is the errno the capability gate produces, and it is deliberately opaque
+in the same way. It is returned whether the token lacked the bit, failed to
+authenticate, or, for a grant call, named a grant it does not own
+(`src/syscall/contract/dispatch.rs:36`). A caller learns that it was refused, not
+which internal check refused it, so probing the boundary does not leak the shape
+of another capsule's authority. `ESTALE` closes a narrower hole: a handle that
+refers to a freed or reused slot is rejected rather than silently resolving to
+whatever now occupies the slot, which is what lets surface and grant handles carry
+an epoch and still be safe to hand back to userspace.
+
+The one deliberate non-error is worth stating. The input ring drops events under
+pressure rather than returning `ENOMEM` to the poster
+(`src/syscall/microkernel/memory/mmap.rs` is the hard-limit path for the calls
+that do fail this way). A driver posting input cannot wedge the kernel by
+overrunning the ring; it loses events, and the sequence number the router reads
+tells it that a gap happened.
+
+## Debugging by errno
+
+Read the return as an `i64` and the sign tells you which half of the boundary you
+are in: a non-negative value is a length, pid, handle, or count, and a negative
+value is `-errno` from the table above. The five you will see most while bringing
+a capsule up each point at a specific place to look. `EPERM` is a manifest or
+grant-ownership problem, checked at the dispatcher. `EFAULT` is a bad pointer
+argument, checked in `src/usercopy` before the handler runs. `ENOENT` is a name
+that did not resolve, from `MkServiceLookup` when the service is not registered or
+`MkIpcRecv` when the inbox does not exist
+(`src/syscall/microkernel/ipc/lookup.rs`, `src/syscall/microkernel/ipc/recv.rs`).
+`ETIMEDOUT` is a blocking IPC call that ran out its deadline, and a `timeout_ms`
+of zero on `MkIpcCall` selects the five-second default rather than blocking
+forever. `ENOSYS` is the one that is not a denial: the number had no handler, which
+in practice means `MkIrqWait`, so a driver stuck there is wired against a wait that
+never fires and should use the poll-and-ack loop instead.
+
+## Source map
+
+```
+  src/syscall/microkernel/errnos.rs      the ERRNO_* constants and their values
+  src/syscall/types/result.rs            SyscallResult and the negate-on-error rule
+  src/arch/x86_64/syscall/manager/entry.rs  the i64-into-RAX cast at the boundary
+  src/usercopy                            the pointer validation that yields EFAULT
+  src/syscall/microkernel/ipc/{lookup,recv}.rs  the ENOENT and ETIMEDOUT sources
+```
+
+Every value and cause above is mirrored from those files. The capability bit each
+call requires, and the gate that turns a missing bit into `EPERM`, are on
+[the syscall page](syscalls.md).
+
 ## A note on layering
 
 There are two error spellings in the tree. The microkernel handlers use the

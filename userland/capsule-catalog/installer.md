@@ -104,6 +104,37 @@ not reachable.
   `/capsules`.
 - **The blobs are stack-owned** across the syscall, so there is no use-after-free of the artifacts.
 
+The capability mask is `0x19` (`Capsule.mk`, `CAPSULE_REQUIRED_CAPS`), decoding to CoreExec (1), IPC (8),
+and Memory (16), the same minimal set as the [vfs pool](vfs.md). This is the striking part of the
+installer's design: the capsule that loads *every other capsule* holds no elevated capability of its own.
+It has no Crypto, so it verifies nothing itself; the trust chain lives entirely behind `mk_capsule_load` in
+the kernel. It has no FileSystem cap, so it reads the four `/capsules` artifacts over IPC to the
+[vfs](vfs.md) rather than touching a storage surface directly. It has no Driver, Mmio, Irq, Dma, Pio, or
+Network, so a bug in the installer cannot reach hardware or the wire. The privilege that matters, the
+authority to spawn a verified capsule, is not a bit in this mask at all: it is the `mk_capsule_load`
+syscall, and the kernel gates *that* on the trust chain, not on the installer's caps. So the isolation
+argument is inverted from what the name suggests: the installer is deliberately unprivileged, and its power
+to install comes only from a syscall whose every success is a signed image. The honest boundary is that the
+inbox is a public port with no caller attestation, as the [gaps](#honest-gaps) state, so the exposure is
+denial-of-service, not authenticity.
+
+## Debugging
+
+The service is `installer` on port 4112 (`Capsule.mk`, `service:4112:installer`), reply endpoint
+`0x1_0000_0011`, and it is spawned in the desktop-services fleet at `spawn_plan/desktop_services.rs:37`
+(behind the `nonos-capsule-installer` feature) as `boot::capsule("INSTALLER", "installer", ...)` from
+`src/userspace/capsule_installer/`. It prints `[INSTALLER] capsule spawned` through `capsule_boot::boot` on
+success, or a `[ERROR]` line with the `SpawnError` (framebuffer under `NONOS_FBCONSOLE=1`). A present
+marker means `mk_service_lookup("installer")` resolves, so the market and the desktop can request loads; an
+absent one means nothing can install. The failure mode worth understanding is that the installer's own
+replies are thin and the real verdict is the kernel's: a `LOAD_BY_NAME` returns the new capsule pid on
+success or the negative `rc` from `mk_capsule_load` on failure, so a rejected install shows up as a
+negative return whose cause (a certificate that did not chain to the trust anchor, a missing ML-DSA-65
+signature, a requested cap outside the manifest) was decided inside the kernel's verified-spawn pipeline,
+not here. A load that fails before the syscall is the name validator refusing a name that is empty, over 64
+bytes, or outside `[A-Za-z0-9_-]`, and the paid path returns `EAGAIN` when the [payment](payment.md)
+service is not reachable.
+
 ## Honest gaps
 
 The installer has no caller attestation, its inbox is a public port, so any capsule that can reach it can

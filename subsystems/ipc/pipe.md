@@ -62,11 +62,62 @@ the pipe. The two coexist: pipes give a capsule a stream fd it can hand to a chi
 into a filter, and inboxes give the kernel a permission-checked, sender-attested message
 channel.
 
-## Source
+## Security analysis
+
+The pipe is the deliberately unprivileged IPC primitive, and its security story is mostly about what it
+is *not*. Unlike the [inbox](inbox.md), it carries no sender identity, no MAC, and no capability check;
+it is a buffer reached through file descriptors, and its safety comes from the fd table's ownership of
+those descriptors rather than from anything the pipe itself authenticates. Two properties hold, and the
+boundary is the important part.
+
+**Bounded and fixed-size.** The buffer is `Vec<u8>` allocated once at `PIPE_BUF_SIZE = 65536`
+(`types.rs:20`) and never grown; `space_available` is `capacity - bytes_available` and the cursors wrap
+modulo the capacity (`api.rs:96`). A write to a full pipe is `EAGAIN`, not a reallocation, so a fast
+writer against a slow reader stalls at the buffer bound rather than growing kernel memory. The number of
+live pipes is itself bounded by `MAX_PIPES = 1024` (`create_pipe_with_size`, `api.rs:27`), which returns
+an `ENFILE`-style `24` when the table is full, so pipe creation cannot exhaust the kernel either.
+
+**End-enforced descriptors.** Each fd is recorded in the fd-to-pipe map with a flag for which end it is
+(`api.rs:38`), and the transfer functions enforce it: reading on a write fd or writing on a read fd is
+`EBADF` (`api.rs:48`, `api.rs:79`), as is an fd not in the map at all. A capsule can only move bytes in
+the direction the descriptor it holds allows.
+
+The honest boundary, stated plainly because it is the whole point: the pipe does not authenticate its
+peers and does not check a capability. Whoever holds the write fd can write and whoever holds the read
+fd can read, and the pipe knows nothing about which capsule that is. The security of a pipe is entirely
+the security of who was handed its descriptors, which is the process fd table's concern
+(`src/process/fd_table.rs`) and the spawn plan that wires a child's fds. This is why the message channel
+between capsules is the inbox, not the pipe: the inbox is where sender attestation and the capability
+check live. The pipe is a stream a capsule already trusts its counterpart on, typically a parent wiring
+a child or a filter in a shell pipeline, not a channel for reaching an arbitrary capsule.
+
+## Debugging pipes
+
+The pipe's whole error surface is four values and every one names a concrete condition, so a failing
+pipe call is unambiguous. `EBADF` from `pipe_read` or `pipe_write` (`api.rs:43`, `api.rs:74`) means one
+of two things: the fd is not in the fd-to-pipe map, or it is but the caller used the wrong end (read on
+a write fd or the reverse). Since the end is fixed at `create_pipe`, an `EBADF` on an fd you believe is
+valid is almost always an end mix-up, not a closed pipe. `EAGAIN` is the flow-control signal and means
+different things on each side: from a read it is an empty pipe whose write end is still open
+(`read_from_pipe`, `api.rs:63`), from a write it is a full buffer (`write_to_pipe`, `api.rs:94`); both
+say "come back later," and a caller looping on `EAGAIN` forever is a peer that stopped draining or
+filling, not a broken pipe. The two definitive conditions are the end-of-stream pair: a read of `0` on
+an empty pipe means the write end is closed (`api.rs:60`), the real EOF, and a write to a pipe whose read
+end is closed is `EPIPE` (`api.rs:91`), the broken-pipe case. The `is_broken` predicate (`types.rs:59`),
+write end closed with nothing buffered, is the same condition the read side reports as `0`. So a stream
+that hangs versus one that ended is read straight off the return: repeated `EAGAIN` is a live but idle
+peer, a `0` read or `EPIPE` write is a closed counterpart.
+
+## Source map
 
 ```
-  src/ipc/pipe/types.rs    the ring buffer, PIPE_BUF_SIZE, MAX_PIPES, error codes
-  src/ipc/pipe/api.rs      create_pipe, pipe_read, pipe_write
-  src/ipc/pipe/registry.rs the pipe and fd tables
-  src/ipc/pipe/close.rs    pipe_close, non-blocking mode
+  src/ipc/pipe/types.rs     the ring buffer, PIPE_BUF_SIZE, MAX_PIPES, EAGAIN / EBADF / EPIPE, is_broken
+  src/ipc/pipe/api.rs       create_pipe, pipe_read, pipe_write, the end and flow-control checks
+  src/ipc/pipe/registry.rs  the pipe and fd tables
+  src/ipc/pipe/close.rs     pipe_close, non-blocking mode
 ```
+
+Every reference above is verified against those trees. The blocking policy, fd lifecycle, and syscall
+surface layered on top live in the filesystem pipe (`src/fs/pipe/`) and the process fd table
+(`src/process/fd_table.rs`); the sender-attested, capability-checked message channel that the pipe
+deliberately is not is the [inbox](inbox.md).

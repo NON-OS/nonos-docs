@@ -64,11 +64,60 @@ with its number, arguments, required capability, and error codes, is the
 [ABI reference](../../abi/syscalls.md), which is generated to match the enum so the two
 cannot disagree.
 
-## Source
+## Security analysis
+
+The numbering is the wire encoding of the syscall surface, and its security value is that it is a closed,
+enumerated registry rather than an open integer space. That closure is what lets the boundary reject a
+malformed call before any state is touched.
+
+**An unregistered tag decodes to nothing, so it can never select a handler.** `from_u64`
+(`src/syscall/numbers/convert.rs:22`) is `abi::lookup_id(id)`, a lookup that returns a `SyscallNumber` enum
+variant for a known tag and `None` for everything else. There is no arithmetic from the raw `u64` to a
+handler and no table indexed by the untrusted value, so a capsule cannot craft a number that runs off the
+end of a jump table or aliases into a handler it was not meant to reach. The [boundary](boundary.md) turns
+that `None` into `ENOSYS` at `entry.rs` before the contract or any handler runs.
+
+**The enum is the single registry the rest of the system matches against.** Because the capability
+cap-table (`src/syscall/contract/cap_table/`) and the router (`src/syscall/dispatch/router/dispatch_fn.rs`)
+both match on `SyscallNumber` variants, not on raw tags, the set of callable syscalls, the set with a
+required capability, and the set the router services are all keyed off one enum. A new syscall that is
+added to the enum but not given a cap-table entry is refused by the cap-table's trailing `unwrap_or(false)`
+(`cap_table/mod.rs:30`), so the failure mode of a half-wired syscall is denial, not an unguarded call.
+
+The honest limit is that the tag is not a secret or a capability. It is a public, stable identifier; the
+authority to call a syscall lives entirely in the capability token checked at the contract, not in
+knowing or guessing the number. The four-character encoding is a readability and stability convenience, and
+nothing about the boundary's safety depends on the tags being hard to discover.
+
+## Debugging syscall numbers
+
+The tag encoding exists precisely to make a trace legible, and that is its main debugging value. Because
+`tag4` (`src/syscall/abi/tag.rs:20`) packs the four ASCII bytes little-endian into the word, a syscall
+number dumped at low memory reads back as its mnemonic: a call to `MDBG` shows the bytes `MDBG`, not an
+opaque integer a reader has to look up. So a register dump that shows the value in `RAX` at the `SYSCALL`
+site can be read directly as the syscall being attempted.
+
+The one failure this page is responsible for is `ENOSYS`. If a capsule gets `-ENOSYS` (38) back, the number
+in `RAX` did not decode, and there are two shapes of that bug. Either the capsule built the tag wrong (a
+byte-order or typo in the four characters), in which case the value dumped will not read as any known
+mnemonic, or the capsule is calling a syscall that exists in a newer or older enum than the running kernel
+was built with, in which case the mnemonic reads fine but `lookup_id` still returns `None`. The tool for
+telling these apart is exactly the readability property above: dump the value, read the four bytes. If they
+spell a real mnemonic the caller's encoding is fine and the mismatch is a registry-version problem; if they
+spell garbage the caller assembled the tag incorrectly. This is distinct from an `ENOSYS` returned by the
+[router](router.md), where the tag decoded to a real `SyscallNumber` but no family claimed it, which is a
+kernel-side routing omission rather than a caller-side encoding error.
+
+## Source map
 
 ```
-  src/syscall/abi/tag.rs        tag4, the four-character encoding
-  src/syscall/abi/              lookup_id and the registry
-  src/syscall/numbers/defs.rs   the SyscallNumber enum
+  src/syscall/abi/tag.rs         tag4, the four-character little-endian encoding
+  src/syscall/abi/               lookup_id and the tag-to-variant registry
+  src/syscall/numbers/defs.rs    the SyscallNumber enum, the authoritative registry
   src/syscall/numbers/convert.rs from_u64
 ```
+
+Every reference above is verified against those trees. The decode-to-`ENOSYS` step is on the
+[boundary](boundary.md) page, the family dispatch on the decoded variant is on the [router](router.md)
+page, and the exhaustive per-call contract with numbers, arguments, and error codes is the
+[ABI reference](../../abi/syscalls.md).

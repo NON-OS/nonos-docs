@@ -22,6 +22,45 @@ known-good memory, and the timer path captures enough state to resume a capsule 
 it was preempted. That last piece is the hinge of preemptive multitasking and is picked up by
 the [scheduler](../scheduler/preemption.md) and the [context switch](../process/context-switch.md).
 
+## Security analysis
+
+The interrupt subsystem is the boundary the CPU crosses on every trap, so its security posture is the sum
+of what the individual pages prove. Three properties hold across the whole section.
+
+**Only one gate is reachable from ring 3.** The [IDT](idt.md) sets every descriptor at ring 0 except the
+syscall gate at `0x80`, so a capsule cannot software-invoke an arbitrary vector to reach a handler, and
+it cannot install or redirect a vector because the table is immutable after build. A driver that wants a
+device interrupt goes through the [broker](../hardware-broker/irq.md), which programs the controller and
+installs only into pre-reserved broker vector slots; the capsule programs nothing.
+
+**Entry from ring 3 is never trusted to leave the CPU in a safe state.** The [trampolines](trampolines.md)
+swap to the kernel GS base before any handler reads per-CPU memory, preserve the interrupted FPU and SSE
+state, and discard the CPU error-code word exactly where the vector calls for it. The fatal exceptions
+run on dedicated IST stacks so a fault taken in a fragile window lands on known-good memory rather than a
+torn stack.
+
+**Faults fail closed and leave a redacted record.** The [handlers](handlers.md) terminate a faulting
+capsule and halt on an unrecoverable kernel fault, never patch around either, and every logged pointer
+passes through `redact_address` so a fault log is not a KASLR oracle. Acknowledgement goes to exactly one
+live [controller](controllers.md), so a line is never double-acked or left hanging. The honest boundary
+running through all of it is that the trampolines and the swapgs discipline are hand-maintained trusted
+code: the hardware does not check that they swapped or saved correctly, so the safety of everything above
+them is conditional on that entry code being right.
+
+## Debugging interrupts
+
+The console (serial, or the framebuffer on a `NONOS_FBCONSOLE=1` build) is the whole debugging surface,
+and the fault vector picks the page. An unhandled exception prints the low-level `[TRAP …]` line from
+`dump_trap` and then a structured critical log; the [handlers](handlers.md) page decodes both, including
+the three plain-language page-fault causes and the double-fault halt banner. A "bound but silent"
+interrupt, where the [broker](../hardware-broker/irq.md) bind succeeded but nothing arrives, is a
+[controller](controllers.md) routing problem, most often an IO-APIC destination aimed at a LAPIC id that
+is not the running CPU (the boot CPU's APIC id is not always 0). A frozen scheduler with no ticks is an
+interrupts-stuck-off critical section on the [safety](safety.md) page, and a machine that wedges on the
+first trap from ring 3 with no `[TRAP …]` line at all is a [trampoline](trampolines.md) swapgs bug that
+kills the trap machinery before it can report itself. Two failure returns from the vector pool,
+`None` and the two `free_vector` strings, are covered on the [allocation](allocation.md) page.
+
 ## Sources
 
 The code for this subsystem lives under `src/interrupts/`: `idt/` (the table and vector map),

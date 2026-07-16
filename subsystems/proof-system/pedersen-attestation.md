@@ -93,12 +93,74 @@ not the Pedersen attestation. This page states that plainly rather than letting 
 [attestation verifiers](../../security/attestation.md) are the ones fuzzed against thousands of
 adversarial proofs to confirm they reject garbage rather than accept it.
 
-## Source
+## Security analysis
+
+This proof family exists to be a spawn-time gate, so its security is the combination of the construction
+above and how the kernel acts on a verification result.
+
+**A proof is runtime evidence, and a failed proof is fail-closed.** The attestation is checked at spawn by
+`verify_capsule_attestation` (`src/security/capsule_attest/verify.rs`), which hashes the capsule ELF, packs
+the granted caps and the policy epoch into a 48-byte context, and calls `verify_enrolled` against the
+committed policy root. The function is `#[must_use]` with the note that a capsule must not be spawned
+unless its attestation verifies, and the [attestation gate](../../security/attestation.md) enforces exactly
+that: a failure returns `SpawnError::AttestationRejected` and the capsule does not run. So the proof is not
+decoration; it is a precondition, and the default is refusal. The one honest caveat is the rollout flag:
+under `nonos-zk-rollout` the gate logs the failure but proceeds, and that flag is mutually exclusive with
+`nonos-production` (`src/lib.rs:39`), so a production build cannot be built fail-open. Outside the rollout
+window the gate is closed.
+
+**The verifier is constant-time and rejects malformed input rather than trusting it.** `verify`
+(`src/crypto/zk_kernel/attest/verify.rs`) accumulates every check into a single `valid` byte, uses
+`constant_time_eq` for the Merkle-root and Schnorr equality comparisons, and folds in point-decompression
+success and small-subgroup rejection before returning `valid == 1`, so it does not branch early on a secret
+comparison. At the proof-system layer, `KernelZkVerifier` returns `MalformedProof` for a garbled proof and
+`UnsupportedProofType` for a system it does not implement (`src/crypto/zk_kernel/verifier.rs:25`), so a
+corrupt or unknown proof is a clean rejection, not a crash and not an accept. The binding is what makes the
+evidence meaningful: the context ties the proof to the capsule's code hash, its granted caps, and the
+policy epoch, so a proof valid for one capsule is not valid for a different binary or a wider cap set.
+
+**Transparent, but classical, is restated as the boundary.** As the caveat section above sets out, this
+layer's soundness and hiding rest on the Curve25519 discrete-log assumption and the Fiat-Shamir random
+oracle. It needs no trusted setup, but it is not post-quantum; only the [STARK layer](stark.md) is. The
+security analysis on this page therefore does not claim a quantum guarantee for the attestation gate, and
+the two families should not be conflated when reasoning about the threat model.
+
+## Debugging Pedersen attestation
+
+A rejected attestation surfaces at the gate, not inside the group arithmetic, and the four `AttestError`
+variants name the cause.
+
+**Read the gate marker first.** The [attestation gate](../../security/attestation.md) prints
+`[ZK-ATTEST] ok`, `[ZK-ATTEST] FAIL`, or `[ZK-ATTEST] none` with the capsule name, and on a failure it
+appends the `AttestError` string. `Missing` (the trailer is empty) means the capsule carries no attestation
+at all, which is a build or enrollment gap, not a proof that failed. `RootUnavailable` means the committed
+policy root was never installed, so nothing can verify against it, a kernel-init ordering problem one layer
+up. `Malformed` is the trailer failing to parse. `Rejected` is the one that means the proof was
+well-formed and the group checks did not pass (`verify_enrolled` returned false), which is the real "this
+secret is not in the policy tree, or not bound to this capsule" case.
+
+**Distinguishing a wrong binding from a wrong secret.** Because the context binds the code hash, the caps,
+and the epoch, a `Rejected` on a capsule that was enrolled correctly is often a binding mismatch: the ELF
+was rebuilt (new hash), the granted cap set changed, or the policy epoch moved, so a proof that once
+verified no longer matches the recomputed context. That is distinct from a genuinely forged or absent
+enrolled secret, and the way to tell them apart is whether the capsule bytes or its cap grant changed since
+the proof was produced. The negative-testing harness that confirms the verifier rejects garbage over
+thousands of adversarial proofs is in `userland/crypto_proofs/src/zk_tests.rs`.
+
+## Source map
 
 ```
   src/crypto/zk_kernel/pedersen.rs     the commitment and the nothing-up-my-sleeve H
   src/crypto/zk_kernel/membership.rs   the Schnorr-style membership proof + Merkle path
   src/crypto/zk_kernel/equality.rs     the equality proof
-  src/crypto/zk_kernel/verifier.rs     KernelZkVerifier and the proof-system enum
+  src/crypto/zk_kernel/verifier.rs     KernelZkVerifier and the ZkResult / ProofSystem enums
+  src/crypto/zk_kernel/attest/verify.rs   verify_enrolled: the constant-time Schnorr + Merkle check
+  src/security/capsule_attest/verify.rs   verify_capsule_attestation, the #[must_use] spawn gate
+  src/security/capsule_attest/error.rs    AttestError: Missing / Malformed / RootUnavailable / Rejected
   userland/crypto_proofs/src/zk_tests.rs   the adversarial soundness fuzzing
 ```
+
+Every reference above is verified against those trees. The gate that consumes `verify_capsule_attestation`
+and prints the `[ZK-ATTEST]` marker, along with what the proof binds, is on the
+[capsule attestation](../../security/attestation.md) page; the hash-based sibling family and its
+post-quantum footing are on the [STARK](stark.md) page.

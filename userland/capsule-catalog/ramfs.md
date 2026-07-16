@@ -121,6 +121,36 @@ check). The identity comes from the kernel-attested `sender_pid`, not a payload 
 - **Authentication**: a bad tag is `EIO`, never a return of unauthenticated bytes.
 - **Handle ownership**: a descriptor is usable only by its owner pid, checked per access.
 
+The capability mask is `0x38` (`Capsule.mk`, `CAPSULE_REQUIRED_CAPS`), which decodes to IPC (8), Memory
+(16), and Crypto (32). The least-privilege argument is legible in that list. It holds Crypto because it
+does its own ChaCha20-Poly1305 at rest through the kernel AEAD; it holds IPC because it is a request/reply
+service; it holds Memory to own its heap. What it does *not* hold is the point: no FileSystem cap, so it
+touches no real storage surface (it is a RAM store); no Driver, Mmio, Irq, Dma, or Pio, so it cannot reach
+any hardware; no RegisterService, so it cannot claim service names beyond the one its manifest declares;
+no Debug, so it cannot open a serial surface or emit `MkDebug`. It is isolated from every other capsule by
+the same boundary the [vfs pool](vfs.md) has: a file lives only in this capsule's heap as ciphertext, and
+another capsule reaches it only by sending a request that the handle-ownership check scopes to the caller
+pid. The honest boundary is the [transient plaintext](#honest-gaps): the mask forbids hardware but does
+not by itself zeroize the decrypted `plain` buffer, so encryption-at-rest is a heap-lifetime property, not
+an absolute one.
+
+## Debugging
+
+The service is `ramfs` on port 4096 (`Capsule.mk`, `CAPSULE_SERVICE_ENDPOINT := service:4096:ramfs`), and
+the reply goes to `KERNEL_REPLY_ENDPOINT` (`0x1_0000_0001`), distinct from the other core pools so
+concurrent replies cannot cross-route. The capsule is spawned early in the boot fleet by
+`spawn_plan/core.rs:19` as `boot::capsule("RAMFS", "ramfs", ...)`, which runs through
+`capsule_boot::boot` (`src/userspace/init/capsule_boot/run.rs`) and prints `[RAMFS] capsule spawned` on
+success or a `[ERROR]` line carrying the `SpawnError` on failure. So the first question, did the store
+even load, is answered by whether that marker is on the boot log (mirrored to the framebuffer under
+`NONOS_FBCONSOLE=1` on a machine with no serial port). If the marker is present the service is registered
+under its manifest endpoint and a caller's `mk_service_lookup("ramfs")` resolves to its pid; if it is
+absent, the capsule's ELF failed verification or its `0x38` mask fell outside policy, and no `/ram` access
+will work because the store never started. The failure signatures at request time are the errno set
+(`ENOENT`, `EIO`, `EACCES`, `EINVAL`, `EMFILE`): a `CryptoFailure` mapped to `EIO` is the tell that a
+file's authentication tag did not verify, which on a healthy store means memory corruption rather than an
+ordinary miss, and a `Denied` on a handle you did own is the owner-pid check refusing a guessed handle.
+
 ## Honest gaps
 
 Stated plainly: the transient decrypted `plain` buffer during a read or write is a `Vec` and is not

@@ -134,6 +134,54 @@ against removed memory, which is a hardware property outside the wipe's reach. T
 guarantee is that nothing the kernel can address is left readable, and that no freed
 memory is reused before it is zeroed.
 
+## Security analysis
+
+The whole page is a security argument, so this states it as named properties and, crucially, where the
+guarantee is a running mechanism versus an unwired capability.
+
+**No cross-lifetime leakage in steady state.** Every physical frame is zeroed on return to the
+allocator by `zero_frame` (`frame_alloc/manager/zero.rs:21`), which bounds-checks the frame against the
+direct map before writing 4 KiB of zeros, so a frame that held a capsule's data is zero by the time any
+other allocation can receive it. The [heap](heap.md) zeroes on both alloc and free, the
+[fault handler](faults.md) zeroes a demand-backed page before mapping it, and secure regions get an
+erase scaled by security level on free (`secure_memory/manager/dealloc.rs:29`). This is the property the
+Lean `Zeroization` module proves at the spec level, and it is a *running* mechanism: it fires on every
+free, so a capsule's frames are scrubbed as its address space is torn down on exit, with no dedicated
+exit wipe needed.
+
+**The whole-system erase is strong but not wired.** `secure_wipe_all_memory` (`security/wipe.rs:23`)
+revokes persistence consent, multi-pass erases the heap, zeros every process's code and VMAs, deletes
+crypto keys, and clears IPC and VFS caches, with per-region sizes bounds-checked so a corrupt PCB cannot
+direct the wipe out of range. The multi-pass `dod_5220_wipe` (`wipe.rs:44`) writes 0x00, 0xFF, random,
+then 0x00, all volatile so the compiler cannot elide them, verifies the read-back, and on x86_64
+`clflush`es every line then `mfence`s so the zeros reach memory rather than sitting in cache. The honest
+statement the code forces: `secure_wipe_all_memory` has no caller anywhere in the tree, so it is a
+capability, not an automatic guarantee. Operational ephemerality rests on the continuous zeroing above,
+which does run; wiring the one-shot wipe means calling it from the shutdown, panic, and tamper paths.
+
+**The claim is bounded to memory the kernel can address.** The software wipe defeats data remanence in
+addressable memory by overwriting and flushing it. It does not claim to defeat physical attacks below
+that level, such as cold-boot DRAM remanence against removed memory, which is a hardware property
+outside its reach. The guarantee is precisely that nothing the kernel can address is left readable, and
+that no freed memory is reused before it is zeroed.
+
+## Debugging zeroization
+
+Zeroization is mostly invisible when it works, so debugging is about knowing which pass ran and what its
+one console signal means. The continuous zeroing is silent: `zero_frame` returns without writing if the
+frame is outside the direct map (`zero.rs`), which is the one way a free could *not* scrub, so a stale
+byte surviving a free points at a frame whose physical address fell outside `DIRECTMAP_SIZE` rather than
+at a missing zero pass. The one narrated path is the whole-system wipe, which logs
+`"ZeroState secure memory wipe complete"` (`wipe.rs`) after its compiler fence, so the absence of that
+line is how you confirm the wipe never ran, which today is always, because nothing calls it. Inside the
+multi-pass erase, `verify_wipe` reads the region back after the final zero pass and warns and re-wipes
+if it finds a nonzero byte, so a persistent verify warning would mean memory that will not hold zeros
+(failing hardware) rather than a logic bug in the pattern. When reasoning about a suspected leak, the
+distinction that matters is which mechanism should have covered it: a reused *frame* is the allocator's
+`zero_frame`, a reused *heap block* is `HEAP_ZERO_ON_FREE`, a *demand page* is the fault handler's zero,
+and a *secure region* is `secure_zero_memory`. The whole-system DoD erase is only for a ZeroState event
+and is not part of any of those steady-state paths.
+
 ## Verification
 
 The specification-level `Zeroization` proofs in the
@@ -141,12 +189,17 @@ The specification-level `Zeroization` proofs in the
 holds no secret and that a reused region leaks nothing across lifetimes, which is the
 abstract statement of the frame-free zeroing and the ZeroState wipe documented here.
 
-## Source
+## Source map
 
 ```
-  src/memory/frame_alloc/manager/alloc.rs   deallocate_frame calls zero_frame
-  src/memory/frame_alloc/manager/zero.rs      zero_frame, the direct-map zero pass
+  src/memory/frame_alloc/manager/alloc.rs      deallocate_frame calls zero_frame
+  src/memory/frame_alloc/manager/zero.rs       zero_frame, the direct-map zero pass
   src/memory/heap/manager/globals.rs           HEAP_ZERO_ON_ALLOC / HEAP_ZERO_ON_FREE
   src/memory/secure_memory/manager/dealloc.rs  secure_zero_memory on region free
   src/security/wipe.rs                          secure_wipe_all_memory and dod_5220_wipe
 ```
+
+Every reference above is verified against those trees. The demand-page zero is on the
+[fault handler](faults.md) page, the heap zeroing is on the [heap](heap.md) page, the frame-free zero is
+the free-path arm of the [physical frame allocator](physical-frames.md), and the spec proofs are on the
+[verification stack](../../../verification/README.md) page.

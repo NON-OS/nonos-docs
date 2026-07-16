@@ -103,17 +103,16 @@ grouped as virtio, bus, input, NIC, USB, and storage
 IP, UDP, DHCP, TCP, DNS, Nym, and sockets in that order
 (`src/userspace/init/spawn_plan/network.rs:17`). The default desktop path runs
 GUI core, WM, wallpaper catalog, wallpaper, desktop shell, and desktop services
-(`src/userspace/init/spawn_plan/desktop_fleet.rs:17`). The init entry path
-registers the launcher broker, then calls desktop and market after network
-(`src/userspace/init/entry.rs:33`, `src/userspace/init/entry.rs:34`,
-`src/userspace/init/entry.rs:35`, `src/userspace/init/entry.rs:36`). The app
-fleet source exists, but the current spawn plan module does not import it or
-export an app spawn entry (`src/userspace/init/spawn_plan/mod.rs:17`,
-`src/userspace/init/spawn_plan/mod.rs:41`).
+(`src/userspace/init/spawn_plan/desktop_fleet.rs:17`). The init entry path calls
+desktop and market after network, then spawns the app fleet through `spawn_apps`
+(`src/userspace/init/entry.rs:31`, `src/userspace/init/entry.rs:32`,
+`src/userspace/init/entry.rs:33`). The app fleet is `spawn_apps`, exported from
+`app_orchestrator` and wired into `run_init`
+(`src/userspace/init/spawn_plan/mod.rs:38`, `src/userspace/init/spawn_plan/apps.rs:17`).
 
 The map below separates source inventory from boot inclusion. A capsule can be
-present in the table above and still be conditional, feature-gated, or launched
-later by the desktop broker.
+present in the table above and still be conditional or feature-gated, so a
+disabled feature simply drops it from the fleet.
 
 ```
 +--------------------------+
@@ -133,8 +132,7 @@ later by the desktop broker.
 +------------+-------------+
              |
 +------------+-------------+
-| launcher broker          |
-| app launch on demand     |
+| app fleet (spawn_apps)   |
 +--------------------------+
 ```
 
@@ -153,7 +151,69 @@ later by the desktop broker.
 | Desktop GUI core | `input_router`, `compositor` | `src/userspace/init/spawn_plan/desktop_fleet.rs:26` |
 | Desktop fleet | `wm`, `wallpaper_catalog`, `wallpaper`, `desktop_shell`, desktop services | `src/userspace/init/spawn_plan/desktop_fleet.rs:17` |
 | Desktop services | `image_codec`, `clipboard`, `attest`, `login`, `toolkit` | `src/userspace/init/spawn_plan/desktop_services.rs:17` |
-| Desktop launch broker | kernel-owned `desktop.launcher` endpoint for allowlisted first-party app launch | `src/userspace/init/entry.rs:34`, `src/userspace/init/launcher/register.rs:19`, `src/userspace/init/launcher/spawn.rs:17` |
+| Taskbar focus | no launch broker; the desktop shell sends a live app pid an `NCTL` focus frame on click | `userland/capsule_desktop_shell/src/server/handlers/launcher_request.rs:26`, `userland/capsule_desktop_shell/src/server/handlers/launcher_focus.rs:24` |
 | Input probe mode | `input_router`, `compositor`, `app.input_probe` | `src/userspace/init/spawn_plan/input_probe_fleet.rs:17` |
 | Setup wizard mode | GUI core plus `app.setup_wizard`, then full desktop after wizard exit | `src/userspace/init/spawn_plan/orchestrator.rs:51`, `src/userspace/init/spawn_plan/orchestrator.rs:63` |
-| App fleet source | `input_proof`, `about`, `calculator`, `terminal`, `file_manager`, then tool apps, present in source but not wired by `spawn_plan/mod.rs` | `src/userspace/init/spawn_plan/apps.rs:17`, `src/userspace/init/spawn_plan/apps_tools.rs:17`, `src/userspace/init/spawn_plan/mod.rs:17` |
+| App fleet | `input_proof`, `about`, `hello`, `calculator`, `snake`, `wallet`, `terminal`, `file_manager`, then tool apps, spawned at boot by `spawn_apps` | `src/userspace/init/spawn_plan/apps.rs:17`, `src/userspace/init/spawn_plan/apps_tools.rs:17` |
+
+## 4. Reading the capability masks
+
+The Caps column is the single most security-relevant number in the table, because it
+is the exact set of syscalls the capsule can make. Each mask is a bitwise OR of the
+capability bits in `src/capabilities/types.rs:54`, and the spread across the inventory
+is the least-privilege model made concrete. The service capsules that touch key
+material, entropy, or file contents, `keyring`, `entropy`, `crypto`, and `ramfs`, carry
+the `Crypto` bit (`0x20`) in their masks; almost nothing else does. The application capsules cluster
+at `0x1819`, CoreExec plus IPC plus Memory plus the display-query and surface-create
+bits, and hold no device, admin, or input-source authority at all. The driver capsules
+are where the broker bits appear:
+`Driver`, `Mmio`, `Irq`, `Dma`, and on the port-IO drivers `Pio`, which is why a NIC
+driver mask like `0xF8019` is so much wider than an app's. The point of the table is
+that this is auditable: you can read a capsule's authority off one hex number and check
+it against what the capsule is supposed to do.
+
+The mask in each `Capsule.mk` is a request, not a grant. The kernel installs the caps
+its verified manifest actually declared, and the manifest cannot exceed the certificate
+ceiling (`src/kernel_core/process_spawn/capsule_spawn/runner/verified.rs:23`,
+`src/security/capsule_manifest/error.rs:50`). So the table records what each capsule
+asks for; the spawn path is what decides whether it gets it. The full gate is on
+[the userland model page](README.md).
+
+## 5. Debugging with the inventory
+
+This table is the lookup for two common questions. When a service call returns `ENOENT`,
+the service name did not resolve, and the Service column is where to confirm the name and
+port the capsule registers under; a caller resolving `net.dns` against port `4450` will
+get `ENOENT` if the DNS capsule never spawned or registered a different endpoint. When a
+call returns `EPERM`, the Caps column tells you whether the target capsule even holds the
+authority the call needs, but the more useful check is against the caller's own mask: an
+app at `0x1819` calling any device or admin syscall is refused at the gate regardless of
+which service it names.
+
+The Boot class map above separates source inventory from boot inclusion, and that
+distinction is itself a debugging tool. A capsule can be present in the inventory and
+still never spawn, because it is feature-gated or conditional on a boot mode. The app
+fleet is spawned at boot by `spawn_apps`, so each app is subject to its own feature
+gate; a disabled feature drops that app from the fleet
+(`src/userspace/init/spawn_plan/apps.rs:17`). Two boot markers exist. The spawn
+primitive prints `[SPAWN] name=<name> pid=... caps=<mask>` once for every capsule it
+installs (`src/kernel_core/process_spawn/capsule_spawn/runner/install/spawn_log.rs:18`),
+and the init boot helper prints an extra `[<PREFIX>] capsule spawned` line for every
+capsule it brings up through `boot::capsule`
+(`src/userspace/init/capsule_boot/run.rs:29`). So an init boot-fleet capsule shows both
+lines, and the `capsule spawned` line is the ground truth for what init actually ran.
+
+## 6. Source map
+
+```
+  userland/capsule_<name>/Capsule.mk     handle, service and reply endpoints, caps mask
+  userland/capsule_<name>/src/main.rs     the no_std entry for each capsule
+  src/capabilities/types.rs               the capability bits behind each caps mask
+  src/userspace/init/spawn_plan/          which capsules the boot path actually spawns
+  src/userspace/init/capsule_boot/run.rs  the capsule spawned boot marker
+```
+
+Every handle, endpoint, and caps value in the inventory is cited to the capsule's
+`Capsule.mk`. The spawn gate that turns a requested mask into installed caps is on
+[the userland model page](README.md); the launch-on-demand path is on
+[the lifecycle page](lifecycle.md).

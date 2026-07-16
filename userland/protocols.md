@@ -97,10 +97,10 @@ display vsync (`userland/app_skeleton/src/runner/service_frame.rs:34`,
 The app receive loop accepts two frame classes. `NCTL` is a desktop-shell control
 frame used for focus, and `NINP` is input delivery from the router. The control
 path only honors a focus-self request if the sender pid resolves to
-`desktop_shell` (`userland/app_skeleton/src/runner/control.rs:22`,
-`userland/app_skeleton/src/runner/control.rs:35`,
-`userland/app_skeleton/src/runner/control.rs:39`,
-`userland/app_skeleton/src/runner/control.rs:59`). Input delivery requires the
+`desktop_shell` (`userland/app_skeleton/src/runner/control.rs:34`,
+`userland/app_skeleton/src/runner/control.rs:42`,
+`userland/app_skeleton/src/runner/control.rs:45`,
+`userland/app_skeleton/src/runner/control.rs:67`). Input delivery requires the
 `NINP` magic and then decodes the event body
 (`userland/app_skeleton/src/runner/dispatch.rs:20`,
 `userland/app_skeleton/src/runner/dispatch.rs:27`,
@@ -151,20 +151,20 @@ the WM window, and exits (`userland/app_skeleton/src/runner/teardown.rs:31`,
 ## 4. Launch and focus frames
 
 Desktop launcher entries are data, not hardcoded drawing side effects. Each
-launcher entry carries icon, launch id, label, and service name
-(`userland/capsule_desktop_shell/src/state/apps.rs:28`,
-`userland/capsule_desktop_shell/src/state/apps.rs:35`). A launcher request looks
-up the target service. If a pid exists, it sends focus control directly to that
-pid. If no pid exists, it sends a launch request to `desktop.launcher`
-(`userland/capsule_desktop_shell/src/server/handlers/launcher_request/request.rs:19`,
-`userland/capsule_desktop_shell/src/server/handlers/launcher_request/lookup_pid.rs:19`,
-`userland/capsule_desktop_shell/src/server/handlers/launcher_request/focus.rs:19`,
-`userland/capsule_desktop_shell/src/server/handlers/launcher_request/launch.rs:19`).
+launcher entry carries an icon, a label, and a service name
+(`userland/capsule_desktop_shell/src/state/apps.rs:30`,
+`userland/capsule_desktop_shell/src/state/apps.rs:36`). The apps are already
+running from boot, so a launcher request only ever focuses. It looks up the
+target service pid; if a pid exists it sends an `NCTL` focus frame directly to
+that pid, and if no pid exists it returns false and does nothing. There is no
+launch frame and no launch broker
+(`userland/capsule_desktop_shell/src/server/handlers/launcher_request.rs:26`,
+`userland/capsule_desktop_shell/src/server/handlers/launcher_request.rs:32`,
+`userland/capsule_desktop_shell/src/server/handlers/launcher_request.rs:42`).
 
 | Frame | Size | Producer | Consumer | Fields |
 |-------|------|----------|----------|--------|
-| `NCTL` | 8 bytes | desktop shell | app skeleton | magic `NCTL`, version `1`, op `1` for focus self. Constants are at `userland/capsule_desktop_shell/src/server/handlers/launcher_request/constants.rs:17` to `userland/capsule_desktop_shell/src/server/handlers/launcher_request/constants.rs:20`, frame encoding is at `userland/capsule_desktop_shell/src/server/handlers/launcher_request/focus_frame.rs:17`. |
-| `NLAU` | 8 bytes | desktop shell | init launcher broker | magic `NLAU`, version `1`, launch id. Constants are at `userland/capsule_desktop_shell/src/server/handlers/launcher_request/constants.rs:21` to `userland/capsule_desktop_shell/src/server/handlers/launcher_request/constants.rs:23`, frame encoding is at `userland/capsule_desktop_shell/src/server/handlers/launcher_request/launch_frame.rs:17`. |
+| `NCTL` | 8 bytes | desktop shell | app skeleton | magic `NCTL`, version `1`, op `1` for focus self. The constants and the frame builder are inline in `userland/capsule_desktop_shell/src/server/handlers/launcher_request.rs:21` through `launcher_request.rs:47`. |
 
 ```
 +----------------------+----------------------+----------------------+
@@ -174,24 +174,10 @@ pid. If no pid exists, it sends a launch request to `desktop.launcher`
 +----------------------+----------------------+----------------------+
 ```
 
-```
-+----------------------+----------------------+----------------------+
-| bytes 0 to 3         | bytes 4 to 5         | bytes 6 to 7         |
-+----------------------+----------------------+----------------------+
-| NLAU magic           | version 1            | launch id            |
-+----------------------+----------------------+----------------------+
-```
-
-The init broker has matching `desktop.launcher`, port `4700`, `NLAU`, and
-version constants (`src/userspace/init/launcher/constants.rs:17`,
-`src/userspace/init/launcher/constants.rs:18`,
-`src/userspace/init/launcher/constants.rs:19`,
-`src/userspace/init/launcher/constants.rs:20`). Its decoder rejects any frame
-whose length, magic, or version does not match, then returns the launch id
-(`src/userspace/init/launcher/decode.rs:17`,
-`src/userspace/init/launcher/decode.rs:21`,
-`src/userspace/init/launcher/decode.rs:23`,
-`src/userspace/init/launcher/decode.rs:26`).
+The app skeleton is the consumer. It accepts the `NCTL` frame only when the
+sender pid resolves to the `desktop_shell` service, so a focus frame from anyone
+else is ignored (`userland/app_skeleton/src/runner/control.rs:42`,
+`userland/app_skeleton/src/runner/control.rs:67`).
 
 ## 5. Core service protocols
 

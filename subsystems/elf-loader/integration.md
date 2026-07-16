@@ -59,11 +59,77 @@ space. The verification that gates it is documented on the
 covered on the [process](../process/pcb.md) and [memory](../memory/paging-manager.md) pages, and
 the capabilities the spawn installs are the [capability model](../../security/capabilities-and-tokens.md).
 
-## Source
+## Security analysis
+
+The whole security value of the ELF loader depends on one ordering property, and this page is where that
+ordering is enforced. Two properties matter.
+
+**Load happens only after attestation.** `spawn_verified`
+(`.../runner/verified.rs:26`) runs `preflight::run` and propagates its error with `?` before it calls
+`install`, so the loader is unreachable for an image that failed verification. Preflight is the full
+verified-spawn check: the NØNOS-ID certificate against the baked trust anchor, then the manifest against
+the publisher keys, with both Ed25519 and ML-DSA-65 required, covered on the
+[capsules and trust](../../security/capsules-and-trust.md) page. This is the boundary that lets the loader
+treat the image as hostile-but-authentic: the structural checks on the [validation](validation.md) and
+[segment](segments.md) pages defend against a malformed or W^X image, and the attestation here is what
+guarantees the image is one a trusted publisher actually signed. Neither layer substitutes for the other,
+and the ordering, verify then install, is what keeps them composed correctly.
+
+**Installed capabilities come from the verified manifest, not from the request.** The source comment on
+`spawn_verified` records that the caps placed on the PCB come from `preflighted.install_caps`, never from
+`spec.requested_caps`, which is only the upper bound the spawn site is willing to grant for optional caps.
+So a capsule cannot widen its own authority through the spawn request; the manifest that preflight
+verified is the authority of record. The loader itself installs no capabilities, it turns verified bytes
+into an address space; the [capability model](../../security/capabilities-and-tokens.md) is where the caps
+are decided.
+
+The honest boundary: `load_elf_into_pid` (`.../install/load_elf_into_pid.rs:21`) maps into the ASID
+returned by `lookup_asid_for_process(pid)` for a process the install step just created, so the capsule's
+pages land in its own fresh page tables and are never briefly visible in the kernel's or another
+capsule's mapping. Once the loader returns the relocated entry point, that address is installed as the
+capsule's initial instruction pointer; from that moment the capsule's own containment is the
+[paging manager](../memory/paging-manager.md)'s and the [capability model](../../security/capabilities-and-tokens.md)'s
+job, not the loader's.
+
+## Debugging spawn integration
+
+A spawn that fails prints one reason string on the console keyed by the `SpawnError` variant
+(`.../capsule_spawn/spec.rs`, mapped in `.../from_vfs/load.rs:95`), so the failure names which stage of
+the pipeline refused the capsule:
 
 ```
-  src/kernel_core/process_spawn/capsule_spawn/from_vfs/load.rs           load_capsule_from_vfs
+  [RUNTIME-LOAD] FAILED name=<capsule> reason=...
+    manifest:pub_sig / manifest:payload_hash / ...   ManifestRejected(...)   verification refused the manifest
+    attestation                                       AttestationRejected     the attestation trailer check failed
+    elf_load                                          ElfLoad                 the loader refused or could not map the image
+    address_space                                     AddressSpace            no ASID for the new process
+    process_creation                                  ProcessCreation         the PCB could not be created
+    endpoint_collision                                EndpointCollision       a declared service port was taken
+    feature_disabled                                  FeatureDisabled         the capsule needs a build feature that is off
+```
+
+The `manifest:*` and `attestation` reasons come from preflight, so they mean the image never reached the
+loader; the specific suffix (`pub_sig`, `payload_hash`, `pub_revoked`, `caps_ceiling`, `target`, and the
+rest) says which verification check refused it. `reason=elf_load` is the one that means verification
+passed and the loader is what failed, and on that path `load_elf_into_pid` also prints the capsule's debug
+tag followed by the `ElfError` string (`.../load_elf_into_pid.rs:27`), so an `elf_load` failure is always
+accompanied by the exact structural reason from the loader. The order is diagnostic on its own: a
+`manifest:*` reason is a signing or policy problem, `elf_load` is a malformed or unmappable binary that
+was nonetheless correctly signed, and `address_space` or `process_creation` is resource or bookkeeping
+failure downstream of a valid, verified image.
+
+## Source map
+
+```
+  src/kernel_core/process_spawn/capsule_spawn/from_vfs/load.rs           load_capsule_from_vfs, the reason strings
   src/kernel_core/process_spawn/capsule_spawn/runner/verified.rs          spawn_verified (verify-then-install)
   src/kernel_core/process_spawn/capsule_spawn/runner/install/install.rs   process + address space + load
-  src/kernel_core/process_spawn/capsule_spawn/runner/install/load_elf_into_pid.rs
+  src/kernel_core/process_spawn/capsule_spawn/runner/install/load_elf_into_pid.rs   the loader call and its error log
+  src/kernel_core/process_spawn/capsule_spawn/spec.rs                     the SpawnError variants
 ```
+
+Every reference above is verified against those trees. The verification that gates this load is on the
+[capsules and trust](../../security/capsules-and-trust.md) page, the loader stages it calls are on the
+[validation](validation.md), [segment](segments.md), and [layout](layout.md) pages, the address space it
+maps into is on the [paging manager](../memory/paging-manager.md) and [process](../process/pcb.md) pages,
+and the capabilities the spawn installs are the [capability model](../../security/capabilities-and-tokens.md).

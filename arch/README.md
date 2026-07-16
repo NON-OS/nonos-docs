@@ -22,9 +22,19 @@ is genuinely arch-specific the kernel exposes it where it exists and fails clean
 The maturity ladder is explicit: x86_64 in production, aarch64 and riscv64 architecture-ready, then
 QEMU, then hardware.
 
-## Sources
+## Source map
 
-The boundary is `src/arch/abi.rs` and `src/arch/mod.rs`; the backends are `src/arch/x86_64/`,
-`src/arch/aarch64/`, and `src/arch/riscv64/`, each with an `abi` module implementing `ArchOps`. Platform
-discovery is `src/arch/x86_64/acpi/` and `src/arch/fdt/`. Every page is verified against those trees with
-`file:line` references.
+```
+  src/arch/abi.rs        the ArchOps trait and its eight primitives        -> boundary.md
+  src/arch/mod.rs        the cfg-selected Arch alias and the module gating  -> boundary.md
+  src/arch/x86_64/       the production backend (abi.rs, acpi/, iommu/)     -> x86_64.md
+  src/arch/aarch64/      the architecture-ready ARM backend (abi/, gic/)    -> aarch64.md
+  src/arch/riscv64/      the architecture-ready RISC-V backend (abi/, plic/) -> riscv64.md
+  src/arch/fdt/          the flattened-device-tree platform discovery       -> platform-discovery.md
+  src/arch/x86_64/acpi/  the ACPI platform discovery                        -> platform-discovery.md
+```
+
+Each backend carries an `abi` module implementing `ArchOps`; x86_64 discovers its platform through ACPI,
+aarch64 and riscv64 through the device tree. Every page in this section is verified against those trees
+with `file:line` references, and the per-arch pages state maturity honestly: x86_64 in production,
+aarch64 and riscv64 architecture-ready.

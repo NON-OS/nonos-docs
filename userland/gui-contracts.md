@@ -14,16 +14,15 @@ The default desktop boot path starts GUI core, then WM, wallpaper catalog,
 wallpaper, desktop shell, and desktop services
 (`src/userspace/init/spawn_plan/desktop_fleet.rs:17`). GUI core is input router
 and compositor (`src/userspace/init/spawn_plan/desktop_fleet.rs:26`). The init
-entry path calls desktop and market after network
-(`src/userspace/init/entry.rs:35`, `src/userspace/init/entry.rs:36`). App
-fleet source files exist, but the current spawn plan module does not wire them
-into `run_init` (`src/userspace/init/spawn_plan/mod.rs:17`,
-`src/userspace/init/spawn_plan/mod.rs:41`).
-Init registers the kernel-owned `desktop.launcher` service before desktop
-startup (`src/userspace/init/entry.rs:34`). The residual init loop drains that
-launcher inbox once per loop after the lifecycle tick
-(`src/userspace/init/supervisor/loop_impl.rs:25`,
-`src/userspace/init/supervisor/loop_impl.rs:29`).
+entry path calls desktop and market after network, then spawns the app fleet
+through `spawn_apps` (`src/userspace/init/entry.rs:31`,
+`src/userspace/init/entry.rs:32`, `src/userspace/init/entry.rs:33`). `spawn_apps`
+is exported from `app_orchestrator` and wired into `run_init`, so the apps come
+up at boot (`src/userspace/init/spawn_plan/mod.rs:38`,
+`src/userspace/init/spawn_plan/apps.rs:17`). There is no launcher broker: the
+residual init loop only ticks lifecycle and yields, and does not drain any
+launcher inbox (`src/userspace/init/supervisor/loop_impl.rs:31`,
+`src/userspace/init/supervisor/loop_impl.rs:40`).
 
 ```
   +----------------+
@@ -50,26 +49,22 @@ launcher inbox once per loop after the lifecycle tick
 
 ## 2. App launch
 
-Desktop launcher entries carry a fixed launch id next to the visible label and
-service name (`userland/capsule_desktop_shell/src/state/apps.rs:28`,
-`userland/capsule_desktop_shell/src/state/apps.rs:35`). A launcher request
-first looks up the app service and sends the app focus control frame if the app
-is already alive. If the service lookup fails, it sends an eight-byte launch
-frame to `desktop.launcher`
-(`userland/capsule_desktop_shell/src/server/handlers/launcher_request/request.rs:19`,
-`userland/capsule_desktop_shell/src/server/handlers/launcher_request/launch.rs:19`,
-`userland/capsule_desktop_shell/src/server/handlers/launcher_request/launch_frame.rs:17`).
+Desktop launcher entries carry an icon, a visible label, and a service name
+(`userland/capsule_desktop_shell/src/state/apps.rs:30`,
+`userland/capsule_desktop_shell/src/state/apps.rs:36`). The apps are already
+running from boot, so a launcher click does not launch anything. The request
+looks up the app's service pid; if the app is alive it sends that pid an
+eight-byte `NCTL` focus control frame, and if the lookup fails it returns false
+and does nothing (`userland/capsule_desktop_shell/src/server/handlers/launcher_request.rs:26`,
+`userland/capsule_desktop_shell/src/server/handlers/launcher_request.rs:32`,
+`userland/capsule_desktop_shell/src/server/handlers/launcher_request.rs:42`).
 
-The init launcher registers a kernel-owned inbox and service endpoint named
-`desktop.launcher`, using endpoint port `4700` and requiring the IPC
-capability (`src/userspace/init/launcher/register.rs:19`). The broker only
-accepts messages whose source pid matches the current `desktop_shell` service
-owner (`src/userspace/init/launcher/authorize.rs:19`). It decodes only the
-`NLAU` versioned eight-byte frame and extracts the launch id from bytes six and
-seven (`src/userspace/init/launcher/decode.rs:17`). The allowlist maps ids
-`1` through `7` to terminal, file manager, text editor, settings, process
-manager, about, and calculator, checking each capsule liveness state before
-calling its verified spawn wrapper (`src/userspace/init/launcher/spawn.rs:17`).
+The app skeleton accepts that `NCTL` frame only from the `desktop_shell` pid, so
+the shell can focus an already-running app but cannot mint a new process
+(`userland/app_skeleton/src/runner/control.rs:42`,
+`userland/app_skeleton/src/runner/control.rs:67`). Spawn authority stays entirely
+in init behind verification; there is no launch broker and no allowlisted
+runtime spawner in the shell path.
 
 ```
   +------------------+
@@ -79,18 +74,14 @@ calling its verified spawn wrapper (`src/userspace/init/launcher/spawn.rs:17`).
            |
   +--------+---------+
   | service lookup   |
-  | focus if alive   |
-  +--------+---------+
-           |
-  +--------+---------+
-  | desktop.launcher |
-  | NLAU id          |
-  +--------+---------+
-           |
-  +--------+---------+
-  | init broker      |
-  | verified spawn   |
-  +------------------+
+  +---+----------+---+
+      |          |
+      | pid      | no pid
+      |          |
+  +---+---+  +---+------+
+  | NCTL  |  | ignored  |
+  | focus |  |          |
+  +-------+  +----------+
 ```
 
 ## 3. Window open
@@ -228,8 +219,8 @@ Button-down inside an app asks the WM to raise and focus that app window
 (`userland/app_skeleton/src/runner/click_focus.rs:20`). The app skeleton also
 accepts a desktop-shell control frame for focusing itself, but only if the
 sender pid resolves to `desktop_shell`
-(`userland/app_skeleton/src/runner/control.rs:28`,
-`userland/app_skeleton/src/runner/control.rs:59`). Keyboard routing asks the
+(`userland/app_skeleton/src/runner/control.rs:42`,
+`userland/app_skeleton/src/runner/control.rs:67`). Keyboard routing asks the
 WM for the focused pid and falls back to the shell pid when there is no focus
 (`userland/capsule_input_router/src/route/keyboard.rs:25`).
 

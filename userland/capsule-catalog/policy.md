@@ -115,6 +115,35 @@ by service name and pid, not by a fine-grained capability, so a compromise of ei
 policy field, including a kernel security toggle. This is a real trust concentration, stated rather than
 hidden.
 
+The capability mask is `0x219` (`Capsule.mk`, `CAPSULE_REQUIRED_CAPS`), which decodes to CoreExec (1), IPC
+(8), Memory (16), and Admin (512). The Admin bit is the load-bearing one and the reason this capsule is not
+like the other config stores: it pushes kernel-relevant fields (`kernel_preempt`, the SMEP/SMAP/NX/IOMMU
+toggles) into the kernel through `push::on_bool_set`, and that privileged propagation is what Admin grants.
+The least-privilege reading is that Admin is the *only* elevated capability here: the mask holds no
+FileSystem (policy is a RAM struct behind a mutex, not a file), no Crypto, no Network, and no hardware
+capability at all (no Driver, Mmio, Irq, Dma, Pio), so the capsule that can flip a kernel security bit
+cannot itself touch the hardware that bit protects. Its isolation from every other capsule is that the
+write path is gated to two named apps resolved through the service registry, so a random capsule holding
+IPC can *read* a setting but cannot *set* one. The honest boundary, stated in the security caveat above and
+the [gaps](#honest-gaps), is that the write gate is by service name rather than a capability, so it is a
+coarse trust concentration on those two apps.
+
+## Debugging
+
+The service is `policy` on port 4108 (`Capsule.mk`, `service:4108:policy`), and the capsule is spawned at
+`spawn_plan/core.rs:67` (behind the `nonos-capsule-policy` feature) as `boot::capsule("POLICY", "policy",
+...)` from `src/userspace/capsule_policy/`. It prints `[POLICY] capsule spawned` through
+`capsule_boot::boot` on success, or a `[ERROR]` line with the `SpawnError` (framebuffer under
+`NONOS_FBCONSOLE=1`). One nuance specific to this capsule: at startup its `main.rs` runs
+`push::seed_kernel` before entering the loop, so a `[POLICY]` marker means both that the service registered
+and that the kernel was primed with the default policy, and a boot where kernel security toggles read as
+their defaults but a setting change never takes effect is a seed-ran-but-propagation-failed symptom rather
+than a spawn failure. Once up, `mk_service_lookup("policy")` resolves for readers. The request-time failure
+signatures are `E_INVAL` for an unknown field discriminant, an unknown op, or a kind/length mismatch (a
+`BOOL` payload that is not exactly one byte), `E_NOT_FOUND` for a get on an unset field, and `E_ACCES` for
+a set from any caller that is not `app.settings` or `app.setup_wizard`, the last being the write gate doing
+its job.
+
 ## Honest gaps
 
 Stated plainly: the write gate is by service name, not a capability mask (above); the store is the

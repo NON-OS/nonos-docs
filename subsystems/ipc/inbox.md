@@ -94,11 +94,78 @@ re-check rather than by tearing the inbox down. This is why the `DeadOwner` chec
 between a capsule exiting and a caller noticing, the strict enqueue is the backstop that
 refuses delivery to the departed owner.
 
-## Source
+## Security analysis
+
+The inbox is the reachability substrate: a capsule shares no memory with another and can name no other
+address space, so the entire surface one capsule presents to another is a message enqueued on a named,
+owned queue that the kernel decides to accept or refuse. Three properties draw that bound.
+
+**A name is created, never conjured on the path.** The registry's stated rule is that there is no
+auto-registration on send or receive (`registry.rs` module doc): an inbox exists only because
+`register_inbox` or `register_or_get_bootstrap_inbox` made it. `register_inbox` (`registry.rs:85`)
+rejects an empty name, a capacity outside `MIN_INBOX_CAPACITY = 16 .. MAX_INBOX_CAPACITY = 65536`, and a
+name already taken, so a caller cannot silently take over an existing queue by re-registering it. The
+only path that mints an inbox without a capsule pid is `register_or_get_bootstrap_inbox`
+(`registry.rs:118`), which stamps `KERNEL_OWNER = 0` and is reserved for the reply inboxes the
+[spawn pipeline](../process/lifecycle.md) sets up. Because a send cannot bring a queue into existence,
+naming a queue that does not exist is a clean `MissingInbox`, not an accidental new endpoint.
+
+**Every enqueue is fail-closed and owner-checked.** Routing goes through `try_enqueue_strict`
+(`registry.rs:164`), which refuses on three distinct conditions rather than papering over any: an absent
+name is `MissingInbox`, a queue whose owner pid has fallen out of `PROCESS_TABLE` is `DeadOwner`, and a
+full bounded queue is `QueueFull`. The `DeadOwner` check is the one that closes the exit race: between a
+destination capsule exiting and a caller noticing, the kernel refuses to deliver into a dead capsule's
+queue, so a message cannot be dropped into a departed owner's inbox and later mis-drained by whatever
+reuses the pid. A kernel-owned inbox (`owner == 0`) skips the liveness check because its drainer is the
+kernel, which never exits.
+
+**Bounded, non-blocking, no unbounded growth.** `try_enqueue` pushes only when `len < capacity` and
+otherwise records a drop and hands the message back (`inbox.rs:75`), all under the queue's own mutex with
+no blocking inside the lock. A full inbox is a fast visible `QueueFull`, not a memory leak and not a
+stall that a sender could induce to wedge a receiver. This is what makes a capsule's inbox a bounded
+resource: a hostile or runaway sender fills the queue and then gets refused, it does not grow the
+kernel's memory without limit or hold a lock a receiver needs.
+
+The honest boundary: the inbox authenticates the *owner* of a queue and its *liveness*, and it enforces
+the bound, but it does not itself decide whether a given sender is allowed to reach a given endpoint.
+That decision is the capability check on the [routing](routing.md) path, which runs before the strict
+enqueue. An inbox that is registered, live, and not full will accept whatever routing hands it; keeping
+the wrong sender out is routing's job, not the queue's.
+
+## Debugging inboxes
+
+The three strict-enqueue variants each become a distinct errno at the syscall boundary, so a failed send
+tells you which of them fired: `MissingInbox` and `DeadOwner` both map to `ESRCH` (`-3`) and `QueueFull`
+maps to `EAGAIN` (`-11`) at `kernel_route_ipc_corr` (`kernel_ipc.rs:90`). The two `ESRCH` cases are
+worth separating in your head even though they share an errno: `MissingInbox` means the destination name
+was never registered, which upstream is usually a service that never called register or an endpoint
+resolved to the wrong name, while `DeadOwner` means the queue is there but its capsule has exited, which
+is the race the check exists to catch. `EAGAIN` means the receiver is not draining fast enough and the
+bounded queue filled, which is a throughput problem, not a wiring problem.
+
+On the receive side the tells are different. `sys_ipc_recv` returns `ENOENT` (`-2`) if the inbox does
+not exist when the loop starts (`recv.rs:65`), which for an `endpoint != 0` recv means the caller does
+not own that endpoint or it was never registered. A recv that returns `ETIMEDOUT` (`-110`) after its
+deadline (`recv.rs:80`) drained nothing in time, which pairs with the sender side: if the sender's route
+was refused, the message never arrived and the receiver simply times out, so a hung-looking call is
+diagnosed by looking at what the *sender* got, not the receiver. For the traced pids the receive loop
+prints `[IPC-RECV] ... enter`, `dequeue`, `missing inbox`, `before yield`, and `after yield`
+(`recv.rs:32`), and the send path prints `[IPC-SEND] pid= ep= len= target=` (`send.rs:36`), so a hung
+IPC call versus a rejected one is read off the trace: a send trace with no matching route, or a recv
+stuck cycling `before yield`/`after yield` with no `dequeue`, is a receiver waiting on a message that a
+refused or misrouted send never delivered.
+
+## Source map
 
 ```
-  src/ipc/nonos_inbox/inbox.rs      the bounded per-owner queue
-  src/ipc/nonos_inbox/registry.rs   the global name -> inbox map, strict enqueue, lifecycle
-  src/ipc/nonos_inbox/error.rs      InboxError and StrictEnqueueError
-  src/syscall/microkernel/ipc/recv.rs   the blocking receive loop
+  src/ipc/nonos_inbox/inbox.rs         the bounded per-owner queue, try_enqueue
+  src/ipc/nonos_inbox/registry.rs      the global name -> inbox map, strict enqueue, capacity bounds, lifecycle
+  src/ipc/nonos_inbox/error.rs         InboxError and the three StrictEnqueueError variants
+  src/syscall/microkernel/ipc/recv.rs  the blocking receive loop and its ENOENT / ETIMEDOUT returns
+  src/ipc/kernel_ipc.rs                where the strict-enqueue variants become ESRCH / EAGAIN
 ```
+
+Every reference above is verified against those trees. The capability check that runs before the enqueue
+and the wake that pairs with the receive loop are on the [routing](routing.md) page, the message that
+gets enqueued is on the [envelope](envelope.md) page, and the reply inboxes the spawn pipeline
+pre-registers are set up by the [spawn pipeline](../process/lifecycle.md).

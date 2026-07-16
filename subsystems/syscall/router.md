@@ -58,13 +58,82 @@ call. The counters make the syscall surface observable, and the audit path recor
 calls that ask to be recorded. The dispatch itself is the match above; this wrapper is the
 accounting around it.
 
-## Source
+## Security analysis
+
+The router runs only after the [contract](boundary.md) has already established that the caller holds the
+capability its syscall requires, so the router itself is not an authority boundary; it is a routing and
+accounting layer. Its security-relevant properties are about not weakening what the contract established
+and about making the boundary observable.
+
+**Unclaimed numbers dead-end, they do not fall through to a neighbour.** `dispatch_syscall`
+(`dispatch_fn.rs:22`) matches the crypto, surface, and input families by explicit variant lists and the
+admin, microkernel, and graphics families by each module's own `matches` predicate; a number that no arm
+and no predicate claims hits the final `_ => errno(38)` arm and returns `ENOSYS`
+(`dispatch_fn.rs`). There is no default handler and no index arithmetic, so a number the contract somehow
+let through without a home cannot be misrouted into another family's handler; it is simply not serviced.
+
+**The capability check is not repeated, and that is deliberate, not a gap.** The router trusts the
+contract's result because `dispatch` (`src/syscall/contract/dispatch.rs:31`) is the only path that reaches
+`handle_syscall_dispatch`, and it reaches it only after `Capability::resolve` succeeded. Re-resolving in
+the router would be redundant work on the hot path and, worse, a second place the rule lives that could
+drift from the first. The cap-table that maps each `SyscallNumber` to its required bits is the single
+source of truth (`src/syscall/contract/cap_table/`), consulted once at the gate.
+
+**Denials are counted separately so the boundary is visible without a logging layer.**
+`handle_syscall_dispatch` (`entry.rs:29`) bumps `total_calls` on entry, then `successful_calls` or
+`failed_calls` by the sign of the result, and increments `permission_denied` specifically when the result
+is `-1`, which is `-EPERM` (`entry.rs:45`). So the running counts expose how many calls the capability
+boundary is dropping, distinct from ordinary handler failures, which is the signal you watch when a
+capsule is misbehaving or under-provisioned. The audit ring is the per-call record behind those counts:
+when a handler marks its result `audit_required`, `audit_syscall` (`audit/sink.rs`) appends a
+`SyscallAuditEntry` with the pid, syscall name, arguments, and result into a 256-entry ring
+(`audit/entry.rs`). The honest limit is that the audit path records only the calls that ask to be
+recorded, and the ring holds the most recent 256, so it is a recent-history window, not a complete log.
+
+## Debugging the router
+
+The router is where a call's outcome becomes a counted, optionally-audited event, so two facilities make
+the syscall surface observable. `get_syscall_stats` (`audit/stats.rs`) returns the four running counters
+as a tuple, `(total, successful, failed, permission_denied)`, and `get_audit_log`
+(`audit/entry.rs`) returns up to N of the most recent audited calls newest-first. Together they answer
+"what is this capsule actually calling and how is it failing."
 
 ```
-  src/syscall/dispatch/router/dispatch_fn.rs   dispatch_syscall, the family match
-  src/syscall/dispatch/router/entry.rs          handle_syscall_dispatch, counters, audit
-  src/syscall/dispatch/router/crypto.rs         the crypto family
-  src/syscall/dispatch/router/admin/            the admin family
-  src/syscall/dispatch/router/microkernel_ops.rs the Mk* family entry
-  src/syscall/microkernel/                       the Mk* handler implementations
+  total_calls        every call that reached the router
+  successful_calls    result.value >= 0
+  failed_calls        result.value < 0  (any negative errno)
+  permission_denied   result.value == -1  (that is -EPERM specifically)
 ```
+
+The one subtlety worth stating: `permission_denied` counts only `-1`. An `EPERM` returned by the contract
+gate never reaches `handle_syscall_dispatch` at all, because `dispatch` returns before calling
+`invoke` when `resolve` fails, so a contract-level denial shows up as a `[CAP-DENY]` log line rather than
+in this counter. The `permission_denied` counter therefore reflects handlers that themselves return
+`EPERM` (for example a handler that re-checks a finer-grained condition), not the boundary denials. If
+`failed_calls` is climbing but `permission_denied` is not, the failures are `EFAULT`, `EINVAL`, `ENOMEM`,
+or `ENOSYS`, not authority, and the audit ring is where you read which: a `NONOS`-side dump of
+`get_audit_log` gives the syscall name, the first four arguments, and the exact `result` value per call, so
+a run of `-14` on `MkInputEventDrain` with a given `out_ptr` argument points straight at a bad user buffer
+rather than a permissions problem. `ENOSYS` (38) from the router, as opposed to from the boundary, means a
+number decoded to a real `SyscallNumber` but no family claimed it in `dispatch_syscall`, which is a
+routing-table omission rather than a bad caller.
+
+## Source map
+
+```
+  src/syscall/dispatch/router/dispatch_fn.rs      dispatch_syscall, the family match and ENOSYS dead-end
+  src/syscall/dispatch/router/entry.rs            handle_syscall_dispatch, the counters and audit call
+  src/syscall/dispatch/router/crypto.rs           the crypto family
+  src/syscall/dispatch/router/admin/              the admin family
+  src/syscall/dispatch/router/microkernel_ops.rs  the Mk* family entry and its matches predicate
+  src/syscall/dispatch/router/input_ops.rs        the input family (a handler that does usercopy)
+  src/syscall/dispatch/util.rs                    errno, require_capability, the usercopy error mapping
+  src/syscall/dispatch/audit/stats.rs             SYSCALL_STATS and get_syscall_stats
+  src/syscall/dispatch/audit/entry.rs             the 256-entry audit ring and get_audit_log
+  src/syscall/dispatch/audit/sink.rs              audit_syscall
+  src/syscall/microkernel/                         the Mk* handler implementations
+```
+
+Every reference above is verified against those trees. The capability gate the router relies on and does
+not repeat is on the [boundary](boundary.md) page, and the per-syscall capability table it trusts is on the
+[capabilities page](../../security/capabilities-and-tokens.md).

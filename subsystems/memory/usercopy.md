@@ -114,6 +114,77 @@ rules (`src/usercopy/string.rs`), and the low-level direct-map helpers, all buil
 the same `check_range` and `walk` foundation so they all agree on what a valid user
 range is.
 
+## Security analysis
+
+Dereferencing a raw user pointer in kernel mode is the classic kernel-compromise primitive, and this
+boundary exists to remove it entirely. Four properties draw the bound.
+
+**The range is confined to user space, before any access.** `check_range` (`policy.rs:35`) is a pure
+function that rejects a null base (`NullPointer`), a length over the 64 MiB cap (`SizeTooLarge`), and an
+`addr + len` that overflows a `u64` (`AddressOverflow`) before it can wrap, and requires the last byte
+to lie at or below `USER_SPACE_END` (`0x0000_7FFF_FFFF_FFFF`), else `InvalidAddress`. That last check is
+what keeps a copy inside user space: a buffer that would run off the top of user memory into the
+non-canonical gap or the kernel half never passes. Because this is one pure function, every caller,
+byte copies, typed copies, string copies, errors the same way.
+
+**Every page is confirmed present and correctly permissioned.** `validate` (`validate.rs:34`) walks
+each page of the range and asks the walker to resolve it and confirm the required access:
+`translate_read` for a read, `translate_write` for a write. A page that is not present fails
+(`PageNotMapped`), a page not accessible from userspace fails (`PageNotUser`), and a write to a
+non-writable page fails (`PageNotWritable`). So the kernel never writes where the capsule itself could
+not, which is the confused-deputy case this closes. The walk uses the faulting process's own page-table
+root (`walk/root.rs`), so it is checking the capsule's real mappings, not the kernel's.
+
+**The access goes through the direct map, never through the user pointer.** After validation,
+`copy_from_user_directmap` and `copy_to_user_directmap` (`direct.rs`) reach the user's bytes at the
+physical frame the walk resolved, addressed through the kernel direct map. The user virtual address is
+a value that was validated, never a pointer that is dereferenced. This is also what SMAP requires: with
+`CR4.SMAP` set by the [hardening](hardening.md) subsystem, a direct kernel-mode load from a user address
+would fault, so the direct-map route is not just cleaner, it is the route SMAP leaves open.
+
+**The check and the copy are one atomic unit.** The whole validate-then-copy runs inside
+`run_without_interrupts` (`copy.rs:27`), which closes the time-of-check-to-time-of-use gap: if a timer
+interrupt could fire between the walk and the copy, the process could be preempted and its mappings
+changed, so the page the walk approved might not be the page the copy touches. Holding interrupts off
+means the mapping validated is the mapping used. The honest boundary: the walk resolves the mapping as
+it stands at validation time under interrupts-off, so within the copy it is stable, but this boundary
+protects the *kernel* from a hostile user pointer; it does not by itself serialise a user thread racing
+its own buffer on another CPU, which is the caller's concern.
+
+## Debugging the copy boundary
+
+Every rejection is a `UsercopyError` (`error.rs`) with a `Display` string and an errno, so a failed
+copy tells you which stage refused it and what the syscall returns:
+
+```
+  NullPointer        "null pointer"                          -14 (EFAULT)   addr == 0
+  InvalidAddress     "invalid user address"                  -14            last byte above USER_SPACE_END
+  AddressOverflow    "address overflow"                      -14            addr + len wrapped
+  MisalignedAddress  "misaligned user address"               -14
+  PageNotMapped      "page not mapped"                       -14            a page in the range is absent
+  PageNotUser        "page not accessible from userspace"    -14            a kernel-only page in range
+  PageNotWritable    "page not writable"                     -14            a write to a read-only page
+  PageTableCorrupt   "page table outside directmap"          -14            a walk hit a bad table pointer
+  PageFault          "page fault during access"              -14
+  NoProcessContext   "no process context"                   -3  (ESRCH)    no current process to walk
+  SizeTooLarge       "copy size too large"                  -12 (ENOMEM)   len > MAX_COPY_SIZE (64 MiB)
+  InvalidUtf8        "invalid UTF-8 string"                 -22 (EINVAL)   a string copy that is not UTF-8
+```
+
+Almost everything collapses to `EFAULT` (`-14`) at the syscall boundary, which is deliberate: a
+capsule passing a bad pointer gets a single "bad address" answer regardless of how it was bad, so the
+precise reason is for the kernel-side log, not the capsule. The variants that distinguish a *policy*
+rejection from a *walk* rejection are the tell: `NullPointer`, `InvalidAddress`, `AddressOverflow`, and
+`SizeTooLarge` come from `check_range` before any page is touched, so they mean the range itself was
+illegal (a null, an out-of-user-space, or an oversize buffer). `PageNotMapped`, `PageNotUser`, and
+`PageNotWritable` come from the per-page walk, so they mean the range was legal but the capsule's
+mappings did not back it with the required permission, which is the usual "capsule handed a buffer it
+had not faulted in or had mapped read-only" case. `PageTableCorrupt` ("page table outside directmap")
+is the one that signals something deeper: a page-table pointer that does not lie in the direct map,
+which is a corrupted or hostile page-table state rather than an ordinary bad buffer. `NoProcessContext`
+means the copy was attempted with no current process to resolve a root against, an ordering bug in the
+caller.
+
 ## Verification
 
 This boundary is one of the surfaces the verification stack proves rather than just
@@ -123,13 +194,18 @@ runnable proofs check the range invariants, so the guarantee that a user copy st
 within user space and never dereferences an unvalidated pointer is machine-checked,
 not only asserted here.
 
-## Source
+## Source map
 
 ```
   src/usercopy/policy.rs    check_range, the pure range rules and the limits
-  src/usercopy/validate.rs   validate_user_read / validate_user_write, the page walk
-  src/usercopy/copy.rs       copy_from_user / copy_to_user
-  src/usercopy/direct.rs     the direct-map transfer helpers
-  src/usercopy/walk/         the page-table walk and permission decision
-  src/usercopy/error.rs      UsercopyError
+  src/usercopy/validate.rs  validate_user_read / validate_user_write, the page walk
+  src/usercopy/copy.rs      copy_from_user / copy_to_user
+  src/usercopy/direct.rs    the direct-map transfer helpers
+  src/usercopy/walk/        the page-table walk and permission decision
+  src/usercopy/error.rs     UsercopyError, its Display strings and errnos
 ```
+
+Every reference above is verified against those trees. The SMAP bit that forces the direct-map route is
+set on the [hardening](hardening.md) page, the interrupt discipline matches the
+[paging manager](paging-manager.md)'s, and the Kani proofs are on the
+[verification stack](../../../verification/README.md) page.

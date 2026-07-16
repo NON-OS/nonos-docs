@@ -105,12 +105,76 @@ and the [paging manager](paging-manager.md) to map them, so it is brought up in
 the rest of init needs dynamic allocation. Its virtual base and size are
 `layout::KHEAP_BASE` and `layout::KHEAP_SIZE` in the memory layout constants.
 
-## Source
+## Security analysis
+
+The heap is a shared kernel resource, so its safety properties are about not leaking one allocation's
+data into the next and not coming up in a half-mapped state. Two properties carry that, and one bound
+is worth naming.
+
+**Zero on both ends.** `HEAP_ZERO_ON_ALLOC` and `HEAP_ZERO_ON_FREE` both default to `true`
+(`globals.rs:24`). Zero-on-alloc means memory handed out never carries a previous allocation's bytes,
+so a bug that reads uninitialised memory sees zeros rather than stale kernel data, secrets or
+pointers included. Zero-on-free means a freed block is wiped as it is returned, so data does not sit
+in the heap waiting to be read back through a later allocation. This is the "secure" in
+`SecureHeapAllocator`, and it is the [zeroization](zeroization.md) posture applied to the kernel's own
+heap rather than to capsule frames. It is a single zero pass, not the multi-pass DoD erase, which is
+the right cost for steady-state reclaim.
+
+**All-or-nothing bring-up.** `init` (`init.rs:26`) pulls one frame at a time through
+`allocate_heap_frames` and returns `HeapError::FrameAllocationFailed` the moment any request comes
+back empty (`init.rs:47`), and `map_heap_memory` returns `HeapError::MappingFailed` if any page fails
+to map (`init.rs:58`). So a heap that cannot be fully backed fails init loudly rather than coming up
+partially mapped, where a later allocation would fault on an unbacked page. `init` is idempotent, a
+second call returns `Ok` once initialised, so re-entry cannot double-map the base.
+
+The honest boundary is that the heap frames are mapped `READ | WRITE` with no guard pages between
+allocations, so the heap relies on the allocator's own bounds and the [hardening](hardening.md)
+tracker rather than on hardware isolation between neighbouring heap objects. The isolation the heap
+does give you is against the previous *tenant* of a block (through zeroing), not against a live
+neighbour overrunning into you.
+
+## Debugging the heap
+
+The heap surfaces exactly two failures from init, both `HeapError` variants (`error/types.rs`), and
+they point at different layers:
+
+```
+  FrameAllocationFailed   the frame allocator could not back the whole heap (physical exhaustion)
+  MappingFailed           a page could not be mapped at KHEAP_BASE (paging manager rejected it)
+```
+
+A `FrameAllocationFailed` at heap init is a bottom-of-the-stack problem: the
+[frame allocator](physical-frames.md) ran out before it could hand over `KHEAP_SIZE / PAGE_SIZE`
+frames, so the fix is upstream (a bad memory-map seed, or the heap sized larger than the managed
+range). A `MappingFailed` means the frames existed but the [paging manager](paging-manager.md)
+refused a mapping at the heap base, which points at a layout or W^X problem rather than exhaustion.
+Because init is the only place these are returned, a heap fault *after* init is not a heap-init bug,
+it is an ordinary allocation reading or writing past its bounds, which is the [hardening](hardening.md)
+tracker's and the page-fault handler's territory. The heap's `HEAP_STATS` (total size set at init,
+allocation counts thereafter) is the runtime view: a live allocation count that never drops while
+memory pressure climbs is a leak in a caller, not in the heap.
+
+## Where this connects
+
+The heap depends on the [frame allocator](physical-frames.md) for its backing pages
+and the [paging manager](paging-manager.md) to map them, so it is brought up in
+`init_unified_vm`'s wake during [boot](../boot/README.md), after those two are live and before
+the rest of init needs dynamic allocation. Its virtual base and size are
+`layout::KHEAP_BASE` and `layout::KHEAP_SIZE` in the memory layout constants. The zeroing
+policy is the per-heap arm of the [zeroization](zeroization.md) posture, and overrun detection over
+heap ranges lives in the [hardening](hardening.md) tracker.
+
+## Source map
 
 ```
   src/memory/heap/manager/globals.rs  the global allocator, bootstrap buffer, flags
   src/memory/heap/manager/init.rs      init, allocate_heap_frames, map_heap_memory
   src/memory/heap/types/               SecureHeapAllocator and HeapStatistics
-  src/memory/heap/error/               HeapError
-  src/memory/layout/                    KHEAP_BASE and KHEAP_SIZE
+  src/memory/heap/error/types.rs       HeapError
+  src/memory/layout/                   KHEAP_BASE and KHEAP_SIZE
 ```
+
+Every reference above is verified against those trees. The frames come from the
+[physical frame allocator](physical-frames.md), the mapping goes through the
+[paging manager](paging-manager.md), the zeroing is the [zeroization](zeroization.md) posture, and
+heap-range corruption detection is on the [hardening](hardening.md) page.

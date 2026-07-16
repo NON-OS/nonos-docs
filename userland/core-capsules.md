@@ -229,3 +229,74 @@ size handling, retired syscall rejection, then emits pass or fail and exits
 | `payment` | Is the request pay, drain receipts, or list supported tokens? | `userland/capsule_payment/src/server/dispatch.rs:26` |
 | `power` | Is the command reboot or shutdown after parse? | `userland/capsule_power/src/server/handlers/router.rs:27` |
 | `proof_io` | Which syscall proof failed before exit? | `userland/capsule_proof_io/src/main.rs:38` |
+
+## 5. Security analysis
+
+These are the capsules that hold the sensitive bits, so their capability masks are the
+first thing to check. `keyring`, `entropy`, `crypto`, and `ramfs` all carry the `Crypto` bit; the
+inventory records `keyring`, `entropy`, and `crypto` at `0x39` and `ramfs` at `0x38`,
+which is `Crypto` together with the `CoreExec`, `IPC`, and `Memory` bits they need to
+run and serve requests (`src/capabilities/types.rs:54`). None of them holds a device,
+admin, or input-source bit, so a compromised core service cannot reach hardware or
+reboot the machine; it can only answer the protocol it was built for. That is the isolation argument for splitting
+key material into its own capsule at all: the keyring owns wallet keys and NOX signing,
+and it is the only capsule that does, so the blast radius of a bug there is the keyring's
+own address space rather than the whole system.
+
+The shared service shape is itself a security property. Every one of these capsules
+receives IPC, parses a length-checked protocol request, dispatches by operation, and
+rejects an unknown operation with a defined error, `EINVAL` for the RAMFS, VFS, and
+crypto dispatchers and `E_BAD_OP` for attest and power
+(`userland/capsule_ramfs/src/server/dispatch.rs:27`,
+`userland/capsule_power/src/server/handlers/router.rs:22`). A caller cannot drive one of
+these services into an undefined path by sending an operation code it does not handle;
+the dispatcher has a closed set and a default-deny tail. VFS goes further and records the
+owner pid on each open file descriptor
+(`userland/capsule_vfs/src/store/fdtable/types.rs:47`), so an FD is scoped to the capsule
+that opened it rather than being a global handle any caller can name.
+
+RAMFS is worth calling out because it encrypts at rest in memory. Each file stores a
+per-file key, nonce, and ciphertext buffer
+(`userland/capsule_ramfs/src/store/types.rs:24`), so file contents are not sitting in the
+capsule's heap as plaintext. That is a defense-in-depth choice, not a substitute for the
+address-space isolation the kernel already provides, but it means a memory disclosure bug
+in RAMFS does not immediately hand over file plaintext.
+
+## 6. Debugging a core service
+
+The failure boundary a caller sees is the error the dispatcher returns, so the debugging
+path starts at the dispatcher for the capsule that owns the state. A request that comes
+back `EINVAL` from RAMFS or crypto hit the unknown-operation tail, which means the
+operation code was wrong or the request framing did not parse, not that the operation
+failed internally. A request that comes back `E_BAD_OP` from attest or power is the same
+situation with the other spelling. A request that never comes back at all is usually the
+service not being spawned, and the `capsule spawned` boot marker
+(`src/userspace/init/capsule_boot/run.rs:29`) is the ground truth for that; the core
+services spawn in a fixed order after RAMFS, keyring then entropy then crypto then policy
+(`src/userspace/init/spawn_plan/core.rs:22`), so a keyring call that hangs when RAMFS is
+up but keyring is not points at that phase.
+
+The per-capsule audit table in section 4 is the routing map for the rest. It names, for
+each of market, installer, payment, power, and `proof_io`, the one question to ask and the
+first source line to open. `proof_io` is the odd one: it is not a long-lived service but a
+boot-time proof that exits with pass or fail after checking time calls, unknown syscall
+handling, bad debug pointers, and retired syscall rejection
+(`userland/capsule_proof_io/src/main.rs:37`), so a `proof_io` failure is a kernel-ABI
+regression to chase in the kernel, not a service to restart.
+
+## 7. Source map
+
+```
+  userland/capsule_ramfs/src/{store/types.rs, server/dispatch.rs}   encrypted files, dispatch
+  userland/capsule_vfs/src/{store/fdtable/types.rs, server/dispatch.rs}  fd table and owner pid
+  userland/capsule_keyring/src/{store/types/store.rs, server/dispatch.rs}  key store and wallet ops
+  userland/capsule_entropy/src/{pool/types.rs, server/dispatch.rs}  counters and random ops
+  userland/capsule_crypto/src/server/dispatch.rs                    the stateless primitive router
+  userland/capsule_{policy,attest,power}/src/server/                header decode and E_BAD_OP tail
+  userland/capsule_{market,installer,payment}/src/server/           index, admission, and pay paths
+  userland/capsule_proof_io/src/main.rs                             the boot-time syscall proof
+```
+
+The service endpoints and capability masks for these capsules are in
+[the capsule inventory](capsules.md); the protocol op tables are in
+[the protocol atlas](protocols.md).

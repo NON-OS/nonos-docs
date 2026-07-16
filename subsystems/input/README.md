@@ -9,6 +9,7 @@ fans each event out to the consumer that owns the focus.
 |------|----------------|
 | [ring.md](ring.md) | The bounded MPSC ring, drop-on-full with a counter, the monotonic sequence number, and the single-waiter wakeup. |
 | [path.md](path.md) | The `InputEvent` record, the `MkInputEventPost` / `Drain` / `Wait` syscalls, and the driver-to-router-to-consumer path. |
+| [drivers.md](drivers.md) | The four input driver capsules (PS/2, i2c-PCI, i2c-HID, USB-HID), the claim / grant / IRQ / read / post model each follows, and how real hardware splits input across all of them at once. |
 
 The shape to keep in mind is that the kernel does the least it can: it holds a 1024-entry ring,
 counts drops rather than blocking a producer, publishes a sequence number so the consumer can wait

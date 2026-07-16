@@ -71,7 +71,63 @@ for a non-PIE:
 
 The returned entry is what the spawn path installs as the capsule's initial instruction pointer.
 
-## Source
+## Security analysis
+
+This is the orchestration layer, so its properties are about ordering and about not leaking a
+half-loaded image into a live address space. Three hold.
+
+**Validation strictly precedes mapping.** `load_entry_into`
+(`src/elf/loader/core/loader/load_entry_into.rs:20`) runs `parse_elf_header`, `validate_elf`, and
+`program_header_bounds` before it maps a single segment, so no frame is allocated and no page is
+installed for an image that fails a header or bounds check. A malformed image is refused up front rather
+than partway through mapping, which is what lets the caller treat a load failure as a clean no-op with
+nothing to unwind at this level. The header and bounds checks themselves are on the
+[validation](validation.md) page; the point here is that the orchestration calls them first, every time.
+
+**The load targets a specific ASID, never the current one.** `load_entry_into` takes a `target_asid` and
+threads it through `load_segment` and `apply_relative_relocations`, so every page lands in the freshly
+created address space for the capsule being spawned. The loader maps into that ASID directly, so the
+capsule's text and data are never briefly visible in the kernel's mapping or another capsule's while the
+load is in progress. That is what keeps a capsule's memory private from the moment it exists.
+
+**ASLR is on by default and page-aligned.** A position-independent image (an `ET_DYN` PIE, which is what
+capsules typically are) is loaded at a randomized base: `load_base` (`loader/base_addr.rs:19`) calls
+`randomize_base` (`aslr/manager/randomize.rs:24`), which adds a random offset within the executable
+randomization range and masks the result back to a page boundary, and randomization is enabled by default
+(`aslr/manager/settings.rs`). So a capsule's segments land at an address an attacker cannot predict from
+the image alone, and the mask keeps the base page-aligned so it does not disturb segment alignment. The
+honest boundary is that the relocation pass, `apply_relative_relocations`, only applies the relative
+(`R_X86_64_RELATIVE`) fixups a PIE needs against the chosen base; it is not a general dynamic linker, and
+an image needing other relocation types is not what this path is for. The relocated GOT it produces is
+write-protected afterward by the paging layer, which is the [capsule RELRO](../../security/capsules-and-trust.md)
+posture.
+
+## Debugging the load orchestration
+
+Because the orchestration calls the header, segment, and relocation stages in order, a failure at any
+stage returns that stage's `ElfError` (`src/elf/errors/types/state.rs:17`) straight up, and the spawn
+path prints it after the capsule's debug tag (`.../install/load_elf_into_pid.rs:27`). Reading the printed
+string against the order in `load_entry_into` localises the failure to a stage:
+
+```
+  Invalid ELF magic / class / type ...   header stage        validate_elf refused the header
+  Program headers out of bounds          bounds stage        the program-header table did not fit
+  Segment ... / W^X / alignment          segment stage       a PT_LOAD segment was rejected or could not map
+  Relocation processing failed           relocation stage    a relative fixup could not be applied
+  Unsupported relocation type            relocation stage    a non-RELATIVE relocation was present
+```
+
+The value of the ordering is that the stage tells you how far the load got. A header-stage error means
+nothing was mapped. A segment-stage error means some earlier segments in the same image may have been
+mapped into `target_asid` before the failing one, but since the whole address space belongs to a capsule
+that will not be scheduled, the caller discards the ASID rather than unmapping page by page. A
+relocation-stage error, `RelocationFailed` or `UnsupportedRelocation`, means every segment mapped
+cleanly and only the fixup pass failed, which points at a linker producing relocations this loader does
+not apply rather than at a corrupt or oversized image. As everywhere on this path, the top-level spawn log
+collapses all of these to `reason=elf_load` (`.../from_vfs/load.rs:99`); the preceding `ElfError` string
+is the one that says which stage.
+
+## Source map
 
 ```
   src/elf/loader/core/loader/load_entry_into.rs   the ordered load orchestration
@@ -79,4 +135,10 @@ The returned entry is what the spawn path installs as the capsule's initial inst
   src/elf/aslr/manager/randomize.rs                randomize_base
   src/elf/aslr/manager/settings.rs                 ASLR defaults
   src/elf/loader/core/relocate/                    the relative relocation pass
+  src/elf/errors/types/state.rs                    the ElfError stages surface here
 ```
+
+Every reference above is verified against those trees. The header and bounds checks this orchestration
+runs first are on the [validation](validation.md) page, the per-segment W^X and zero-fill it drives are on
+the [segment loading](segments.md) page, and the verify-then-load gate that calls this whole path is on
+the [integration](integration.md) page.

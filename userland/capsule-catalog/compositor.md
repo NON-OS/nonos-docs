@@ -17,6 +17,7 @@ presents the [surfaces](../../subsystems/graphics/surfaces.md) every window draw
 - [Presentation: GOP and virtio-gpu](#presentation-gop-and-virtio-gpu)
 - [Layer reaping](#layer-reaping)
 - [Security analysis](#security-analysis)
+- [Debugging](#debugging)
 - [Honest gaps](#honest-gaps)
 - [Source map](#source-map)
 
@@ -119,12 +120,45 @@ as a dead layer, and the fixed 32-slot table does not fill with stale entries.
 
 ## Security analysis
 
+The mask is `0x7919` (`CAPSULE_REQUIRED_CAPS` in `userland/compositor/Capsule.mk`), decoding to `CoreExec |
+IPC | Memory | Debug | GraphicsDisplayQuery | GraphicsSurfaceCreate | GraphicsSurfaceMap | GraphicsPresent`
+against `src/capabilities/types.rs`. It is the only capsule in the desktop fleet that holds the full
+graphics set, and the one that matters is `GraphicsPresent`: the compositor is the single capsule allowed to
+put pixels on the display, and `GraphicsSurfaceMap` is what lets it map a client's surface to composite it.
+Notably it holds none of the driver-broker capabilities: no `Driver`, `Mmio`, `Irq`, `Dma`, or `Pio`. It
+does not touch a device or program DMA; it presents through the kernel and, in virtio mode, through the
+graphics client, so a compromise of the compositor is bounded to the framebuffer, not the GPU's registers.
+
 - **Layers are owner-scoped**: a layer is tagged with the submitting pid, and only the owner can update or
   remove it, so one capsule cannot move or delete another's window.
 - **Geometry is validated**: a scene or damage rectangle must fit inside the display, so a client cannot
   address pixels outside the screen.
 - **Passive**: the compositor initiates no calls to other capsules, so it is a target, not a client, and
   its attack surface is the eight fixed-size ops.
+
+## Debugging
+
+The compositor registers as `compositor` on port 4310 and every client (the wm, wallpaper, login, boot
+splash, and the input router's cursor update) reaches it by `mk_service_lookup("compositor")`. It is the
+first desktop service the fleet waits on: the boot splash and wallpaper both poll that lookup and retry until
+it resolves, so a desktop that never paints usually means the compositor never registered. The kernel spawn
+marker is:
+
+```
+  [SPAWN] name=compositor pid=0x... caps=0x7919 entry=0x...
+```
+
+`caps=0x7919` confirms it was admitted with the full graphics set. Because setup acquires the graphics port,
+the backing framebuffer, its dimensions and stride, and the GOP-versus-virtio mode before the loop runs
+(`main.rs:37`), a compositor that spawns but never presents is stuck in that acquisition, not the loop.
+
+The runtime failure signatures are on the wire and in the frame. An unknown op or a wrong-size payload is
+`E_BAD_OP` or `E_INVAL` (`src/server/handlers/scene_submit.rs`). A `SCENE_SUBMIT` with a zero-area rectangle
+or one that does not fit the display is rejected before a layer is created, so a window that never appears is
+a geometry rejection, not a lost frame. A layer whose owner exited stops painting and is reaped after 60
+consecutive attach misses (`REAP_THRESHOLD`), so a window that lingers for about a second after its capsule
+dies and then vanishes is the reaper working, not a leak. Since damage is a single bounding box, a visible
+smear between two small changes in opposite corners is the accumulator merging them, which is expected.
 
 ## Honest gaps
 

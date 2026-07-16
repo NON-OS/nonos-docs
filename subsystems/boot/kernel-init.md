@@ -58,11 +58,61 @@ IPC path, a live bootstrap processor, and a working virtual-memory manager. The 
 along in a degraded state past any of them; it stops with a legible reason. After step 16 the core is
 ready, and control passes to [userspace init](userspace-init.md).
 
-## Source
+## Security analysis
+
+Init is a security event because it establishes the invariants everything later depends on, and it does
+so fail-closed: a missing precondition halts rather than degrades.
+
+**Fatal preconditions halt, they do not degrade.** The four steps that call `fatal` (`entry.rs:73`) are
+the RNG (`entry.rs:33`), the IPC MAC secret (`entry.rs:36`), the bootstrap processor (`entry.rs:39`),
+and the unified VM (`entry.rs:49`). Each writes its stage to the boot log and serial and then calls
+`crate::arch::halt_loop()`, so the kernel never runs a capsule with an unseeded generator, an unkeyed
+IPC path, no live CPU, or no virtual-memory manager. There is no partial-boot mode past these; the
+system stops with a legible reason. The same discipline appears in `microkernel_main`, where a failure
+to create the init process, its address space, or its kernel stack halts (`entry.rs:125` onward).
+
+**The trust primitives are established before any capsule can spawn.** The kernel signing keypair
+(`crypto::kernel_keys::init`, `entry.rs:64`) and the ELF loader (`entry.rs:63`) come up in the core
+sequence, and no capsule is spawned until `microkernel_main` runs afterward. So by the time the first
+capsule is verified, the loader and the keys it checks against both exist. The baked trust anchor the
+capsule certificates root in is compiled into the kernel image the bootloader already authenticated, so
+it is not something init has to fetch or establish.
+
+**Ordering is the safety property, not a convenience.** RNG precedes the IPC secret because the secret
+is drawn from it; the BSP precedes the scheduler because per-CPU state must exist first; the VM manager
+precedes every process creator. A reordering that ran a dependent step first would not fail safe, it
+would run on uninitialised state, which is why the order is fixed in code rather than left to
+convention.
+
+## Debugging kernel init
+
+On a machine with no serial port the kernel's on-screen text log is deliberately off: `init_after_fb`
+(`src/sys/boot_log/init.rs:22`) prints "[fbconsole] on-screen log disabled; serial only" and leaves the
+bootloader's verified-boot splash in the framebuffer for the compositor to build on, so the kernel log
+is a serial-only stream. Each successful stage prints through `boot_log::ok` as a bracketed tag line,
+"[NONOS] Microkernel init" (`entry.rs:29`), "[NONOS] broker IO-APIC routing ready" (`entry.rs:59`),
+"[NONOS] Core ready" (`entry.rs:69`), and the pre-init steps in `core_init.rs` print their own
+"[NONOS] ..." lines ("[NONOS] PCI enumerated", "[NONOS] hardware broker seeded"). A fatal stop is the
+"[ERROR] ..." line from `boot_log::error` followed by "[FATAL] <stage>: <detail>" on serial
+(`entry.rs:74`), so the last two serial lines name exactly which precondition failed. The common early
+symptom, a black screen with the bootloader splash frozen and the kernel serial silent after the
+handoff, means bring-up died before or at the first `boot_log` call rather than at any specific stage.
+The `bench::mark` breadcrumbs ("vm_ready", "process_runtime_ready", "microkernel_core_ready" at
+`entry.rs:52`, `65`, `70`) bracket the sequence for locating where progress stopped.
+
+## Source map
 
 ```
-  src/kernel_core/init/entry.rs        microkernel_init, the ordered sequence, fatal
-  src/kernel_core/init/memory.rs        the early arch memory bring-up
-  src/kernel_core/init/framebuffer.rs   the framebuffer MMIO map
-  src/kernel_core/init/start_secondary.rs   the AP bring-up
+  src/kernel_core/init/entry.rs             microkernel_init, the ordered sequence, fatal, microkernel_main
+  src/kernel_core/init/memory.rs             the early arch memory bring-up
+  src/kernel_core/init/framebuffer.rs        the framebuffer MMIO map
+  src/kernel_core/init/start_secondary.rs    the AP bring-up
+  src/boot/main/core_init.rs                 the pre-init serial markers (PCI, broker, APIC)
+  src/sys/boot_log/init.rs                   init_after_fb, why the on-screen log stays off
+  src/sys/boot_log/output.rs                 boot_log::ok / error, the bracketed tag lines
 ```
+
+Every reference above is verified against those trees. The handoff and its verification that precede
+this sequence are on the [handoff](handoff.md) page; the userspace transition that follows it is on the
+[userspace init](userspace-init.md) page; the VM manager step 10 brings up is the
+[paging manager](../memory/paging-manager.md).

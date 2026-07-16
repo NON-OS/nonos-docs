@@ -69,10 +69,72 @@ that is not running the affected address space, while a kernel-address flush rea
 every online CPU because kernel mappings are shared by all of them. This file is the
 broadcast-and-wait primitive; the paging manager decides when to invoke it.
 
-## Source
+## Security analysis
+
+A missed TLB shootdown is a memory-safety hole: a CPU that keeps a stale translation can read or write
+through a page that was unmapped and possibly handed to another tenant. So the properties here are about
+never letting the initiator proceed while a stale entry survives. Three hold.
+
+**The initiator waits for every other online CPU to acknowledge.** `tlb_shootdown`
+(`src/smp/tlb.rs:22`) resets `TLB_SHOOTDOWN_ACK` to zero, sends the IPI, invalidates locally, then
+spin-waits until the ack count reaches `cpus_online() - 1`. Each other CPU, in
+`handle_tlb_shootdown_ipi` (`tlb.rs:57`), invalidates the published address and does a
+`fetch_add` on the ack counter. Because the initiator does not return until every other CPU has bumped
+that counter, the mapping is dropped from every TLB before the initiator continues. The publish/ack
+handshake uses release/acquire ordering (`store(..., Release)` on the address and active flag,
+`load(Acquire)` on the ack), so the receiver sees the published address before it acts and the initiator
+sees the acks after they are counted.
+
+**The active flag gates the handler, so a spurious IPI is a no-op.** `handle_tlb_shootdown_ipi` reads
+`TLB_SHOOTDOWN_ACTIVE` first and only invalidates and acks when a shootdown is genuinely in progress
+(`tlb.rs:57`). An IPI that arrives with no active shootdown does nothing and does not corrupt the ack
+count for a later one, so a stray or late-delivered vector cannot desynchronise the handshake.
+
+The honest boundary is the timeout. The wait is bounded: after roughly ten million TSC cycles the
+initiator logs `[SMP] TLB shootdown timeout` and proceeds anyway rather than hanging the CPU forever if a
+core is unresponsive (`tlb.rs:22`). Proceeding on a timeout means the safety guarantee, that every TLB
+dropped the entry, is best-effort under a wedged CPU: the alternative, hanging the initiator forever,
+would take the whole system down instead. In practice a timeout means a core is stuck with interrupts
+disabled or not servicing the vector, which is itself a bug to chase; the timeout keeps that bug from
+freezing the CPU that changed the mapping, and the log line is the signal that it happened.
+
+## Debugging TLB shootdown
+
+The one message this path prints is the timeout, and it is the anchor for the two failure shapes here:
+
+```
+  [SMP] TLB shootdown timeout    an ack never arrived within ~10M TSC cycles; the initiator proceeded
+```
+
+**A shootdown timeout.** The initiator waited for `cpus_online() - 1` acks and one never came. The usual
+cause is a CPU that is not servicing the shootdown vector: it took an exception with interrupts off, it is
+spinning in a section with `cli`, or its IDT entry for `IPI_TLB_SHOOTDOWN` is not installed. Because
+`init_bsp` registers the IPI handlers before any AP starts (`src/smp/init/bsp.rs`), a timeout on a system
+that booted cleanly points at a stuck core rather than a missing handler. The danger sign that follows a
+timeout is a later use-after-free-shaped fault on another core, since the initiator proceeded assuming
+every TLB was flushed when one was not.
+
+**A stale translation with no timeout.** If a CPU reads through an unmapped page but no timeout was
+logged, the shootdown probably was not sent for that unmapping at all, which is a decision made a layer up
+in the [paging manager](../memory/paging-manager.md)'s per-ASID wrappers, not in this file. The filter
+there reads each CPU's [`active_asid`](per-cpu.md); a CPU whose `active_asid` is wrong (for instance
+because a context switch did not update it, or a per-CPU read hit the wrong core through a bad GS base)
+would be skipped when it should have been included. So a stale-translation bug with no timeout points at
+the ASID filter and the `active_asid` field, whereas a timeout points at delivery and servicing. On a
+single-CPU boot neither can occur: `tlb_shootdown` degrades to a plain local `invlpg` with no IPI when
+`cpus_online() <= 1`, so a shootdown bug is always a multi-CPU-only symptom.
+
+## Source map
 
 ```
   src/smp/tlb.rs        tlb_shootdown, handle_tlb_shootdown_ipi, invalidate_page, flush_tlb
   src/smp/ipi/          the inter-processor interrupt send and vectors
   src/smp/state.rs      the shootdown address, ack, and active flags
+  src/smp/init/bsp.rs   init_bsp binds the IPI handlers before any AP starts
+  src/smp/ipi_idt.rs    register_ipi_handlers, the shootdown vector binding
 ```
+
+Every reference above is verified against those trees. The address-space filter that decides when to
+invoke this broadcast is in the [paging manager](../memory/paging-manager.md), the `active_asid` field it
+reads to scope targets is on the [per-CPU](per-cpu.md) page, and the online-CPU count the wait depends on
+is established during AP bring-up in the SMP init path.

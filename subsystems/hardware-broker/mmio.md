@@ -59,11 +59,68 @@ pid owns. Each unmaps the user pages when the holder's address space is the acti
 the unmap otherwise, letting address-space teardown drop the page-table entries wholesale; the
 [revocation](revocation.md) page covers that self-context decision and the exit wiring.
 
-## Source
+## Security analysis
+
+MMIO is easier to reason about than [DMA](dma.md) because the mapped pages land in the capsule's own
+address space and are contained by paging: a capsule can touch only what the broker mapped, and the
+mapping is bounded to a slice of a BAR the capsule holds. Four properties draw that bound.
+
+**Bounded to a claimed BAR.** The physical base comes from the kernel's device table, not the request,
+so a mapping can only name memory inside the BAR of a device the caller claims; it cannot forge an
+arbitrary physical address. The arithmetic is all `checked_add`, and `phys_end > bar_end` is `BadRange`,
+so an off-by-one cannot walk past the BAR into another device's registers or into RAM.
+
+**MSI-X withheld.** The single most important clamp. A device's MSI-X table usually shares the register
+BAR, and mapping it would let the capsule program its own interrupt vectors and bypass the [IRQ](irq.md)
+bind allowlist entirely. `safe_length` trims any request to stop at the page below the table, or refuses
+it with `WouldExposeMsixTable` if it starts inside, so the capsule drives its device but the kernel
+keeps the vector programming. This is what makes a userspace driver's interrupts trustworthy: the driver
+can never point an interrupt at a vector it was not bound.
+
+**Guard-page isolation.** Adjacent grants are separated by an unmapped guard page (`grant.rs`), so a
+runaway access off the end of one grant faults into nothing rather than spilling into the next grant's
+registers.
+
+**Data, not code.** The pages are mapped user, read-write, uncached, and no-execute (`map.rs`). No-execute
+means a capsule cannot execute out of its device mapping, so a writable BAR window is not a code-injection
+path; uncached is correctness, because it is device memory and not RAM. The epoch closes the same
+use-after-release gap as the other grants (`StaleEpoch`). Unlike DMA, MMIO needs no IOMMU discussion: the
+reach is CPU-side and paging-contained, so a compromised capsule can only touch the BAR slice it was
+granted, minus the MSI-X table.
+
+## Debugging MMIO grants
+
+`map_for_caller` prints a stage marker as it clears each step, so a partial trace on the console (or the
+framebuffer on a `NONOS_FBCONSOLE=1` build) tells you exactly how far a mapping got before it was refused:
+
+```
+  [MMIO] claim     claim + epoch resolved      (absent -> NotClaimed / StaleEpoch)
+  [MMIO] device    device + BAR resolved       (stops here -> BadBarIndex / NotMmioBar)
+  [MMIO] msix      MSI-X info looked up
+  [MMIO] msix ok   the clamp passed            (stops before -> WouldExposeMsixTable)
+  [MMIO] va        user VA reserved
+  [MMIO] reserve   guard-padded region carved  (stops here -> no user VA space)
+  [MMIO] map       pages installed             (stops here -> page install failed)
+  [MMIO] record    grant recorded, returns
+```
+
+The markers are printed in order and `[MMIO] record` is the last, so seeing `record` means the driver
+got its registers, and the missing marker names the step that blocked it: a trace that reaches
+`[MMIO] msix` but not `[MMIO] msix ok` is an MSI-X overlap, a trace that reaches `[MMIO] va` but not
+`[MMIO] map` is a page-install failure, and no `[MMIO] claim` at all is a claim-ordering or epoch problem.
+This is how a driver that comes up on QEMU but not on real hardware is diagnosed: the trace stops at the
+step the real BAR layout broke.
+
+## Source map
 
 ```
   src/hardware/broker/mmio/map.rs             the five-step mapping path
-  src/hardware/broker/mmio/msix_exclusion.rs  the MSI-X table clamp
+  src/hardware/broker/mmio/msix_exclusion.rs  the MSI-X table clamp (safe_length)
+  src/hardware/broker/mmio/types.rs           MmioGrant and the MmioMapError variants
   src/hardware/broker/mmio/release.rs         unmap_grant / release_for_device / release_all_for_pid
-  src/hardware/broker/grant.rs                the MmioGrant table and the user VA region
+  src/hardware/broker/grant.rs                the MmioGrant table and the guard-padded user VA region
 ```
+
+Every reference above is verified against those trees. The claim and epoch are on the
+[device claim](claim.md) page, the interrupt allowlist the MSI-X clamp protects is on the [IRQ](irq.md)
+page, and the self-context unmap decision is on the [revocation](revocation.md) page.

@@ -63,12 +63,59 @@ zero or returning nothing, but a calibrated boot uses the real frequency. The su
 saturating so the counter difference never underflows, which is what makes the derived time
 monotonic.
 
-## Source
+## Security analysis
+
+Calibration is a correctness step, not a boundary, but the frequency it stores is the divisor under every
+duration and every uptime-based freshness check in the kernel, so its failure modes matter to anything
+that reads time.
+
+**Wrong-but-not-broken is the design.** If no method succeeds the counter is still monotonic; only the
+scale is wrong. `calibrate` returns `CalibrationFailed` rather than storing a guess (`calibrate.rs:60`),
+and the separate `now_ns` fallback substitutes `2_500_000_000` when the stored frequency is still zero
+(`timer/time.rs:26`). The result is that an uncalibrated boot produces time that still counts up and still
+orders events correctly, but whose absolute rate is a guess. Nothing here can make a mis-scaled clock read
+as an error, so code that needs to know time is trustworthy must check that calibration ran, not just that
+`now_ns` returns a value.
+
+**Provenance is recorded, not just the number.** The stored `CalibrationSource` (`Cpuid`, `Pit`, `Hpet`)
+and a confidence travel with the frequency, and CPUID gets confidence 100 because the CPU reporting its
+own timestamp frequency is authoritative while the PIT and HPET paths carry a measured confidence over
+several samples. That provenance is what lets a later reader distinguish a frequency taken as exact from
+one measured against a legacy timer whose own accuracy is the floor on the result. The honest boundary is
+that none of these sources is authenticated: the kernel trusts the CPUID leaf, the 8254, or the HPET as
+the hardware presents them, so calibration is a measurement chain, not a trust chain.
+
+## Debugging calibration
+
+Calibration runs once and prints one line, so its outcome is read from that line and then confirmed by the
+shape of the time it produces.
+
+**The one marker to look for.** `timer::init` logs `[TIMER] Initialized with TSC frequency: {} Hz`
+(`timer/init.rs:43`) after storing the frequency. A plausible number here (a few GHz on a modern part)
+with time that tracks a wall clock means the chain worked; the `CalibrationSource` behind it tells you
+whether it was the authoritative CPUID leaf or a measured fallback.
+
+**A slow or fast clock is a frequency-scale bug, not a stopped one.** If sleeps finish early or late by a
+consistent ratio and timestamps drift at a fixed rate, the stored frequency is wrong, most often because
+calibration fell through to the `2_500_000_000` default (the boot ran uncalibrated) and the real part is
+some other speed. The signature is a constant multiplicative error in every duration, which distinguishes
+it from a stuck clock (constant, not accumulating) and from the pre-init `None` window (which returns
+nothing rather than a scaled value). The fix is upstream: get CPUID or the PIT/HPET path to succeed so the
+default is never used, and confirm by the printed frequency changing from a round 2.5 GHz to the part's
+real rate.
+
+## Source map
 
 ```
   src/arch/x86_64/time/timer/tsc.rs                 rdtsc
   src/arch/x86_64/time/tsc/calibration/calibrate.rs  the CPUID -> PIT -> HPET chain
   src/arch/x86_64/time/tsc/calibration/cpuid.rs      the CPUID TSC-frequency leaf
   src/arch/x86_64/time/tsc/calibration/pit.rs        the PIT measurement fallback
+  src/arch/x86_64/time/tsc/calibration/hpet.rs       the HPET measurement variant
   src/arch/x86_64/time/timer/time.rs                 now_ns and the frequency fallback
+  src/arch/x86_64/time/timer/init.rs                 timer::init and the [TIMER] frequency marker
 ```
+
+Every reference above is verified against those trees. The frequency stored here is consumed as the
+divisor in the monotonic base on the [time bases](time-bases.md) page, and the consumers that ultimately
+depend on the scale being right are collected on the [consumers](consumers.md) page.

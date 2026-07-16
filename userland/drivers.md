@@ -199,3 +199,103 @@ or mouse event is missing from the desktop.
 | `driver.ps2_kbd0` | Startup retries setup until a driver object is returned, then enters the server loop. Each loop pumps IRQ sequence state, drains PS/2 data, acknowledges keyboard and auxiliary IRQ grants, then services IPC. | Keyboard translation posts key-down and key-up. Mouse publishing posts relative pointer movement, wheel, button-down, and button-up. | Startup at `userland/capsule_driver_ps2_input/src/main.rs:31` to `userland/capsule_driver_ps2_input/src/main.rs:45`, pump at `userland/capsule_driver_ps2_input/src/server/pump.rs:24` to `userland/capsule_driver_ps2_input/src/server/pump.rs:45`, server loop at `userland/capsule_driver_ps2_input/src/server/runner.rs:32` to `userland/capsule_driver_ps2_input/src/server/runner.rs:73`, keyboard post at `userland/capsule_driver_ps2_input/src/keymap/post.rs:18` to `userland/capsule_driver_ps2_input/src/keymap/post.rs:31`, mouse post at `userland/capsule_driver_ps2_input/src/mouse/post.rs:24` to `userland/capsule_driver_ps2_input/src/mouse/post.rs:52`. |
 | `driver.usb_hid0` | Startup initializes heap, waits until the xHCI service can be resolved, enumerates connected xHCI ports, then polls HID endpoints and rescans when no endpoints are present for the rescan interval. | Keyboard publishing posts key-down and key-up with modifier flags and mapped special keys. Mouse publishing posts relative pointer movement, wheel, button-down, and button-up. | Startup at `userland/capsule_driver_usb_hid/src/main.rs:32` to `userland/capsule_driver_usb_hid/src/main.rs:37`, xHCI lookup at `userland/capsule_driver_usb_hid/src/orchestrator/run.rs:19` to `userland/capsule_driver_usb_hid/src/orchestrator/run.rs:28`, enumeration at `userland/capsule_driver_usb_hid/src/orchestrator/enumerate/run.rs:25` to `userland/capsule_driver_usb_hid/src/orchestrator/enumerate/run.rs:36`, poll loop at `userland/capsule_driver_usb_hid/src/orchestrator/poll/run.rs:26` to `userland/capsule_driver_usb_hid/src/orchestrator/poll/run.rs:44`, keyboard post at `userland/capsule_driver_usb_hid/src/hid/post_key.rs:32` to `userland/capsule_driver_usb_hid/src/hid/post_key.rs:66`, mouse post at `userland/capsule_driver_usb_hid/src/hid/post_mouse.rs:24` to `userland/capsule_driver_usb_hid/src/hid/post_mouse.rs:49`, shared post at `userland/capsule_driver_usb_hid/src/hid/post_wire.rs:19` to `userland/capsule_driver_usb_hid/src/hid/post_wire.rs:22`. |
 | `driver.i2c_hid0` | Startup resolves the I2C controller, probes the bus for a HID descriptor, records address, descriptor length, input register, and input report length, then the server loop polls input after every receive timeout. | Parsed mouse samples post relative pointer movement, wheel, button-down, and button-up. | Startup at `userland/capsule_driver_i2c_hid/src/main.rs:31` to `userland/capsule_driver_i2c_hid/src/main.rs:39`, setup at `userland/capsule_driver_i2c_hid/src/setup.rs:5` to `userland/capsule_driver_i2c_hid/src/setup.rs:19`, server poll point at `userland/capsule_driver_i2c_hid/src/server/runner.rs:15` to `userland/capsule_driver_i2c_hid/src/server/runner.rs:33`, I2C read and report parse at `userland/capsule_driver_i2c_hid/src/input/poll.rs:22` to `userland/capsule_driver_i2c_hid/src/input/poll.rs:34`, event publishing at `userland/capsule_driver_i2c_hid/src/input/publish.rs:25` to `userland/capsule_driver_i2c_hid/src/input/publish.rs:45`, shared post at `userland/capsule_driver_i2c_hid/src/input/post.rs:19` to `userland/capsule_driver_i2c_hid/src/input/post.rs:30`. |
+
+## 6. Security analysis
+
+Every one of the eighteen drivers is a ring-3 capsule, and not one of them runs in the kernel. The
+kernel owns no keyboard controller, no NIC ring, no NVMe queue; it owns the [hardware
+broker](../subsystems/hardware-broker/README.md), the input ring, and the capability check, and it lends
+the hardware to a capsule that asks correctly. A driver reaches its device through four broker grants,
+each a separate call checked against the same claim epoch and each revoked when the capsule exits:
+[claim](../subsystems/hardware-broker/claim.md) takes exclusive ownership of the device and returns the
+epoch, [mmio](../subsystems/hardware-broker/mmio.md) maps a slice of a BAR into the capsule's address
+space, [irq](../subsystems/hardware-broker/irq.md) binds the device line to a kernel-delivered
+notification, and [dma](../subsystems/hardware-broker/dma.md) hands back a DMA-coherent buffer, with a
+fifth path, [pio](../subsystems/hardware-broker/pio.md), minting a kernel-mediated `in`/`out` window
+against a port BAR. A driver holds exactly the subset of these its device needs and nothing more.
+
+The mask is where that least-privilege split is written down, and it decodes exactly to the grants a
+device requires (bits from `src/capabilities/types.rs`). The masks in the table above are not
+interchangeable; each is the smallest set for its bus:
+
+| Mask | Capabilities beyond CoreExec/IPC/Memory | Drivers |
+|------|-----------------------------------------|---------|
+| `0x19` | none | `usb_msc` |
+| `0x200019` | InputSource | `usb_hid`, `i2c_hid` |
+| `0x78019` | DeviceEnum, Driver, Mmio, Irq | `ahci`, `hda`, `i2c_pci` |
+| `0xF8019` | DeviceEnum, Driver, Mmio, Irq, Dma | `xhci`, `nvme`, `e1000`, `rtl8169`, `iwlwifi` |
+| `0x1D8019` | DeviceEnum, Driver, Irq, Dma, Pio | `rtl8139` |
+| `0x1F8019` | DeviceEnum, Driver, Mmio, Irq, Dma, Pio | `virtio_rng`, `virtio_blk`, `virtio_net` |
+| `0x1F9019` | DeviceEnum, Driver, Mmio, Irq, Dma, Pio, GraphicsSurfaceCreate | `virtio_gpu` |
+| `0x358019` | DeviceEnum, Driver, Irq, Pio, InputSource | `ps2_kbd` |
+
+Several properties are worth reading straight off that table. The HID drivers, `usb_hid` and `i2c_hid`,
+hold `InputSource` and nothing else in the hardware column: they carry no Mmio, no Irq, no Dma, no Pio,
+because they reach their hardware through another capsule (the xHCI driver and the i2c bus driver
+respectively) over IPC. A compromised HID report parser, which is the most complex and most exposed code
+in the input path, cannot map a register, take an interrupt, or program DMA; the worst it can do is post
+forged input events, which are bounded by the ring. The inverse is `i2c_pci`: it has Mmio and Irq but
+*not* InputSource, so the capsule that drives the controller registers cannot inject a keystroke. The
+right to touch the hardware and the right to produce input are held by different capsules on purpose,
+which is the [input drivers](../subsystems/input/drivers.md) page in one sentence. `usb_msc` is the
+extreme case, mask `0x19`, the three baseline bits and no hardware capability at all, because it builds
+SCSI command blocks and hands them to the xHCI driver rather than touching a controller itself.
+
+`Dma` is the capability to watch, and the split between `0x78019` and `0xF8019` is exactly the line
+between devices that bus-master and devices that do not. `ahci`, `hda`, and `i2c_pci` get Mmio and Irq
+but no Dma; the NICs, NVMe, xHCI, and iwlwifi get Dma because they move data through descriptor rings in
+RAM. The [broker's DMA grant](../subsystems/hardware-broker/dma.md) bounds what a *capsule* may allocate
+and program (a per-class page ceiling, a zero-scrub before the frames leave the kernel, and an epoch
+check against use-after-release), but it is honest about the one bound it does not enforce: the IOMMU
+backend is behind the `nonos-arch-iommu` feature and is not engaged in the shipping builds, so the
+address the broker returns is a raw physical address and a device programmed by a driver can in principle
+DMA to any physical page regardless of the grant. DMA safety therefore rests on the software bounds plus
+the assumption of non-malicious device hardware, and this is the same boundary every DMA-capable driver
+in the table inherits. The storage drivers reach the [block device](../subsystems/storage/block-device.md)
+layer and ultimately the [vfs capsule](../subsystems/storage/vfs-capsule.md) above them, none of which
+gains the driver any authority the mask did not already grant.
+
+## 7. Debugging
+
+The drivers are instrumented so that a machine which boots with a dead device names the stage that
+failed rather than going silent. The debugging follows the spawn, then the grant, then the device, in
+that order.
+
+The first question is whether the driver capsule loaded. Every driver is spawned through
+`super::boot::capsule(prefix, ...)` in its spawn-plan group
+(`src/userspace/init/spawn_plan/drivers_storage.rs`, `drivers_nic.rs`, `drivers_usb.rs`,
+`drivers_bus.rs`, `drivers_input.rs`, `drivers_virtio.rs`), which routes to `capsule_boot::boot`
+(`src/userspace/init/capsule_boot/run.rs:29`) and prints `boot_log::ok(prefix, "capsule spawned")` on
+success or `boot_log::error(...)` on failure. So a live driver prints a line naming it: `[DRIVER-AHCI]`,
+`[DRIVER-NVME]`, `[DRIVER-HDA]`, `[DRIVER-PS2-INPUT]`, and the rest, each followed by `capsule spawned`.
+If that line is absent the capsule never ran: its ELF failed signature verification or its manifest asked
+for a capability outside policy, and the spawn was refused before any driver code executed. This is the
+same marker the [input drivers](../subsystems/input/drivers.md) page uses to answer "did the driver even
+load."
+
+If the driver spawned but the device is dead, the next stage is the broker grant, and the broker prints
+its own markers as it hands hardware over. An MMIO map walks through `[MMIO] claim`, `[MMIO] device`,
+`[MMIO] reserve`, `[MMIO] va`, `[MMIO] map`, and `[MMIO] record`
+(`src/hardware/broker/mmio/map.rs`), so a driver that spawned but never reached `[MMIO] record` for its
+device failed partway through the map. A DMA grant prints `[DMA]` lines and names the exact failure class
+when it refuses (`src/hardware/broker/dma/map/mod.rs`): `[DMA] validate not-claimed` means the driver
+asked for DMA on a device it never claimed, `[DMA] validate stale-epoch` means its claim lapsed and was
+re-taken, `[DMA] validate bad-length-class` means the request exceeded the per-class ceiling, and
+`[DMA] alloc no-memory` means the physical frames were not available. These distinguish a driver bug
+(asking wrong) from a resource problem (nothing free) without reading the driver's code. The claim
+itself is the gate before any of these: a claim is refused with `AlreadyClaimed`
+(`src/hardware/broker/claim.rs:51`) when another capsule already holds the device, so two drivers
+contending for one device shows up as the second one never getting past claim.
+
+If the grant succeeded but nothing happens, the failure has moved to the device or its interrupt, and
+the distinction is between enumeration and drive. Whether the firmware exposed the device at all is a
+broker-table question, separate from whether a driver spawned: a device absent from the broker's device
+table is a firmware or ACPI problem, not a driver defect, and the device-census tooling described on the
+[input drivers](../subsystems/input/drivers.md) page renders that table so the two can be told apart
+before any driver is blamed. An enumerated device with a spawned driver that still produces nothing is
+usually the interrupt: the [irq grant](../subsystems/hardware-broker/irq.md) bound the line but the line
+never fires, which on real hardware is typically GSI-to-vector routing through the IOAPIC rather than a
+driver fault. For the input drivers specifically, the producer table in section 4 above lists the exact
+poll and post points to inspect when a key or mouse event goes missing, and the
+[input drivers](../subsystems/input/drivers.md) page covers isolating the kernel ring from the driver
+with a synthetic-event probe.

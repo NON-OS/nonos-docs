@@ -65,10 +65,65 @@ lanes, permute, squeeze) and a two-to-one Merkle compression (`state = [left | r
 the rate lanes), which is the node hash for the [Poseidon Merkle tree](stark.md) the recursive-friendly
 FRI uses.
 
-## Source
+## Security analysis
+
+The field and the hash are the two primitives everything else reduces to, so their properties, and the
+honesty about what the hash is, are the security ground the whole proof system stands on.
+
+**The hash's trust comes from auditable derivation, not from a reference match.** The construction uses a
+full x^7 S-box layer on every round (`poseidon.rs:79`, `.pow(7)` on each lane) and derives its round
+constants from the BLAKE3 hash of the domain string `NONOS-POSEIDON-GOLDILOCKS-RC` (`poseidon.rs:55`),
+rather than shipping the published Poseidon round schedule or constant set. As the honest-description
+section states plainly, this is a Poseidon-style permutation, not a drop-in of the reference. What that
+buys is transparency: anyone can regenerate the constants from the domain string and confirm the Cauchy
+matrix is MDS for disjoint node sets, so there is no hidden structure to hide a weakness in. What it costs
+is that there are no reference test vectors, because it is not claiming to reproduce a reference, and the
+full-round schedule is more conservative and more expensive than the standard mix of full and partial
+rounds. The security analysis names this rather than letting "Poseidon" imply the published parameters.
+
+**The parameters set a stated security level, and that is the boundary.** Width 8 with rate 4 and capacity
+4 gives a 256-bit capacity, which the code annotates as roughly 128-bit sponge security. That is the
+claimed level; it is not independently certified here, and the honest reading is that the sponge is as
+strong as the permutation is a good random permutation, which is the usual Poseidon-family assumption
+applied to these specific, self-derived parameters.
+
+**Being algebraic is a feature that also constrains it.** The whole reason this hash exists alongside the
+kernel's general-purpose BLAKE3 is that x^7 is a degree-7 polynomial and the MDS mix is linear, so one
+round is a low-degree constraint and the hash can be proven inside the [STARK](stark.md). That is what
+makes the recursive-friendly FRI and the in-circuit transcript possible. The tradeoff is that an
+arithmetization-friendly hash is a narrower, younger design point than a byte-oriented hash, so it is used
+where arithmetization is required and BLAKE3 is used everywhere else, which is exactly how the two are
+split in the tree.
+
+## Debugging the field and hash
+
+Bugs at this layer do not print; they show up as a proof that will not verify, and the way to localize
+them is to reproduce the two derivations by hand.
+
+**A verifier that rejects every proof points at a hash-parameter divergence.** Because the round constants
+are derived from `NONOS-POSEIDON-GOLDILOCKS-RC` and the MDS matrix from the Cauchy construction, prover
+and verifier agree only if both compute the identical permutation. If a proof produced by one build fails
+under another with no other change, the first thing to check is that the domain string, the width and rate
+constants (`poseidon.rs:43`, `poseidon.rs:45`), and the round count match on both sides, since any
+difference silently produces a different hash and every Merkle root and transcript challenge downstream
+diverges. This is the most likely cause of a whole class of proofs failing at once rather than one.
+
+**Field-arithmetic mistakes surface as non-canonical elements.** `Fp` holds its value canonically in
+`[0, p)` with `p = 0xFFFF_FFFF_0000_0001` (`field/element.rs:19`). A reduction bug leaves an element at or
+above `p`, which then compares unequal to its canonical twin and breaks the constant-time equality checks
+the verifiers rely on. The signature is a proof that fails only for certain inputs (the ones that hit the
+unreduced range) while most pass, which distinguishes it from the hash-parameter case above where nothing
+verifies at all.
+
+## Source map
 
 ```
   src/crypto/stark/field/element.rs   the Goldilocks prime and Fp
   src/crypto/stark/field/            add/sub/mul, exp, inverse
   src/crypto/stark/air/poseidon.rs    the permutation: params, S-box, MDS, NUMS constants, sponge, compress
 ```
+
+Every reference above is verified against those trees. The AIR gadgets that express this hash as
+constraints are on the [AIR catalog](air-catalog.md) page, the STARK and FRI that run over this field are
+on the [STARK](stark.md) page, and the general-purpose BLAKE3 this algebraic hash sits alongside is on the
+[hashes](../crypto/hashes.md) page.

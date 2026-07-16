@@ -117,22 +117,116 @@ Every check above feeds one running snapshot (`api.rs:64`):
 hit, canaries broken, and lifetime errors caught is observable at runtime, alongside
 the count of guard pages, canaries, and allocations currently tracked.
 
+## The CPU protection bits
+
+The software checks above are backed by hardware enforcement the manager turns on at init.
+`init_module_memory_protection` (`hardening/manager/verify/protection.rs:20`) sets three control-register
+bits and is called from `init_all_memory_subsystems` (`memory/unified/system.rs:32`):
+
+```
+  init_module_memory_protection():
+      enable_write_protection()          set CR0.WP  (bit 16)
+      cr4 |= CR4_SMEP                    set CR4.SMEP (bit 20)
+      cr4 |= CR4_SMAP                    set CR4.SMAP (bit 21)
+```
+
+`enable_write_protection` (`paging/tlb/write_protect.rs:18`) sets `CR0.WP`, so a read-only page is
+read-only even to ring 0: the kernel cannot accidentally write through a mapping it marked read-only,
+which is what makes the read-only mappings the manager installs actually enforced. `CR4.SMEP` stops
+the kernel from fetching instructions out of any user page, and `CR4.SMAP` stops it from reading or
+writing user pages except through an explicit `stac`/`clac` window. SMAP is why the [usercopy](usercopy.md)
+boundary reaches user bytes through the direct map rather than dereferencing the user pointer: with
+SMAP on, a direct kernel-mode load from a user address faults. The bits are set only if not already
+set, so re-init is safe.
+
+## Security analysis
+
+Hardening is defence in depth: the mapping path and the allocators are already correct, and this
+subsystem adds invariants that turn a bug that slips past them into a caught, counted event rather
+than a silent corruption. Four properties carry that.
+
+**W^X holds by construction.** The real gate is `map_page_in_asid` (`mapping/map_in_asid.rs:37`),
+which rejects any `permissions.is_wx_violation()` set with `PagingError::WXViolation` before it
+computes a page-table entry. No page in any address space is ever both writable and executable,
+because no such PTE is ever written, not because a scan catches it after the fact. The
+`validate_wx_permissions` form (`validation.rs:18`) is the same rule for callers reasoning in
+booleans, and both feed the `wx_violations` counter. Combined with SMEP and NX on the device and DMA
+helpers, a writable page is never a code-injection target.
+
+**Kernel writes respect read-only, kernel fetches respect user.** `CR0.WP`, `CR4.SMEP`, and
+`CR4.SMAP` move three of these guarantees from convention into the hardware. Without WP the kernel
+could write through its own read-only mappings; without SMEP it could be tricked into executing a
+user page; without SMAP it could dereference an unvalidated user pointer. Turning all three on is
+what makes the W^X and usercopy boundaries enforced rather than merely intended. The honest boundary:
+the code assumes the CPU supports these bits and sets them unconditionally, it does not branch on a
+CPUID probe here, so on hardware lacking SMEP/SMAP the write to `CR4` is a no-op for those bits and
+the software checks are the only line left.
+
+**Guard pages and canaries are overrun tripwires.** A guard page (`api.rs:50`) marks an address so
+that a fault on it is reported as a deliberate boundary crossing (`check_guard_page_access`,
+`api.rs:28`) rather than an ordinary miss, and the page-fault path checks it first
+(`page_fault.rs:63`). A stack canary (`api.rs:78`) is a value written with a volatile store eight
+bytes below the top of a stack, the first thing an overflow overwrites, and `check_stack_canary`
+fails if it changed. Both catch an off-the-end write that the mapping permissions alone would not.
+
+**Lifetime errors are detectable and counted.** `track_allocation` / `track_deallocation`
+(`api.rs:37`) let the manager name a double free (deallocating an untracked address) and a
+use-after-free (touching a retired one), and the frame allocator has its own hard `DoubleFree` check
+underneath. The honest limit throughout this subsystem is that the tracker and canaries are a
+best-effort layer the caller must actually invoke; they are not automatic on every allocation, so
+they catch the paths that opt in. The W^X gate and the CPU bits, by contrast, are unconditional.
+
+## Debugging hardening
+
+The hardening subsystem is designed to make a violation visible rather than fatal-and-silent, so the
+first tool is the running tally. `get_hardening_stats` returns the `HardeningStatsSnapshot`
+(`api.rs:64`) with one counter per class:
+
+```
+  guard_violations   a guard page was hit          (add_guard_page had marked it)
+  wx_violations      a W+X mapping was refused      (map_in_asid or validate_wx_permissions)
+  stack_overflows    a canary came back changed
+  heap_corruptions   detect_heap_corruption fired over a tracked range
+  double_frees       a deallocation of an untracked address
+  use_after_free     an access to a retired address
+  total_guard_pages  active_canaries  tracked_allocations   what is currently live
+```
+
+A non-zero `wx_violations` with the system still running means the gate did its job: a caller tried
+to map a W+X page and was refused with `WXViolation`, no PTE was written, and the count is the
+evidence. On the fault side, the exact strings come from the page-fault handler, not this module:
+`Guard page violation detected` (`page_fault.rs:64`) is printed when a faulting address matches a
+registered guard page, and the "Attempted to execute from non-executable page" line on a
+`KERNEL PANIC` is an NX or W^X hit reaching hardware. So a guard-page overrun shows up twice, as a
+console line at the fault and as an increment of `guard_violations`, and reading them together
+distinguishes a deliberate tripwire from an ordinary miss. The W^X refusal string itself,
+`"W^X violation: memory cannot be both writable and executable"` (`validation.rs:26`), is what a
+caller sees when it asks for a writable-executable mapping.
+
 ## Where this connects
 
 The W^X gate sits on the [paging manager](paging-manager.md)'s install path, so it
 applies to every mapping the manager makes, including the ones the
-[fault handlers](faults.md) install. The guard pages and canaries protect the
+[fault handlers](faults.md) install, and the guard-page check is consulted first by the
+[page-fault handler](faults.md). The guard pages and canaries protect the
 per-process kernel stacks the [page allocator](page-allocator.md) carves and the
-[heap](heap.md). The W^X invariant here is also one of the properties the
+[heap](heap.md). The SMAP bit set here is what forces the [usercopy](usercopy.md)
+boundary to go through the direct map. The W^X invariant is also one of the properties the
 [verification stack](../../../verification/README.md) proves at the encoding level,
 in the kernel isolation proofs.
 
-## Source
+## Source map
 
 ```
-  src/memory/paging/manager/mapping/map_in_asid.rs  the W^X enforcement gate
-  src/memory/hardening/manager/validation.rs         validate_wx_permissions, guard test
-  src/memory/hardening/manager/api.rs                the hardening surface
-  src/memory/hardening/types/                         GuardPage, StackCanary, snapshots
-  src/memory/hardening/stats/                         the violation counters
+  src/memory/paging/manager/mapping/map_in_asid.rs    the W^X enforcement gate
+  src/memory/hardening/manager/validation.rs           validate_wx_permissions, guard test
+  src/memory/hardening/manager/api.rs                  the hardening surface
+  src/memory/hardening/manager/verify/protection.rs    CR0.WP / SMEP / SMAP enablement
+  src/memory/paging/tlb/write_protect.rs               enable_write_protection (CR0.WP)
+  src/memory/hardening/types/                          GuardPage, StackCanary, snapshots
+  src/memory/hardening/stats/record.rs                 the violation counters
 ```
+
+Every reference above is verified against those trees. The W^X predicate is on the
+[paging manager](paging-manager.md) page, the guard-page consumer is the [page-fault handler](faults.md),
+and the SMAP-gated copy boundary is on the [usercopy](usercopy.md) page.
