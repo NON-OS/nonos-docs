@@ -145,7 +145,7 @@ and returns rather than blocking (`src/main.rs:39`, `wait_compositor` at `:76`).
 
 The capsule is `no_std`/`no_main`. The nine modules are `chrome`, `detail`, `display`, `input`, `paint`,
 `proto`, `scene`, `surface`, and `vignette` (`src/main.rs:6` through `:14`). There is no app-skeleton and
-no `App` trait here; unlike the [terminal](terminal-full.md), the splash drives its own surface and its
+no `App` trait here; unlike the [terminal](terminal/README.md), the splash drives its own surface and its
 own loop directly, because it is an overlay that predates the window manager rather than a normal window.
 
 - `proto` is the NCMP client core: the `0x4E43_4D50` magic, the 20-byte header builder, the

@@ -10,7 +10,7 @@ the same window-and-input envelope as any GUI app, and no authority beyond it. T
 It is an [app-skeleton](../writing-an-app.md) GUI app. The kernel spawns it under service handle
 `app.calculator` on service port 4720 with a reply port on 4721, and its capability mask is `0x1819`
 (`userland/capsule_calculator/Capsule.mk:11`). Its sibling reference page is the exhaustive
-[terminal reference](terminal-full.md); this page is the same standard for the calculator.
+[terminal reference](terminal/README.md); this page is the same standard for the calculator.
 
 ## Contents
 

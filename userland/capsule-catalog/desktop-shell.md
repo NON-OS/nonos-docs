@@ -28,7 +28,7 @@ The shell is a `no_std`/`no_main` capsule. `_start` initializes the heap, blocks
 until every required peer is up and a shared overlay surface is registered, then runs the server loop
 (`src/main.rs:37`, `src/wait_for_setup.rs:19`, `src/server/runner/run.rs:29`). It supplies its own frame
 protocol on its service port and its own paint routines; it is not built on the app skeleton the way the
-[terminal](terminal-full.md) is.
+[terminal](terminal/README.md) is.
 
 The chrome is drawn into one full-screen ARGB8888 overlay that the shell allocates during setup and
 submits to the compositor as a scene at z-order 1, above every application window
@@ -281,7 +281,7 @@ hardware, driver, DMA, or `GraphicsPresent` capability.
 - **The launcher focuses, it does not spawn.** A dock click resolves the target service and sends a
   single `NCTL` focus-self frame to its pid (`src/server/handlers/launcher_request.rs:26`). There is no
   installer call and no process creation in the shell; an app that is not already running cannot be
-  brought up from the dock. Contrast the [terminal](terminal-full.md), which is the capsule that can ask
+  brought up from the dock. Contrast the [terminal](terminal/README.md), which is the capsule that can ask
   the installer to spawn a store capsule.
 - **Tray entries are owner-scoped on write.** `TRAY_REGISTER` tags each entry with `sender_pid` and
   rejects a duplicate `(pid, tray_id)` with `E_BUSY`; labels are length-checked against `TRAY_LABEL_MAX`

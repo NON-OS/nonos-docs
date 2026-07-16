@@ -25,7 +25,7 @@ them.
 | [Settings](settings.md) | `app.settings`, port 4728 | System control panel whose Display, Network, and Security rows are live reads and writes against the `policy` service; it owns no policy of its own. |
 | [Text editor](text-editor.md) | `app.text_editor`, port 4726 | Focused single-document editor over one fixed-capacity buffer, loading and saving through vfs and copying and pasting through clipboard; not an IDE. |
 | [Snake](snake.md) | `app.snake`, port 4732 | The classic snake game as a signed capsule; the smallest complete interactive app in the tree, owning nothing but its own state and surface. |
-| [Terminal](terminal-full.md) | see page | The shell and command surface; the largest app-skeleton app, reaching the filesystem, network, and installer over IPC. |
+| [Terminal](terminal/README.md) | see page | The shell and command surface; the largest app-skeleton app, reaching the filesystem, network, and installer over IPC. |
 | [Wallet](wallet-nonos.md) | see page | An Ethereum and NOX wallet that holds no private key, delegates all signing to the keyring, and pins its RPC endpoint with a from-scratch TLS 1.3 handshake. |
 
 ## Proof and stub capsules
@@ -163,7 +163,7 @@ shared spawn-and-log wrapper is `src/userspace/init/capsule_boot/run.rs`, the pr
 in `src/userspace/init/entry.rs`, and the capability bits every mask above decodes against are in
 `src/capabilities/types.rs`. The interactive apps carry their own full references:
 [about](about.md), [calculator](calculator.md), [file manager](file-manager.md), [settings](settings.md),
-[text editor](text-editor.md), [snake](snake.md), [terminal](terminal-full.md), and
+[text editor](text-editor.md), [snake](snake.md), [terminal](terminal/README.md), and
 [wallet](wallet-nonos.md). The proof and stub capsules on this page keep their spec inline and are
 labeled as self-tests or as not-implemented rather than presented as finished features. Every reference
 above is verified against those trees.

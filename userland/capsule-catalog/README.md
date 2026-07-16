@@ -13,7 +13,7 @@ is the per-capsule prose with purpose, protocol ops, behavior, and honest gaps.
 | [core-services.md](core-services.md) | ramfs, vfs, keyring, entropy, crypto, policy, attest, installer, payment, power, market, process_manager |
 | [desktop.md](desktop.md) | compositor, wm, input_router, desktop_shell, wallpaper, wallpaper_catalog, image_codec, clipboard, login, toolkit, boot_splash, setup_wizard |
 | [apps-and-proofs.md](apps-and-proofs.md) | about, calculator, file_manager, hello, settings, text_editor, snake, ripgrep, wallet_nonos, gui_proof, std_proof, input_proof, input_probe, proof_io |
-| [../terminal.md](../terminal.md) | terminal (its own page, the reference app) |
+| [terminal/](terminal/README.md) | terminal (the reference app, documented as a folder that mirrors its code: input, commands, emulation, rendering) |
 | [../drivers.md](../drivers.md) | the 18 hardware driver capsules (ahci, bga, e1000, hda, i2c_hid, i2c_pci, iwlwifi, nvme, ps2_input, rtl8139, rtl8169, usb_hid, usb_msc, virtio_blk, virtio_gpu, virtio_net, virtio_rng, xhci) |
 | [../network-capsules.md](../network-capsules.md) | the network capsules (net_core, net_l2, net_ip, net_udp, net_tcp, net_dhcp, net_dns, net_sockets, net_nym) |
 

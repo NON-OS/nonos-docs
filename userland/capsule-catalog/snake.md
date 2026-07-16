@@ -3,7 +3,7 @@
 `capsule_snake` is the classic snake game as a signed NONOS capsule: a normal GUI window with a real
 game loop behind it. It is also the smallest complete interactive application in the tree, so it doubles
 as a worked example of a self-contained app that owns nothing but its own state and its surface. Where
-[capsule_terminal](terminal-full.md) shows how large an [app-skeleton](../writing-an-app.md) app can get,
+[capsule_terminal](terminal/README.md) shows how large an [app-skeleton](../writing-an-app.md) app can get,
 snake shows how small one can be and still be a real, verified, least-privilege capsule.
 
 The kernel spawns it under service handle `app.snake` on service port 4732 with a reply port on 4733, and
