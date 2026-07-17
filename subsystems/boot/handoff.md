@@ -34,8 +34,18 @@ The handoff is only reached after the bootloader has verified the kernel it is a
 bootloader authenticates the kernel image with the same hybrid signature posture as a
 [capsule](../../security/capsules-and-trust.md), an Ed25519 and an ML-DSA-65 signature, and it enforces
 an anti-rollback index against a TPM monotonic counter so an attacker cannot downgrade the kernel to an
-older, vulnerable signed image. Only a kernel that passes both the signature check and the rollback
-check is executed and handed the structure above. This means the trust chain is unbroken from the
+older, vulnerable signed image.
+
+With the `stark-kernel-attest` feature the bootloader adds a third check on top of the signature and the
+rollback index: it verifies the kernel's own transparent STARK self-attestation before the jump. It
+measures the kernel image with BLAKE3 and checks the proof, carried in the image footer, that this
+measurement is a leaf of the enrolled kernel root
+(`nonos-bootloader/src/kernel_verify/stark_attest.rs:44`). The proof is verified by the same `nonos-stark`
+crate the kernel links, so the prover and the verifier are one implementation. A zeroed root trusts
+nothing, so an un-enrolled build cannot be spoofed. Only a kernel that passes the signature check, the
+rollback check, and, when enabled, the self-attestation, is executed and handed the structure above.
+
+This means the trust chain is unbroken from the
 firmware root to the running capsules: the bootloader vouches for the kernel, the baked trust anchor in
 the kernel vouches for the capsule certificates, and each capsule's manifest vouches for its image.
 

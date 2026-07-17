@@ -49,13 +49,16 @@ and capsule code and run it with `cargo test`:
 
 **Layer 1b, bounded model-checking (Kani).** Several proof crates carry Kani harnesses
 (`nonos-bootloader/boot_proofs/src/kani_proofs.rs`, `userland/fs_proofs/src/kani_proofs.rs`,
-`userland/driver_proofs`). Kani exhaustively checks a function over all inputs within a bound, which is
+`userland/driver_proofs`, and `userland/stark_proofs/src/kani_proofs.rs`, which proves the untrusted
+attestation-trailer deserializer is total on any input). Kani exhaustively checks a function over all
+inputs within a bound, which is
 stronger than testing for the bounded region and catches the arithmetic and boundary cases fuzzing can
 miss. It is bounded, not unbounded: it proves the property for inputs up to the bound, not for all
 inputs of unbounded size.
 
-**Layer 2, Lean theorems.** Ten Lean files under `verification/lean/Nonos/` carry 54 theorems and
-**zero `sorry`** (Lean's placeholder for an unproven step), so every stated theorem is fully proven:
+**Layer 2, Lean theorems.** The Lean files under `verification/lean/Nonos/` carry theorems with
+**zero `sorry`** (Lean's placeholder for an unproven step), so every stated theorem is fully proven. The
+kernel-invariant files are:
 
 ```
   Capability.lean    (11)  grant/revoke/attenuate algebra: empty grants nothing, grant adds and never
@@ -72,11 +75,21 @@ inputs of unbounded size.
   Paging.lean         (3)  page-permission invariants (no writable-executable)
 ```
 
+The transparent STARK attestation adds a second body of proof, 203 theorems across the
+`Nonos/Stark/` modules plus `SigningKey` and `KeyLifecycle`: Merkle membership soundness and
+collision-freedom, the binding of a proof to its capsule identity, capabilities, policy epoch and
+domain, length-prefixed measurement injectivity, the money-grade soundness budget, trailer parse
+safety, and signing-key rollback, revocation and validity windows. These pin the model the STARK
+spawn gate refines; see [attestation](../security/attestation.md) and the
+[proof system](../subsystems/proof-system/stark.md).
+
 **Layer 2b, Verus refinement.** `verification/verus/` proves that the real Rust bit-operations match
 the Lean model: the capability `has`/`grant`/`revoke`/`attenuate` functions (`revoke_is_monotonic`,
 `revoke_drops_the_right`, and their companions), the page-permission spec, and the IPC-length spec are
-proven in Verus directly over the Rust semantics. This is the bridge that ties the abstract Lean theorem
-to the concrete `bits & !bit` the kernel executes.
+proven in Verus directly over the Rust semantics. The attestation adds `stark_attestation.rs`, which
+SMT-checks that a trailer length capped at the bytes remaining never over-reserves and that the gate
+accepts only the conjunction of the root, context and enrollment checks. This is the bridge that ties
+the abstract Lean theorem to the concrete `bits & !bit` the kernel executes.
 
 ## What is established
 
