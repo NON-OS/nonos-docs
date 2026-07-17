@@ -128,11 +128,23 @@ already measures the kernel image with BLAKE3; with the `stark-kernel-attest`
 feature it also verifies the kernel's own STARK trailer, carried in the image
 footer, against an enrolled kernel root before it jumps
 (`nonos-bootloader/src/kernel_verify/stark_attest.rs:44`). The context is the kernel
-measurement and the boot epoch. A zeroed root trusts nothing, so an un-enrolled
-build cannot be spoofed into trusting a proof. Capsules attest to the kernel's
-policy root; the kernel attests to its own enrolled measurement, and both are
-checked by the same verifier, the `nonos-stark` crate the kernel and the
-bootloader both link, so the prover and the verifier cannot drift.
+measurement and the boot epoch. Capsules attest to the kernel's policy root; the
+kernel attests to its own enrolled measurement, and both are checked by the same
+verifier, the `nonos-stark` crate the kernel and the bootloader both link, so the
+prover and the verifier cannot drift.
+
+The verdict gates the jump. The boot decision refuses a kernel whose
+self-attestation does not verify, the same hard refuse the invalid-signature and
+rollback paths use, under a signature-required mode
+(`nonos-bootloader/src/boot/crypto/signature/verify.rs`,
+`.../signature/error.rs`). A signature alone is not enough: the kernel must also
+prove its measurement, or the boot resets rather than continue.
+
+The enrolled root is mandatory at build time. When `stark-kernel-attest` is on,
+`build.rs` fails the build if `NONOS_KERNEL_ATTEST_ROOT` is missing or all zeroes,
+rather than embedding a zero root, so a build that turns the gate on cannot ship
+one that silently trusts nothing (`nonos-bootloader/build.rs`,
+`generate_kernel_attest_root`). Enroll the kernel first, then build with the gate.
 
 ## Relationship to the signature chain
 
@@ -195,6 +207,76 @@ capsule spawns anyway. That rollout feature is mutually exclusive with
 cannot be built fail-open, but during a rollout window a failing attestation is
 not why a spawn fails, and this marker should be read as advisory, not as a gate.
 
+## Proving it under attack
+
+The attestation is exercised adversarially by tooling that links the same
+verifier the bootloader links, over the same image byte layout the boot path
+parses, so a green run is evidence about the shipped gate rather than a model of
+it (`security/nonos-secops`). Two tools sit behind it.
+
+`nonos-defend` is the blue-team side: it parses an attested image footer and
+verifies the kernel self-attestation against the enrolled root, the same check
+the bootloader runs, and refuses to bless an image that would not boot.
+
+`nonos-attack` is the red-team side. Its `battery` mode builds a genuine attested
+image and then mounts the attacks a shipped image must survive, one per finding,
+running each against the boot-side verify and passing only when the gate refuses
+it: flip a byte in the flashed kernel, truncate the image, swap a foreign kernel
+under a stolen trailer, forge a trailer under a different root, flip a bit inside
+the trailer, and hand the parser an undersized image. Its `fuzz` mode drives the
+untrusted trailer parser with random bytes and mutations of a real trailer,
+including absurd length prefixes, and requires the parser to stay total: a parser
+that can be driven to panic is a boot-time denial of service, so the fuzzer exits
+non-zero if any input breaks it.
+
+The suite runs on every pull request through the `attestation-attack` job in the
+verify workflow, alongside the kernel self-attestation proof of concept
+(`nonos-bootloader/tools/embed-zk-proof/tests/kernel_self_attest_poc.rs`), so a
+change that weakens the gate or breaks the parser fails CI before it lands. Run it
+locally with `security/tests/run.sh`.
+
+## FAQ
+
+Is the STARK real, or a stub that returns true?
+Real. `nonos-stark` is a FRI-STARK with a DEEP quotient low-degree test, Merkle
+openings, and a query phase. The verifier the tools link, the kernel links, and
+the bootloader links is one crate, which is why an adversarial run of `nonos-attack`
+is evidence about the gate that actually ships.
+
+Is there a trusted setup?
+No. There is no structured reference string, no ceremony, and no toxic waste. The
+only public input is a hash. That is what transparent means here.
+
+Is it actually post-quantum?
+The attestation path uses a hash and a finite field and nothing else. There is no
+discrete log, no pairing, and no factoring for a quantum adversary to attack. The
+kernel signature layer is post-quantum too: ML-DSA-65 alongside Ed25519.
+
+What is the soundness, exactly?
+It is set by explicit parameters: the query count, the grinding bits, the blown-up
+rate, and extension-field challenges. Those are real FRI soundness knobs and can be
+dialled up. State the parameters, not a vibe.
+
+How do you revoke a capsule or a kernel?
+Bump the epoch. `POLICY_EPOCH` and `BOOT_EPOCH` are inside the bound context, so
+rotating an epoch invalidates every trailer built under the old one. Revocation is
+a re-enroll under the new epoch.
+
+What happens when attestation fails?
+A capsule whose attestation does not verify is not spawned in a strict build; the
+verifier return is `#[must_use]` so a spawn cannot ignore it. A kernel whose
+self-attestation does not verify does not boot under a signature-required mode.
+
+Does attestation replace the signatures?
+No. It sits next to them. The kernel is dual-signed with its rollback index bound
+and on top of that proves its measurement; the capsule is signed and on top of
+that proves its measurement and its capability set. Defence in depth, not a swap.
+See [relationship to the signature chain](#relationship-to-the-signature-chain).
+
+Does turning the gate on break a build that has not enrolled yet?
+Yes, deliberately. With `stark-kernel-attest` on, a build without a real enrolled
+root fails rather than shipping a gate that trusts nothing. Enroll first.
+
 ## Source map
 
 ```
@@ -208,7 +290,13 @@ not why a spawn fails, and this marker should be read as advisory, not as a gate
   src/security/capsule_attest/error.rs    AttestError and its as_str messages
   src/crypto/zk_kernel/attest/verify.rs   verify_enrolled, the enrolled-secret constant-time group check
   nonos-bootloader/src/kernel_verify/stark_attest.rs  the kernel self-attestation the bootloader checks
+  nonos-bootloader/src/boot/crypto/signature/verify.rs  the boot decision that gates the jump on the verdict
+  nonos-bootloader/src/boot/crypto/signature/error.rs   the hard refuse on a failed self-attestation
+  nonos-bootloader/build.rs               the mandatory enrolled root when the gate is on
+  nonos-bootloader/tools/embed-zk-proof/  enroll the kernel and embed its self-attestation trailer
   nonos-stark/                            the shared verifier crate, linked by kernel and bootloader
+  security/nonos-secops/                  the blue-team verifier and the red-team attack and fuzz suite
+  security/tests/run.sh                   the local security suite harness
   src/lib.rs                              the nonos-production / nonos-zk-rollout exclusivity
 ```
 
