@@ -76,7 +76,7 @@ The per-slug make targets are generated from `nonos-mk/capsule.mk:158` and pulle
 ```
 
 There is no `nonos-mk-compositor-prod` target. The compositor ships inside the full desktop image built by
-`make nonos-mk-desktop-gui-prod` (`Makefile:1067`) and `make nonos-mk-zerostate` (`Makefile:1093`), and
+`make nonos-mk-desktop-gui-prod` (`Makefile:1183`) and `make nonos-mk-zerostate` (`Makefile:1215`), and
 its artifacts are pulled into those builds through `$(compositor_ARTIFACTS)` (`Makefile:880`).
 
 ## Code standards

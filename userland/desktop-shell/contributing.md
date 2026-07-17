@@ -79,8 +79,8 @@ The per-slug make targets are generated from the `NONOS_CAPSULE_RULES` template 
 For a running desktop that includes the shell:
 
 ```
-  make nonos-mk-desktop-gui-prod   attested desktop GUI image (bundles desktop-shell)   Makefile:1067, 1079
-  make nonos-mk-zerostate      full GUI feature profile (bundles desktop-shell)     Makefile:1093, 1109
+  make nonos-mk-desktop-gui-prod   attested desktop GUI image (bundles desktop-shell)   Makefile:1183, 1079
+  make nonos-mk-zerostate      full GUI feature profile (bundles desktop-shell)     Makefile:1215, 1109
 ```
 
 Both image targets pull in `$(desktop-shell_ARTIFACTS)` (`Makefile:1079`, `Makefile:1109`).
