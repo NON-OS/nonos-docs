@@ -1,9 +1,15 @@
 # Pedersen Attestation
 
+This is the earlier attestation backend, transparent but classical. In production
+the spawn gate uses the post-quantum [STARK](stark.md) instead, selected by the
+`nonos-stark-attest` feature; this discrete-log backend remains the default build
+until the STARK pipeline is the standard. It is documented here in full because it
+still ships and still gates the default build.
+
 The STARK is one proof family; the other is the `zk_kernel`, a set of transparent discrete-log proofs
-that back capsule attestation. A capsule can prove its enrolled secret is a member of a committed policy
-tree, without revealing the secret, and the kernel checks that proof at spawn. This page documents the
-proof construction; the enforcement gate and what the proof binds are on the
+that back the enrolled-secret attestation. A capsule can prove its enrolled secret is a member of a
+committed policy tree, without revealing the secret, and the kernel checks that proof at spawn. This page
+documents the proof construction; the enforcement gate and what the proof binds are on the
 [capsule attestation](../../security/attestation.md) page. The code is under `src/crypto/zk_kernel/`.
 
 ## The proof family

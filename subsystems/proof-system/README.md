@@ -1,8 +1,10 @@
 # Proof System
 
-NØNOS carries its own transparent proof machinery in the kernel: a STARK over the Goldilocks field for
-hash-based proofs, and a family of Curve25519 discrete-log proofs for capsule attestation. Both are
-transparent, no trusted setup, no structured reference string, and both rest only on public
+NØNOS carries its own transparent proof machinery in the kernel: a STARK over the Goldilocks field, and
+a family of Curve25519 discrete-log proofs. In production the STARK backs both capsule and kernel
+attestation, as a transparent, post-quantum membership proof; the discrete-log family backs the earlier
+enrolled-secret attestation, which is the default build until the STARK pipeline is the standard. Both
+are transparent, no trusted setup, no structured reference string, and both rest only on public
 parameters anyone can regenerate and audit. This is the cryptographic spine under
 [capsule attestation](../../security/attestation.md).
 

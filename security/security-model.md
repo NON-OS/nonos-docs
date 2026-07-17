@@ -129,7 +129,8 @@ The claims on this page are not only asserted, the security-critical ones are pr
 source, with no unproven placeholders, and re-run on every push. The [verification
 page](../architecture/verification.md) is the full, honest scope, but in summary: the capability algebra
 soundness, address-space isolation, page-permission invariants, memory zeroization, the attestation and
-anti-rollback logic, and path canonicalization are proven in Lean (54 theorems, zero `sorry`) with a
+anti-rollback logic, and path canonicalization are proven in Lean (the kernel invariants plus 203
+theorems for the STARK attestation, all with zero `sorry`) with a
 Verus refinement over the real capability bit-operations; the crypto primitives are checked against
 FIPS, RFC, and NIST vectors with tamper rejection; and the parsers are fuzz-proven never to panic or
 break their invariants over millions of hostile inputs.

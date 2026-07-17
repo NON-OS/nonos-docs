@@ -89,7 +89,8 @@ The real boot attestation, the kernel's measured `zk_verified` and `secure_boot`
 (`userland/capsule_boot_splash/src/main.rs:52`, `userland/libc/src/attest.rs:30`). This capsule never
 calls `mk_attest_status`. The genuine cryptographic machinery lives in the kernel, in the transparent
 [STARK and Pedersen attestation](../../security/attestation.md) and the capsule-attestation gate that
-verifies an enrolled-secret proof at spawn.
+verifies the membership proof at spawn, a STARK in the production build and the enrolled-secret proof in
+the default build.
 
 ## The capsule-mask table
 

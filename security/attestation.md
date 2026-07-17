@@ -2,12 +2,22 @@
 
 The signature chain in [verified spawn](capsules-and-trust.md) proves who signed a
 capsule and that its bytes match a signed manifest. Attestation is a second,
-independent layer on top of that: a zero-knowledge proof, carried in a trailer
-appended to the capsule, that the capsule's enrolled secret is a member of a
-committed policy tree, bound to the capsule's exact code, its granted
-capabilities, and a policy epoch, without revealing the secret. This is the
-transparent, trapdoor-free enrolled-secret proof. This page documents the gate,
-its enforcement, the trailer format, and exactly what the proof binds.
+independent layer on top of that: a proof, carried in a trailer appended to the
+capsule, that the capsule is a member of a committed policy tree, bound to the
+capsule's exact code, its granted capabilities, and a policy epoch.
+
+Two proof backends sit behind the same gate, selected at build time by the
+`nonos-stark-attest` feature. The production build (`nonos-mk-zerostate`) verifies
+a transparent, post-quantum FRI-STARK proof that the capsule's measurement is a
+leaf of the policy tree (`src/security/capsule_attest/stark.rs:53`). Without the
+feature, the default build verifies the earlier transparent, trapdoor-free
+enrolled-secret proof (`verify_enrolled`, `src/crypto/zk_kernel/`). Both are
+checked against the same 48-byte context and the same policy root; they differ
+only in the proof system and the trailer layout. This page documents the gate,
+both backends, and exactly what the proof binds. The STARK construction is on the
+[proof system](../subsystems/proof-system/stark.md) page; the enrolled-secret
+construction is on the
+[Pedersen attestation](../subsystems/proof-system/pedersen-attestation.md) page.
 
 ## Where the gate runs
 
@@ -43,28 +53,34 @@ unless its attestation verifies (`src/security/capsule_attest/verify.rs:24`):
 
 ```
   verify_capsule_attestation(trailer, elf, granted_caps):
-      proof = parse(trailer)?
-      root = policy_root::root().ok_or(RootUnavailable)?
       capsule_hash = blake3(elf)                       32 bytes
       ctx[0..32]  = capsule_hash
       ctx[32..40] = granted_caps      (big-endian u64)
       ctx[40..48] = POLICY_EPOCH      (big-endian u64)
-      if verify_enrolled(proof, root, ctx) -> Ok else -> Rejected
+      with nonos-stark-attest:  verify_capsule_attestation_stark(trailer, elf, granted_caps)
+      without it:               parse(trailer); verify_enrolled(proof, root, ctx)
 ```
 
 The context the proof is checked against is a 48-byte value that ties the proof to
 three things at once: the exact ELF, via its BLAKE3 hash; the capability set being
 installed, so a proof valid for one grant is not valid for a wider one; and the
 policy epoch, so a proof enrolled under an old policy does not verify under a new
-one. `verify_enrolled` (`src/crypto/zk_kernel/`) checks the enrolled-secret proof
-against the committed policy root over that context; the zero-knowledge machinery
-itself is documented in the crypto section. The policy root comes from
-`policy_root::root()`, and if it is unavailable the gate rejects with
-`RootUnavailable` rather than skipping the check.
+one. Both backends bind this same context. The STARK backend
+(`src/security/capsule_attest/stark.rs:53`) reconstructs it, reads the policy root
+from `policy_root::root()`, and verifies the money-grade membership proof against
+that root. The enrolled-secret backend (`verify_enrolled`, `src/crypto/zk_kernel/`)
+checks the Sigma-protocol proof against the same root. If the root is unavailable
+either backend rejects with `RootUnavailable` rather than skipping the check.
 
-## The trailer format
+## The enrolled-secret trailer format
 
-The trailer is a fixed-magic, fixed-layout blob parsed by `parse`
+This section describes the trailer of the enrolled-secret backend, magic
+`NZKCAPS2`. The STARK backend uses its own trailer, magic `NZKSTRK1` (the
+membership path followed by the serialized FRI-STARK proof), parsed in
+`src/security/capsule_attest/stark.rs:53` and documented on the
+[STARK](../subsystems/proof-system/stark.md) page.
+
+The enrolled-secret trailer is a fixed-magic, fixed-layout blob parsed by `parse`
 (`src/security/capsule_attest/trailer.rs:28`). It begins with the eight-byte magic
 `NZKCAPS2`; a blob shorter than eight bytes or with the wrong magic is rejected as
 `Missing`. The parser then requires an exact length,
@@ -105,6 +121,19 @@ The attestation error type is closed (`src/security/capsule_attest/error.rs:18`)
 
 The gate maps any of these to `SpawnError::AttestationRejected` in a strict build.
 
+## Kernel self-attestation
+
+The same membership proof runs one layer up, for the kernel itself. The bootloader
+already measures the kernel image with BLAKE3; with the `stark-kernel-attest`
+feature it also verifies the kernel's own STARK trailer, carried in the image
+footer, against an enrolled kernel root before it jumps
+(`nonos-bootloader/src/kernel_verify/stark_attest.rs:44`). The context is the kernel
+measurement and the boot epoch. A zeroed root trusts nothing, so an un-enrolled
+build cannot be spoofed into trusting a proof. Capsules attest to the kernel's
+policy root; the kernel attests to its own enrolled measurement, and both are
+checked by the same verifier, the `nonos-stark` crate the kernel and the
+bootloader both link, so the prover and the verifier cannot drift.
+
 ## Relationship to the signature chain
 
 Attestation and the signature chain answer different questions and neither
@@ -116,12 +145,12 @@ in zero knowledge. A capsule can be correctly signed but not enrolled, or enroll
 under a stale policy epoch, and the attestation layer is what catches that,
 independently of the signatures, when a strict build requires it.
 
-This page covers the gate, the trailer, and what the proof binds. The cryptographic
-construction underneath, the transparent Pedersen commitment with its
-nothing-up-my-sleeve generator, the Schnorr-style membership proof, and the honest
-classical-versus-post-quantum boundary, is documented on the
-[proof system](../subsystems/proof-system/pedersen-attestation.md) page, alongside the
-in-kernel transparent [STARK](../subsystems/proof-system/README.md).
+This page covers the gate, the trailers, and what the proof binds. The
+cryptographic constructions underneath are documented on the proof system pages:
+the production [STARK](../subsystems/proof-system/stark.md), a transparent,
+post-quantum FRI proof with no trusted setup, and the earlier enrolled-secret
+[Pedersen attestation](../subsystems/proof-system/pedersen-attestation.md), a
+transparent but classical Sigma-protocol proof.
 
 ## Debugging attestation
 
@@ -171,17 +200,20 @@ not why a spawn fails, and this marker should be read as advisory, not as a gate
 ```
   src/kernel_core/process_spawn/capsule_spawn/runner/attest_gate.rs  the gate, the markers, and the feature flags
   src/kernel_core/process_spawn/capsule_spawn/from_vfs/load.rs       the [RUNTIME-LOAD] reason= mapping
-  src/security/capsule_attest/verify.rs   verify_capsule_attestation and the 48-byte context
-  src/security/capsule_attest/trailer.rs  the NZKCAPS2 trailer format
+  src/security/capsule_attest/verify.rs   verify_capsule_attestation, the backend dispatch and 48-byte context
+  src/security/capsule_attest/stark.rs    the STARK backend: NZKSTRK1 parse and money-grade verify
+  src/security/capsule_attest/trailer.rs  the NZKCAPS2 enrolled-secret trailer format
   src/security/capsule_attest/layout.rs   POLICY_TREE_DEPTH, POLICY_EPOCH
   src/security/capsule_attest/policy_root.rs  the committed policy root
   src/security/capsule_attest/error.rs    AttestError and its as_str messages
-  src/crypto/zk_kernel/attest/verify.rs   verify_enrolled, the constant-time group check
+  src/crypto/zk_kernel/attest/verify.rs   verify_enrolled, the enrolled-secret constant-time group check
+  nonos-bootloader/src/kernel_verify/stark_attest.rs  the kernel self-attestation the bootloader checks
+  nonos-stark/                            the shared verifier crate, linked by kernel and bootloader
   src/lib.rs                              the nonos-production / nonos-zk-rollout exclusivity
 ```
 
-The zero-knowledge construction verified above, and the adversarial fuzzing that
-confirms the verifier rejects garbage, are on the
-[proof system](../subsystems/proof-system/pedersen-attestation.md) page; the
-signature chain that produces the other `reason=` values is on the
+The proof constructions verified above are on the
+[STARK](../subsystems/proof-system/stark.md) and
+[Pedersen attestation](../subsystems/proof-system/pedersen-attestation.md) pages;
+the signature chain that produces the other `reason=` values is on the
 [verified spawn](capsules-and-trust.md) page.

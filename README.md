@@ -45,7 +45,7 @@ After that, pick a wing:
 |------|-------|----------------|
 | Architecture | [architecture/](architecture/) | The mission and use cases, the whole-system model in one overview, and the honest verification scope (Lean, Verus, Kani, known-answer proofs). |
 | Subsystems | [subsystems/](subsystems/) | Per-subsystem deep dives: boot, memory, process model, ELF loader, scheduler, SMP, syscall, IPC, hardware broker, interrupts, input, graphics, networking, storage, time, crypto, proof system. |
-| Security | [security/](security/) | The trust anchor, capsule signing and MAC, the certificate and manifest schemas, capabilities and tokens, delegation, revocation, and attestation. |
+| Security | [security/](security/) | The trust anchor, capsule signing and MAC, the certificate and manifest schemas, capabilities and tokens, delegation, revocation, and the transparent post-quantum STARK attestation that gates every spawn. |
 | Userland | [userland/](userland/) | The capsule userland model, the capsule catalog, the SDK and nonos_std, the desktop stack, and how to write an app. |
 | Arch | [arch/](arch/) | The arch boundary, platform discovery, and the x86_64, aarch64, and riscv64 backends behind it. |
 | ABI | [abi/](abi/) | Every syscall with its calling convention, number, capability, and semantics; the error codes; and the driver-broker ABI. |
