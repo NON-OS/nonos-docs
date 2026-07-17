@@ -80,7 +80,7 @@ For a running desktop that includes the shell:
 
 ```
   make nonos-mk-desktop-gui-prod   attested desktop GUI image (bundles desktop-shell)   Makefile:1067, 1079
-  make nonos-mk-full-gui-prod      full GUI feature profile (bundles desktop-shell)     Makefile:1093, 1109
+  make nonos-mk-zerostate      full GUI feature profile (bundles desktop-shell)     Makefile:1093, 1109
 ```
 
 Both image targets pull in `$(desktop-shell_ARTIFACTS)` (`Makefile:1079`, `Makefile:1109`).
@@ -106,7 +106,7 @@ Both image targets pull in `$(desktop-shell_ARTIFACTS)` (`Makefile:1079`, `Makef
   userland/capsule_desktop_shell/src/setup/         peer discovery, overlay registration, subscriptions
   userland/capsule_desktop_shell/Capsule.mk         slug, ports, mask; includes the generated targets
   nonos-mk/capsule.mk                               the nonos-mk-desktop-shell[-sign|-verify|-keys] templates
-  Makefile                                          the desktop-gui-prod and full-gui-prod image targets
+  Makefile                                          the desktop-gui-prod and zerostate image targets
 ```
 
 Every reference above is verified against those trees.

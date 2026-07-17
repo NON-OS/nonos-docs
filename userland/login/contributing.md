@@ -68,7 +68,7 @@ in `$(login_ARTIFACTS)`: the desktop GUI, the full GUI, and the setup wizard
 
 ```
   make nonos-mk-desktop-gui-prod   desktop GUI image with login       Makefile:1067
-  make nonos-mk-full-gui-prod      full GUI image with login          Makefile:1093
+  make nonos-mk-zerostate      full GUI image with login          Makefile:1093
   make nonos-mk-setup-wizard-prod  setup-wizard image with login      Makefile:1099
 ```
 

@@ -77,7 +77,7 @@ The desktop production build depends on signed artifact triples for core
 services, drivers, network, desktop, apps, attest, and power, then runs
 `nonos-mk-verify-desktop-gui-capsules` before building the kernel with feature
 `microkernel-desktop-gui` (`Makefile:1067`). The larger image is
-`microkernel-full-gui`, built by `nonos-mk-full-gui-prod`
+`microkernel-full-gui`, built by `nonos-mk-zerostate`
 (`Makefile:1094`); it is `microkernel-desktop-gui` plus the remaining production
 hardware driver capsules (Cargo.toml:495). Two of those extras are the input
 drivers that matter on real laptops: `microkernel-full-gui` pulls in
@@ -121,7 +121,7 @@ requirements above.
 **A kernel with no drivers.** If the desktop comes up but nothing responds to a
 laptop's built-in keyboard or touchpad, the likely cause is the wrong profile:
 `microkernel-desktop-gui` carries no i2c input drivers, only PS/2 and xHCI. Build
-`microkernel-full-gui` (`nonos-mk-full-gui-prod`, `Makefile:1094`) for hardware
+`microkernel-full-gui` (`nonos-mk-zerostate`, `Makefile:1094`) for hardware
 whose input is behind i2c-HID. More broadly, a driver capsule that is not in the
 selected profile's feature set is simply not embedded, so its device is
 unclaimed; the fix is to build the profile that includes it, not to change the

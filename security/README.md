@@ -19,7 +19,7 @@ authority, before a single instruction of it executes.
 | [manifest-schema.md](manifest-schema.md) | Every field of the `CapsuleManifest`, the fixed sizes, the endpoint and publisher-signature sub-schemas, what the signatures cover, and which verification step reads each field. |
 | [certificate-schema.md](certificate-schema.md) | Every field of the NØNOS-ID certificate, the capability ceiling and namespace globs, the publisher keys that sign manifests, and the two signing layers from anchor to certificate to manifest. |
 | [trust-anchor.md](trust-anchor.md) | The baked, non-optional anchor policy, its signing keys and their windows, the epoch anti-rollback, the three revocation lists, and exactly what it enforces on a certificate. |
-| [attestation.md](attestation.md) | The zero-knowledge attestation gate, its feature-gated enforcement, the `NZKCAPS2` trailer format, and what the enrolled-secret proof binds. |
+| [attestation.md](attestation.md) | The attestation gate and its two backends: the production transparent post-quantum STARK membership proof and the earlier enrolled-secret proof, their feature gating, the trailer formats, and what the proof binds. |
 
 ## Enforcement
 

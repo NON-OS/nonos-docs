@@ -82,7 +82,7 @@ included through `userland/capsule_boot_splash/Capsule.mk:20`. The generated `.P
 ```
 
 There is no `boot-splash`-specific prod image target. The splash ships as a component of the desktop
-images: `make nonos-mk-desktop-gui-prod` (`Makefile:1067`) and `make nonos-mk-full-gui-prod`
+images: `make nonos-mk-desktop-gui-prod` (`Makefile:1067`) and `make nonos-mk-zerostate`
 (`Makefile:1093`) both pull in `$(boot-splash_ARTIFACTS)` (`Makefile:1082`, `Makefile:1112`,
 `Makefile:1134`).
 
