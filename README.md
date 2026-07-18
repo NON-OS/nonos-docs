@@ -25,7 +25,8 @@ nonos-docs/
 ├── userland/          The capsule userland model, the SDK, the desktop stack
 ├── arch/              The x86_64, aarch64, and riscv64 backends
 ├── abi/               Syscall numbers, calling convention, per-call contracts
-└── build/             The toolchain, the cargo and Make build, capsule signing
+├── build/             The toolchain, the cargo and Make build, capsule signing
+└── community/         Contributing, rewards, verifiable work, how to report
 ```
 
 ## Start here

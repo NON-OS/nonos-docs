@@ -1,7 +1,7 @@
 # Contributing to capsule_hello
 
 This page is for someone changing the hello capsule, or copying it to start their own. Because it is the
-tutorial reference for the QUICKSTART.md guide in the repository root, keep it minimal: it should stay the simplest
+tutorial reference for the [quickstart](../../build/quickstart.md) guide, keep it minimal: it should stay the simplest
 capsule that still opens a window, paints, and closes. For what it does and how it is put together, read the
 [overview](README.md) and the [walkthrough](walkthrough.md). For the general path from a source tree to a
 signed capsule, read [writing-an-app.md](../writing-an-app.md).
@@ -49,7 +49,7 @@ The per-slug make targets are generated from `nonos-mk/capsule.mk:158` and pulle
   make nonos-mk-check-hello-keys     check the per-capsule signing keys exist
 ```
 
-These are exactly the steps the QUICKSTART.md guide in the repository root runs against this capsule. To spawn it,
+These are exactly the steps the [quickstart](../../build/quickstart.md) guide runs against this capsule. To spawn it,
 the kernel is built with the `nonos-capsule-hello` feature; without it, `spawn_hello` is the empty stub and
 nothing spawns (`src/userspace/init/spawn_plan/apps.rs:55`).
 

@@ -33,6 +33,11 @@ on, and how it is withdrawn.
 | [delegation.md](delegation.md) | The `Delegation` structure, the subset and expiry rules enforced at creation, the domain-separated MAC, the three verification entry points, and every error. |
 | [revocation.md](revocation.md) | The four scopes of revocation: the per-boot key and nonce, the per-process epoch, the per-token revoked set, and the anchor lists, with where each takes effect. |
 
+## Reporting
+
+Suspected vulnerabilities go through [reporting.md](reporting.md): the private
+contact, what is in and out of scope, and what to include in a report.
+
 ## Sources
 
 The code behind this section lives under `src/security/` (the capsule manifest,

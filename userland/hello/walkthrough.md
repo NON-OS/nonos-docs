@@ -3,7 +3,7 @@
 This page reads the hello capsule one file at a time as a teaching example. It is the shortest complete
 capsule in the tree, so nothing here is elided: every source line has a place. Read it beside the
 [overview](README.md), and when you want to build your own from this shape, follow
-the QUICKSTART.md guide in the repository root and the deeper [writing-an-app.md](../writing-an-app.md).
+the [quickstart](../../build/quickstart.md) guide and the deeper [writing-an-app.md](../writing-an-app.md).
 
 ## The entry point
 

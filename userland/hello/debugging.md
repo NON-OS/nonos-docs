@@ -26,7 +26,7 @@ the spawn line.
 A working hello capsule opens one 360x180 window titled `Hello NONOS`
 (`userland/capsule_hello/src/hello/manifest.rs:24`, `manifest.rs:29`). Inside it is a constant frame, drawn
 by the five calls in `paint`: a cleared dark background, a teal accent bar four pixels tall across the top,
-`hello, NONOS` at double scale, then `a signed, attested capsule` and `built from QUICKSTART.md`, and a
+`hello, NONOS` at double scale, then `a signed, attested capsule` and `built from the quickstart`, and a
 dimmed `press Esc to close` at the bottom (`userland/capsule_hello/src/hello/paint.rs:24`). The frame never
 changes: `paint` is a pure function of nothing but its own colour constants, so nothing you do to the window
 alters what it shows except closing it. Pressing Escape closes the window and exits the process

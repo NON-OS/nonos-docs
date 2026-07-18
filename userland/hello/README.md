@@ -3,7 +3,7 @@
 The hello capsule is the tutorial reference for NONOS userland. It is the simplest capsule that still does
 everything a real one does: it opens its own window, paints a greeting, closes on a key, and reaches the
 system only through capability-checked IPC. It is kept in the tree as the living reference for
-the QUICKSTART.md guide in the repository root, so its five source files map one to one onto the steps that guide
+the [quickstart](../../build/quickstart.md) guide, so its five source files map one to one onto the steps that guide
 takes you through, from an empty folder to a signed, attested capsule the kernel spawns. Read this page to
 see what it is; read [walkthrough.md](walkthrough.md) to read the source file by file.
 
@@ -16,7 +16,7 @@ greeting, and an event handler that closes on Escape. It holds no state between 
 function of nothing but its own constants (`userland/capsule_hello/src/hello/paint.rs:24`).
 
 The drawn frame is a cleared background, an accent bar, and four lines of text: `hello, NONOS` at double
-scale, then `a signed, attested capsule`, `built from QUICKSTART.md`, and `press Esc to close`
+scale, then `a signed, attested capsule`, `built from the quickstart`, and `press Esc to close`
 (`userland/capsule_hello/src/hello/paint.rs:26`). The window title is `Hello NONOS`
 (`userland/capsule_hello/src/hello/manifest.rs:23`).
 
@@ -81,7 +81,7 @@ capsule spawned` on the boot log (`src/userspace/init/spawn_plan/apps.rs:53`,
 means. It is compiled into the fleet only under the `nonos-capsule-hello` feature; without it, `spawn_hello`
 is the empty stub and nothing spawns (`src/userspace/init/spawn_plan/apps.rs:55`).
 
-This whole path is what the QUICKSTART.md guide in the repository root walks you through end to end, using this same
+This whole path is what the [quickstart](../../build/quickstart.md) guide walks you through end to end, using this same
 capsule: write the app, declare it, generate a publisher identity, build and sign, let the kernel spawn it,
 and run it. For the App trait and the runtime that drives it in depth, read [writing-an-app.md](../writing-an-app.md).
 
