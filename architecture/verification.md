@@ -131,8 +131,8 @@ faithful stand-in for the standard method, not a `sorry`.
 
 ## The evidence manifest
 
-`verification/EVIDENCE.json` is a machine-readable inventory of the whole verification surface,
-generated from the source tree by `verification/collect-evidence.sh` and checked for drift on every
+`verification/evidence/EVIDENCE.json` is a machine-readable inventory of the whole verification surface,
+generated from the source tree by `verification/evidence/collect-evidence.sh` and checked for drift on every
 push. It carries the live counts (Lean modules and theorems, the `sorry` count, the axiom-profiled
 theorems, the extracted functions with their file hashes, and the Verus, Kani and runnable-proof
 totals) and the pinned toolchains. As of this writing:
@@ -227,14 +227,14 @@ cd verification/lean       && lake env lean AxiomProfile.lean
 cd verification/extraction/lean && lake exe cache get && lake build
 
 # The evidence manifest: regenerate and confirm it matches the committed copy
-./verification/collect-evidence.sh | diff - verification/EVIDENCE.json
+./verification/evidence/collect-evidence.sh | diff - verification/evidence/EVIDENCE.json
 ```
 
 ## Source map
 
 ```
-  verification/EVIDENCE.json        the machine-readable inventory, CI-checked for drift
-  verification/collect-evidence.sh  regenerates the manifest from the source tree
+  verification/evidence/EVIDENCE.json        the machine-readable inventory, CI-checked for drift
+  verification/evidence/collect-evidence.sh  regenerates the manifest from the source tree
   verification/README.md            the layered framing and the run commands
   verification/ARCHITECTURE.md      the thesis, threat model, and what is / is not established
   verification/lean/Nonos/*.lean    the 887 Lean theorems across 120 modules (zero sorry)
@@ -283,7 +283,7 @@ properties, over the real Rust source, on a memory-safe language. Different scop
 
 **How many theorems are there, really?** 887 Lean theorems across 120 modules with zero `sorry`, plus
 203 in the STARK attestation body, plus the Verus, Kani and runnable proofs. The live counts are in
-`verification/EVIDENCE.json`, regenerated and diff-checked on every push, so the number in the repo is
+`verification/evidence/EVIDENCE.json`, regenerated and diff-checked on every push, so the number in the repo is
 never stale.
 
 **What does "zero sorry" actually guarantee?** A `sorry` is Lean's placeholder for an unproven step. If
@@ -296,7 +296,7 @@ the real `src/` through `#[path]`; the Verus proofs run over the real Rust bit-o
 mechanical extraction lowers real functions from `rustc`'s MIR and proves on that. Where a property is
 only an abstract Lean theorem, a second proof connects it to the implementation.
 
-**Can I trust the numbers on this page?** They are checked. `verification/EVIDENCE.json` is regenerated
+**Can I trust the numbers on this page?** They are checked. `verification/evidence/EVIDENCE.json` is regenerated
 from the source and diffed in CI, so a stale number fails the build. Every command in "Reproduce it"
 runs from a clean checkout.
 
