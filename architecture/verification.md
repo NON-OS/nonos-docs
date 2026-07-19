@@ -56,24 +56,36 @@ stronger than testing for the bounded region and catches the arithmetic and boun
 miss. It is bounded, not unbounded: it proves the property for inputs up to the bound, not for all
 inputs of unbounded size.
 
-**Layer 2, Lean theorems.** The Lean files under `verification/lean/Nonos/` carry theorems with
-**zero `sorry`** (Lean's placeholder for an unproven step), so every stated theorem is fully proven. The
-kernel-invariant files are:
+**Layer 2, Lean theorems.** The Lean files under `verification/lean/Nonos/` carry **887 theorems across
+120 modules with zero `sorry`** (Lean's placeholder for an unproven step), so every stated theorem is
+fully proven. The tree is core-only: no Mathlib, so any recent Lean 4 toolchain checks it. The live
+counts are in [the evidence manifest](#the-evidence-manifest), regenerated and checked on every push.
+
+The modules map one to one onto the trusted path. A representative slice:
 
 ```
-  Capability.lean    (11)  grant/revoke/attenuate algebra: empty grants nothing, grant adds and never
-                           removes, revoke drops the target and preserves others, attenuate is confined
-                           by the mask, idempotence and commutativity
-  Zeroization.lean    (6)  freed memory is scrubbed; no cross-lifetime residue
-  Path.lean           (6)  path canonicalization and the read-only guard
-  AntiRollback.lean   (6)  a monotonic index cannot be moved backward
-  Attestation.lean    (5)  the attestation binding and its rejection cases
-  Authorization.lean  (5)  the authority checks
-  Ipc.lean            (5)  message-length and endpoint invariants
-  Crypto.lean         (4)  the crypto-facing properties
-  Isolation.lean      (3)  address-space isolation
-  Paging.lean         (3)  page-permission invariants (no writable-executable)
+  Capability / CapMask / CapToken   grant/revoke/attenuate algebra and delegation-subset: a delegated
+                                    mask never carries a capability its parent lacks; a token is
+                                    admitted only if signed, unexpired and unrevoked
+  UserCopy                          the user/kernel boundary: an accepted copy range lies wholly in
+                                    user space, never the null page or the kernel half
+  Paging / Isolation / DemandPaging no writable-and-executable page; a served demand page is never
+                                    executable; no kernel-half address is demand-backed
+  AntiRollback / AntiRollbackState  a monotone version floor that never falls; the concrete bootloader
+                                    check refines the abstract theorem
+  DmaMap / IrqBind / MsixExclusion  the hardware broker: bounded DMA owned on a fresh epoch, a bounded
+                                    MSI-X bind, and no raw mapping ever reaching a protected register
+  ElfPhdr / ElfReloc / LoadProtect  the loader: in-bounds program headers, a bounded relocation write,
+                                    RELRO sealed read-only before entry
+  FdAlloc / PidAlloc / SyscallRoute the allocators and the first-match syscall dispatch
+  Wpa2Handshake / CcmpReplay        the Wi-Fi trusted path: keys install only on a valid message 3, a
+                                    replayed packet number is dead forever
 ```
+
+The 168 flagship theorems are listed in `verification/lean/AxiomProfile.lean`, which prints each one's
+exact axiom closure. The CI Lean job runs it as a gate: a closure may name only Lean's three standard
+axioms (`propext`, `Classical.choice`, `Quot.sound`) and never `sorryAx`, so a `sorry` anywhere in a
+proven theorem's dependency graph fails the build. This is machine-enforced, not a convention.
 
 The transparent STARK attestation adds a second body of proof, 203 theorems across the
 `Nonos/Stark/` modules plus `SigningKey` and `KeyLifecycle`: Merkle membership soundness and
@@ -90,6 +102,52 @@ proven in Verus directly over the Rust semantics. The attestation adds `stark_at
 SMT-checks that a trailer length capped at the bytes remaining never over-reserves and that the gate
 accepts only the conjunction of the root, context and enrollment checks. This is the bridge that ties
 the abstract Lean theorem to the concrete `bits & !bit` the kernel executes.
+
+**Layer 2c, mechanical extraction (Charon and Aeneas).** This is the strongest link between proof and
+code, and it removes the transcription step entirely. [Charon](https://github.com/AeneasVerif/charon)
+lowers real kernel functions from the MIR that `rustc` compiles into LLBC, and
+[Aeneas](https://github.com/AeneasVerif/aeneas) translates that into a pure Lean definition. The Lean
+theorems in `verification/extraction/lean/` are then proven directly on that extracted definition, so
+the thing proved is the real function, not a model a human retyped from it. The extraction crates under
+`verification/extraction/` include the real `src/` files unmodified through `#[path]`; nothing is
+copied. Extracted and proven so far:
+
+```
+  capabilities::bits::{has,add,remove}_capability   the capability word operations; extracted_remove_confines
+                                                    proves the extracted revoke never grants a new capability
+  usercopy::policy::check_range                     the user/kernel range check; check_range_spec proves it
+                                                    accepts exactly the non-null, in-bound, non-wrapping ranges,
+                                                    tied to the abstract Isolation.Accepts
+  memory::paging is_wx_violation, to_pte_flags      the W^X page encoder; extracted_no_wx_page proves the
+                                                    extracted encoder never emits a writable-executable page
+  broker::irq::validate_msix_request                the MSI-X bind validator; a request with an unknown flag
+                                                    bit is refused before any device state is read
+```
+
+The extraction is regenerated in CI and diffed against the checked-in Lean, so it can never silently
+drift from the source. Where Aeneas models a `core` library method as an opaque axiom (for example
+`Option::ok_or`), that axiom appears in the theorem's closure and is documented as such; it is a
+faithful stand-in for the standard method, not a `sorry`.
+
+## The evidence manifest
+
+`verification/EVIDENCE.json` is a machine-readable inventory of the whole verification surface,
+generated from the source tree by `verification/collect-evidence.sh` and checked for drift on every
+push. It carries the live counts (Lean modules and theorems, the `sorry` count, the axiom-profiled
+theorems, the extracted functions with their file hashes, and the Verus, Kani and runnable-proof
+totals) and the pinned toolchains. As of this writing:
+
+```
+  Lean specification    120 modules, 887 theorems, 0 sorry, 168 axiom-profiled
+  mechanical extraction  7 functions lowered from real MIR (Charon + Aeneas)
+  Verus refinement       5 source files over the real Rust bit-operations
+  Kani model checking    65 harnesses
+  runnable proofs        32 proof crates over the real source
+```
+
+Because the manifest is regenerated and diffed in CI, these numbers in the repo are always current and
+CI-checked, not a claim in prose that can rot. The green Lean, Verus, Kani and extraction jobs are the
+proof that the surface actually checks; the manifest is the inventory of it.
 
 ## What is established
 
@@ -160,20 +218,34 @@ cd userland/fs_proofs      && cargo kani --output-format terse
 
 # Layer 2: Lean theorems (requires the Lean toolchain in verification/lean)
 cd verification/lean       && lake build
+# the axiom gate: prints each flagship theorem's axiom closure, must show no sorryAx
+cd verification/lean       && lake env lean AxiomProfile.lean
+# the reproducible proof-corpus commitment (refuses to form on any sorry)
+./verification/lean/proof-corpus-root.sh
+
+# Layer 2c: mechanical extraction (requires Charon, Aeneas, and the Lean toolchain)
+cd verification/extraction/lean && lake exe cache get && lake build
+
+# The evidence manifest: regenerate and confirm it matches the committed copy
+./verification/collect-evidence.sh | diff - verification/EVIDENCE.json
 ```
 
 ## Source map
 
 ```
-  verification/README.md          the three-layer framing and the run commands
-  verification/ARCHITECTURE.md     the thesis, threat model, and what is/ is not established
-  verification/STATUS.md           the last local run and its results
-  verification/lean/Nonos/*.lean   the 54 Lean theorems (zero sorry)
-  verification/verus/src/*.rs      the Verus refinement of capabilities, paging, IPC lengths
-  userland/fs_proofs/              runnable + Kani proofs over the real VFS/parser/attestation code
-  userland/crypto_proofs/          the crypto known-answer and tamper-rejection proofs
-  userland/{net,driver,stark,kernel,usb}_proofs/  further runnable proofs per subsystem
-  nonos-verify/                    the source-hygiene gate
+  verification/EVIDENCE.json        the machine-readable inventory, CI-checked for drift
+  verification/collect-evidence.sh  regenerates the manifest from the source tree
+  verification/README.md            the layered framing and the run commands
+  verification/ARCHITECTURE.md      the thesis, threat model, and what is / is not established
+  verification/lean/Nonos/*.lean    the 887 Lean theorems across 120 modules (zero sorry)
+  verification/lean/AxiomProfile.lean   the 168-theorem axiom gate (no sorryAx, standard axioms only)
+  verification/lean/proof-corpus-root.sh  the reproducible commitment over the proven corpus
+  verification/extraction/           Charon + Aeneas crates and the proofs on the extracted MIR
+  verification/verus/src/*.rs        the Verus refinement of capabilities, paging, IPC lengths
+  userland/fs_proofs/                runnable + Kani proofs over the real VFS/parser/attestation code
+  userland/crypto_proofs/            the crypto known-answer and tamper-rejection proofs
+  userland/*_proofs/                 32 proof crates, one guarantee per subsystem, over the real source
+  nonos-verify/                      the source-hygiene gate
 ```
 
 Every reference above is verified against those trees. The properties proven here are what the
@@ -181,3 +253,56 @@ Every reference above is verified against those trees. The properties proven her
 page](../security/capabilities-and-tokens.md), the attestation on the [attestation
 page](../security/attestation.md), and the crypto primitives on the [crypto
 pages](../subsystems/crypto/README.md).
+
+## Get involved
+
+The verification surface grows one machine-checked property at a time, and the on-ramp is real. Good
+first contributions, roughly easiest first:
+
+- **Add a Lean theorem over a real invariant.** Pick a small, self-contained function in `src/` (a
+  bounds check, an allocator, a validator), model it faithfully in a new `verification/lean/Nonos/`
+  module, and prove its safety property. The tree is core-only, so no Mathlib to learn; the existing
+  modules are the template. Add the flagship theorems to `AxiomProfile.lean` and confirm the axiom
+  closure stays clean.
+- **Strengthen a runnable proof.** The `userland/*_proofs/` crates run the real source. A new assertion,
+  a tighter invariant, or a fuzz harness that finds a real bug is as welcome as a new theorem.
+- **Mechanically extract a function.** Add a real kernel function to an extraction crate under
+  `verification/extraction/`, regenerate with Charon and Aeneas, and prove its property on the extracted
+  definition. This is the strongest kind of contribution because it closes the model-to-code gap.
+- **Extend the evidence and CI.** New proof systems, new drift checks, better badges: the manifest and
+  the workflows are the project's public statement of what it proves.
+
+The [contributing guide](../community/contributing.md) covers the house rules; the reward program in
+[rewards](../community/rewards.md) weights work on the trusted path and on verification highest.
+
+## FAQ
+
+**Is this "formally verified" like seL4?** No, and the page says so plainly above. seL4 proves total
+functional correctness of a minimal C kernel. NONOS proves a focused set of security-critical
+properties, over the real Rust source, on a memory-safe language. Different scope, honestly stated.
+
+**How many theorems are there, really?** 887 Lean theorems across 120 modules with zero `sorry`, plus
+203 in the STARK attestation body, plus the Verus, Kani and runnable proofs. The live counts are in
+`verification/EVIDENCE.json`, regenerated and diff-checked on every push, so the number in the repo is
+never stale.
+
+**What does "zero sorry" actually guarantee?** A `sorry` is Lean's placeholder for an unproven step. If
+any proven theorem depended on one, its axiom closure would name `sorryAx`, and the CI axiom gate
+(`AxiomProfile.lean`) fails on exactly that. So every stated theorem is fully proven under at most
+Lean's three standard axioms.
+
+**How is the Lean tied to the code that runs?** Three ways, strongest last: the runnable proofs execute
+the real `src/` through `#[path]`; the Verus proofs run over the real Rust bit-operations; and the
+mechanical extraction lowers real functions from `rustc`'s MIR and proves on that. Where a property is
+only an abstract Lean theorem, a second proof connects it to the implementation.
+
+**Can I trust the numbers on this page?** They are checked. `verification/EVIDENCE.json` is regenerated
+from the source and diffed in CI, so a stale number fails the build. Every command in "Reproduce it"
+runs from a clean checkout.
+
+**What is NOT proven?** Total functional correctness, unbounded model checking, timing side channels,
+and hardware below the IOMMU line. The "What is NOT established" section above is the honest scope.
+
+**Where do I start reading the proofs?** `verification/lean/Nonos/Capability.lean` for the algebra,
+`UserCopy.lean` for a boundary check, and `verification/extraction/lean/NonosExtraction/Refinement.lean`
+for a proof landed on mechanically-extracted code.
