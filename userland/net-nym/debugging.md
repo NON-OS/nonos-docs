@@ -92,12 +92,28 @@ and a packet whose session id matches no open session is dropped (`recv_drain.rs
 an errno, so a persistent `E_RX_EMPTY` on an active link points at one of them, or at the far side simply not
 sending.
 
-## A note on the stale source README
+## What the serial log names
 
-The capsule's own `README.md` says the operational ops return `E_NOTSUP` in beta and the mask is `0x10`. If
-you are debugging against that document, stop: the code returns real errnos from the set above, the mask is
-`0x0003d`, and the ops are implemented. Debug against the code and this documentation, not the capsule
-README.
+A failing gateway connection says which stage it reached, which separates a network problem from a protocol
+one:
+
+```
+  [NET-NYM] gateway bound <ip>        a session is up
+  [NET-NYM] gateway connect <code>    never reached ESTABLISHED
+  [NET-NYM] gateway upgrade <code>    the WebSocket upgrade was refused
+  [NET-NYM] gateway register <code>   the registration handshake failed
+```
+
+The proxy in front says the same for a tunnel it could not open:
+
+```
+  [SOCKS5] open refused: no session   no mixnet session to carry it
+  [SOCKS5] open refused: no exit      no network requester configured
+  [SOCKS5] open refused: send <code>  net.nym refused the send, with its errno
+```
+
+All of these need the `Debug` right in the capability mask. Without it `mk_debug` output is dropped before
+it reaches the log, and a failure shows up only as missing traffic in a packet capture.
 
 ## Source map
 

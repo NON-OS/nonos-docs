@@ -1,3 +1,5 @@
+![Traffic leaving a NØNOS machine, and what each hop is allowed to know](doc/nym-mixnet.png)
+
 # The Nym Capsule
 
 `net_nym` is the anonymity-overlay capsule: a signed ring-3 capsule that wraps an application datagram in a
@@ -16,13 +18,15 @@ for the AEAD, X25519, and hash primitives it calls, read the [crypto capsule](..
 
 ## Reading the source README first
 
-The capsule ships a `README.md` (`userland/capsule_net_nym/README.md`) that describes a beta scaffold: four
-ops, an `IPC`-only `0x10` mask, endpoints `4500`/`4501`, wire magic `NNYM`, and every operational op
-returning `E_NOTSUP` until a "live wrap pipeline" lands post-beta. That document is stale. The code in the
-tree is well past it: sixteen ops, a `0x0003d` mask, endpoints `4470`/`4471`, request magic `NYM1`, and a
-working encode/decode path with real crypto syscalls. Where the source README and the code disagree, this
-documentation follows the code and the `Capsule.mk`, and the discrepancies are called out explicitly below
-and on each page. Treat the source README as a design note that the implementation overtook.
+The capsule ships a `README.md` (`userland/capsule_net_nym/README.md`) that now tracks the code: eighteen
+ops, a `0x0013d` mask, endpoint `4470`, the Sphinx packet sizes, the gateway stages, and what the serial log
+prints when one of them fails. It described a beta scaffold for a long time and was rewritten once the
+mixnet path started working, so an older checkout will disagree with it. Where any document and the code
+disagree, this documentation follows the code and the `Capsule.mk`.
+
+The mask gained the `Debug` right (`0x0013d`, previously `0x0003d`) so a failing gateway stage can name
+itself on the serial log. Without that right `mk_debug` output is dropped before it reaches the log, and a
+failure is visible only as an absence of traffic in a packet capture.
 
 ## Identity
 
@@ -36,7 +40,7 @@ Everything the kernel and the service registry need to name and reach the capsul
 | Namespace | `systems.nonos.net.nym` | `Capsule.mk:10` |
 | Service endpoint | `service:4470:net.nym` | `Capsule.mk:11`, `spawn.rs:31` |
 | Reply endpoint | `reply:4471:endpoint.net.nym.reply` | `Capsule.mk:12`, `spawn.rs:32`, `spawn.rs:33` |
-| Capability mask | `0x0003d` | `Capsule.mk:13` |
+| Capability mask | `0x0013d` | `Capsule.mk:13` |
 | Binary name | `net_nym` | `Capsule.mk:8`, `Cargo.toml:19` |
 | Feature gate | `nonos-capsule-net-nym` | `Capsule.mk:9`, `src/userspace/capsule_net_nym/embed.rs:17` |
 | Request magic | `NYM1` (`0x4E594D31`) | `src/protocol/header.rs:17` |
@@ -48,24 +52,23 @@ The reply endpoint has two parts the manifest and the spawn record agree on: the
 `endpoint.net.nym.reply` (`spawn.rs:32`) and the reply port `4471` (`spawn.rs:33`). The capsule sends every
 reply back to the sender by pid with `mk_ipc_reply` rather than to a fixed inbox (`src/server/respond.rs:31`),
 so the reply endpoint is the registry-side name for its return path, not an address the capsule hardcodes.
-Note the source README's `4500`/`4501` and `NNYM` do not match; the manifest and the code use `4470`/`4471`
-and `NYM1`.
 
-The mask `0x0003d` decomposes bit by bit against `src/capabilities/types.rs`:
+The mask `0x0013d` decomposes bit by bit against `src/capabilities/types.rs`:
 
 ```
-  0x00001  CoreExec   bit()   1   types.rs:56
-  0x00004  Network    bit()   4   types.rs:58
-  0x00008  IPC        bit()   8   types.rs:59
-  0x00010  Memory     bit()  16   types.rs:60
-  0x00020  Crypto     bit()  32   types.rs:61
+  0x00001  CoreExec   bit()    1   types.rs:56
+  0x00004  Network    bit()    4   types.rs:58
+  0x00008  IPC        bit()    8   types.rs:59
+  0x00010  Memory     bit()   16   types.rs:60
+  0x00020  Crypto     bit()   32   types.rs:61
+  0x00100  Debug      bit()  256   types.rs:64
   -------
-  0x0003d  = 1 + 4 + 8 + 16 + 32
+  0x0013d  = 1 + 4 + 8 + 16 + 32 + 256
 ```
 
 The kernel spawn path requests four of those five bits by name, `IPC | Memory | Crypto | Network`
 (`src/userspace/capsule_net_nym/spawn.rs:49`), which is `0x3c`; the manifest ceiling adds `CoreExec`
-(`0x1`) so the process can run, giving the full `0x3d`. The requested set is a subset of the manifest
+(`0x1`) so the process can run, and `Debug` (`0x100`) so failures are legible, giving `0x13d`. The requested set is a subset of the manifest
 ceiling, which is what the spawn check enforces before the ELF is mapped. What each bit buys this capsule:
 `CoreExec` runs it as a process, `IPC` lets it receive on `net.nym` and call `net.tcp`, `Memory` maps its
 own heap and stack, and `Crypto` reaches the `crypto_*` syscalls it uses for AEAD, X25519, HKDF, HMAC,
@@ -73,8 +76,8 @@ BLAKE3, Ed25519 verify, and random (`src/crypto/mod.rs:24`). The `Network` bit i
 the stack uses to place it in the network fleet; the capsule reaches the wire only by IPC to `net.tcp`,
 never a NIC. It holds no driver, MMIO, IRQ, DMA, PIO, filesystem, graphics, admin, or debug authority, so
 compromising it yields its own session tables and the ability to speak to `net.tcp`, and nothing more. The
-source README's `0x10` (`IPC` only) is wrong on two counts: the manifest is `0x3d`, and the code does call
-crypto and open TCP streams, both of which that mask would forbid.
+`Debug` bit added on top of that set buys one thing: a failing gateway stage can name itself on the serial
+log instead of being visible only as missing traffic in a capture.
 
 ## The five pillars
 
