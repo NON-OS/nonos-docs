@@ -26,6 +26,7 @@ nonos-docs/
 ├── arch/              The x86_64, aarch64, and riscv64 backends
 ├── abi/               Syscall numbers, calling convention, per-call contracts
 ├── build/             The toolchain, the cargo and Make build, capsule signing
+├── releases/          What changed in each release, and what is not finished
 └── community/         Contributing, rewards, verifiable work, how to report
 ```
 
