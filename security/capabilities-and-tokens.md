@@ -14,37 +14,45 @@ set of bits a capsule is allowed to hold in the first place.
 
 ## The capability set
 
-A capability is a single bit. The set is closed and small: twenty-two variants
-of the `Capability` enum in `src/capabilities/types.rs:18`. Each variant maps to
-one bit through `Capability::bit()` (`types.rs:54`), and the bits are the plain
-powers of two, so a set of capabilities is a `u64` bitmask.
+A capability is a single bit. The set is closed and small: thirty-one variants
+of the `Capability` enum in `src/capabilities/types/defs.rs`. Each variant maps
+to one bit through `Capability::bit()` in `types/bit.rs`, and the bits are the
+plain powers of two, so a set of capabilities is a `u64` bitmask.
 
 ```
-  CoreExec               1        DeviceEnum         32768
-  IO                     2        Driver             65536
-  Network                4        Mmio              131072
-  IPC                    8        Irq               262144
-  Memory                16        Dma               524288
-  Crypto                32        Pio              1048576
-  FileSystem            64        InputSource      2097152
-  Hardware             128
-  Debug                256        Admin                512
-  RegisterService     1024        GraphicsDisplayQuery   2048
-  GraphicsSurfaceCreate 4096      GraphicsSurfaceMap     8192
-  GraphicsPresent      16384
+  CoreExec               1        DeviceEnum           32768
+  IO                     2        Driver               65536
+  Network                4        Mmio                131072
+  IPC                    8        Irq                 262144
+  Memory                16        Dma                 524288
+  Crypto                32        Pio                1048576
+  FileSystem            64        InputSource        2097152
+  Hardware             128        TimeSet            4194304
+  Debug                256        SpawnBroker        8388608
+  Admin                512        SpawnWindow       16777216
+  RegisterService     1024        ProcessControl    33554432
+  GraphicsDisplayQuery      2048  StoreWrite        67108864
+  GraphicsSurfaceCreate     4096  EnrolDevRoot     134217728
+  GraphicsSurfaceMap        8192  Keyring          268435456
+  GraphicsPresent          16384  Entropy          536870912
+                                  AppInstall      1073741824
 ```
+
+This table is checked against the kernel by `scripts/check_docs_caps.py`, since
+a stale copy of it is worse than no copy: a reader who grants what the page
+says gets what the kernel says.
 
 The enum is the single source of the bit mapping. No other part of the kernel
 writes a raw literal for a capability; grant, revoke, and test all go through the
 bitmask algebra in `src/capabilities/bits.rs`, which is nothing more than `OR`,
 `AND` with a complement, and `AND` against a single bit. Keeping the whole
-authority surface to twenty-two bits is deliberate: it is small enough to audit
+authority surface to thirty-one bits is deliberate: it is small enough to audit
 in one reading, and every action a capsule performs that reaches beyond its own
 address space is one of these bits.
 
 Several bits form structured groups rather than standing alone.
 
-The driver-broker bits are layered, and the enum comment at `types.rs:35` is the
+The driver-broker bits are layered, and the enum comment in `types/defs.rs` is the
 authority for how they compose. `DeviceEnum` permits enumeration only. `Driver`
 permits claiming and releasing a device. `Mmio`, `Irq`, `Dma`, and `Pio` are each
 required in addition to a claim before the broker will hand over the
@@ -305,7 +313,7 @@ To decode which bit a syscall needs, read the `Mk` table
 (`src/syscall/contract/cap_table/mk.rs`) reproduced above: `MkMmioMap` needs
 `Mmio`, `MkIrqBind` needs `Irq`, `MkDeviceClaim` needs `Driver`, and so on. Then
 compare against the bits the capsule actually holds, which are the powers of two in
-`src/capabilities/types.rs` decoded by `bits_to_caps` (`src/capabilities/bits.rs:29`)
+`src/capabilities/types/defs.rs` decoded by `bits_to_caps` (`src/capabilities/bits.rs:29`)
 from the token's `permissions`. A `[CAP-DENY]` on `MkIrqBind` from a capsule whose
 grant did not include `Irq` (`262144`) is a manifest problem, not a runtime bug:
 the capsule was admitted without the bit it is now trying to use, and the fix is in
@@ -325,7 +333,8 @@ manifest or certificate ceiling fails much earlier, at
 ## Source map
 
 ```
-  src/capabilities/types.rs             the Capability enum and bit mapping
+  src/capabilities/types/defs.rs        the Capability enum
+  src/capabilities/types/bit.rs         the bit mapping
   src/capabilities/bits.rs              caps_to_bits, bits_to_caps, the bitmask algebra
   src/capabilities/token/types.rs       the CapabilityToken and predicates
   src/capabilities/token/material.rs    the 128-byte MAC material and mac64
