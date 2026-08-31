@@ -8,9 +8,10 @@ here are the userland half of the [event path](../../subsystems/input/path.md).
 
 Its source is organized into six top-level modules, and this documentation mirrors that structure so a
 page can be read beside the folders it describes. The one fact to hold before anything else: the router
-sees every keystroke and every pointer motion on the machine, yet it holds no `InputSource` capability. It
-can drain the ring and speak IPC, but it cannot inject a synthetic event back into the ring the way a
-driver can. That property is the spine of every page here.
+sees every keystroke and every pointer motion on the machine, and it is the only capsule that does. It
+holds `InputSource`, the privileged consumer authority for the raw-input ring, so it can drain the ring
+and speak IPC, but it cannot inject a synthetic event back into the ring the way a driver can. Drivers can
+POST events but not DRAIN them; the router drains but cannot POST. That split is the spine of every page here.
 
 ## Identity
 
@@ -24,32 +25,38 @@ Everything the kernel and the service registry need to name and reach the router
 | Namespace | `systems.nonos.input_router` | `Capsule.mk:11` |
 | Service endpoint | `service:4320:input_router` | `Capsule.mk:12`, `spawn.rs:32` |
 | Reply endpoint | `reply:4321:endpoint.input_router.reply` | `Capsule.mk:13`, `spawn.rs:33`, `spawn.rs:34` |
-| Capability mask | `0x19` | `Capsule.mk:15` |
+| Capability mask | `0x200019` | `Capsule.mk:16` |
 | Binary name | `input_router` | `Capsule.mk:9` |
 | Kernel mirror | `src/userspace/capsule_input_router` | `Capsule.mk:16` |
 
-The mask `0x19` decomposes into exactly three bits, checked against `src/capabilities/types.rs`:
+The mask `0x200019` decomposes into exactly four bits, checked against `src/capabilities/types/defs.rs`:
 
 | Bit | Value | Grants |
 |---|---|---|
-| CoreExec | `0x0001` | run as a process (`types.rs:56`) |
-| IPC | `0x0008` | send and receive on its endpoints and speak the drain syscalls (`types.rs:59`) |
-| Memory | `0x0010` | map its own heap and stack (`types.rs:60`) |
+| CoreExec | `0x000001` | run as a process |
+| IPC | `0x000008` | send and receive on its endpoints |
+| Memory | `0x000010` | map its own heap and stack |
+| InputSource | `0x200000` | drain and wait on the global raw-input ring |
 
 ```
-  0x0019 = 0x0001 + 0x0008 + 0x0010
-         = CoreExec + IPC + Memory
+  0x200019 = 0x000001 + 0x000008 + 0x000010 + 0x200000
+           = CoreExec + IPC + Memory + InputSource
 ```
 
-The kernel spawn path requests exactly those three capabilities and no others
-(`src/userspace/capsule_input_router/spawn.rs:50`). The router does **not** hold `InputSource`.
-`InputSource` (capability value `2097152`, `src/capabilities/types.rs:77`) is the post authority, and
-`MkInputEventPost` is gated on it (`src/syscall/contract/cap_table/mk.rs:78`); only the signed driver
-capsules that own the hardware hold it. The router only drains, and `MkInputEventDrain` and
-`MkInputEventWait` are gated on `can_ipc` (`src/syscall/contract/cap_table/mk.rs:79`), which the `IPC` bit
-satisfies. So the router can read the ring and speak IPC, but it cannot inject a synthetic event, and it
-holds no network, filesystem, graphics, or hardware capability at all. Compromising the router yields
-those three bits and the right to ask the window manager, compositor, and policy services a question.
+The router holds `InputSource` (`0x200000`) because draining the raw-input ring is
+now a privileged consumer operation, not an ordinary IPC call. The consumer gate
+`can_input_consumer()` backs `MkInputEventDrain` and `MkInputEventWait`
+(`src/syscall/contract/cap_table/mk.rs:106`), and it deliberately requires
+`InputSource` while excluding `Irq`. The reason is spelled out at the gate: the
+ring carries every keystroke, and the looser `can_input_source()` accepts `Irq`,
+which every device driver holds, so a driver capsule could have drained the ring
+and stolen the keystroke stream (`src/syscall/contract/cap_table/mk.rs:100`). The
+tightened gate keeps drivers able to POST events (`MkInputEventPost`, still gated
+on `can_input_source()`, `mk.rs:99`) but not DRAIN them, so the router is the one
+capsule that can read the stream. It still cannot inject a synthetic event and it
+holds no network, filesystem, graphics, or hardware capability at all. Compromising
+the router yields those four bits and the right to ask the window manager,
+compositor, and policy services a question.
 
 ## The six pillars
 
@@ -82,7 +89,7 @@ questions each decision needs.
 ## Lifecycle
 
 The router is spawned first in the desktop GUI fleet, before the compositor, so the rest of the desktop
-comes up behind it (`src/userspace/init/spawn_plan/desktop_fleet.rs:38`, `:72`). The spawn is idempotent
+comes up behind it (`src/userspace/init/spawn_plan/desktop_fleet/mod.rs`, `:72`). The spawn is idempotent
 through an `is_alive` guard, verifies the embedded ELF, cert, manifest, and attestation, and registers
 `input_router` on port 4320 (`src/userspace/capsule_input_router/spawn.rs:37`). It also runs as part of
 the input-probe fleet (`src/userspace/init/spawn_plan/input_probe_fleet.rs:24`).
@@ -106,7 +113,7 @@ means.
   userland/capsule_input_router/src/route/     the routing decision engine
   userland/capsule_input_router/src/state/     the routing memory
   userland/capsule_input_router/src/clients/   the outbound service clients
-  src/capabilities/types.rs                  the CoreExec / IPC / Memory / InputSource capability bits
+  src/capabilities/types/defs.rs                  the CoreExec / IPC / Memory / InputSource capability bits
   src/syscall/contract/cap_table/mk.rs       the per-syscall capability gate
   src/userspace/capsule_input_router/        the kernel-side embed and verified spawn
   src/userspace/init/spawn_plan/             the desktop and input-probe fleet spawn entries

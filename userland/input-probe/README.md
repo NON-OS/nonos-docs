@@ -44,7 +44,7 @@ is a deliberate test surface, not something to leave running under a normal desk
 | Capability mask | `0x1819` | `Capsule.mk:16` |
 | Kernel mirror | `src/userspace/capsule_input_probe` | `Capsule.mk:17` |
 
-The mask decomposes into five bits, checked against `src/capabilities/types.rs`:
+The mask decomposes into five bits, checked against `src/capabilities/types/defs.rs`:
 
 | Bit | Value | Grants | Source |
 |---|---|---|---|
@@ -115,7 +115,7 @@ built and injected as a proof capsule through the `nonos-mk-input-probe-inject-p
   userland/capsule_input_probe/src/protocol.rs      request and delivery wire formats
   userland/capsule_input_probe/src/clients/         compositor, display_info, input_router IPC clients
   userland/capsule_input_probe/src/state.rs         the Context struct
-  src/capabilities/types.rs                         the capability bits behind 0x1819
+  src/capabilities/types/defs.rs                         the capability bits behind 0x1819
   src/userspace/capsule_input_probe/spawn.rs        the kernel spawn mirror and requested caps
   userland/capsule_input_router/src/server/handlers/grab_request.rs  the grab allowlist
   Makefile                                          the input-probe inject image target

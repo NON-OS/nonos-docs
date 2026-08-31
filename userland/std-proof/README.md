@@ -27,7 +27,7 @@ debugging pages.
 | Capability mask | `0x19` | `Capsule.mk:19` |
 | Kernel mirror | `src/userspace/capsule_std_proof` | `Capsule.mk:20` |
 
-The mask decomposes into three bits, checked against `src/capabilities/types.rs`:
+The mask decomposes into three bits, checked against `src/capabilities/types/defs.rs`:
 
 | Bit | Value | Grants | Source |
 |---|---|---|---|
@@ -103,7 +103,7 @@ to where to look.
   userland/capsule_std_proof/Capsule.mk       slug, handle, endpoints, mask, build-std=std, mirror
   userland/capsule_std_proof/Cargo.toml       the three crates.io deps, panic=abort, AGPL
   userland/capsule_std_proof/.cargo/config.toml  links the nonos-rt _start shim
-  src/capabilities/types.rs                   the CoreExec / IPC / Memory bit values
+  src/capabilities/types/defs.rs                   the CoreExec / IPC / Memory bit values
   src/userspace/capsule_std_proof/spawn.rs    the kernel spawn mirror and requested caps
   src/userspace/init/entry.rs                 the feature gate and the runtime-install staging log
 ```

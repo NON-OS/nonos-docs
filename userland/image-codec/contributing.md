@@ -59,7 +59,7 @@ The build and sign targets are generated per slug by `nonos-mk`. The slug is `im
 ```
 
 The manifest is signed from `Capsule.mk` with the required caps declared and no optional caps, so the
-installed mask resolves to exactly `0x1819` (`Capsule.mk:11`; see [safety](safety.md) for how the install
+installed mask resolves to exactly `0x3819` (`Capsule.mk:11`; see [safety](safety.md) for how the install
 computes it). There is no image-codec-specific production target: the codec ships as part of the desktop
 image because its feature `nonos-capsule-image-codec` is in the desktop profiles (`Cargo.toml:84`,
 `Cargo.toml:469`).

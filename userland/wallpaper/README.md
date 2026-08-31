@@ -40,7 +40,7 @@ its `Capsule.mk` and the kernel-side spawn record.
 | Binary name | `wallpaper` | `Capsule.mk:5` |
 | Kernel mirror | `src/userspace/capsule_wallpaper` | `Capsule.mk:13` |
 
-The mask `0x1819` decomposes into five bits, checked against `src/capabilities/types.rs`:
+The mask `0x1819` decomposes into five bits, checked against `src/capabilities/types/defs.rs`:
 
 | Bit | Value | Grants |
 |-----|-------|--------|
@@ -83,7 +83,7 @@ documentation is one page each, plus a contributing and a debugging page.
 
 The wallpaper is spawned through the desktop fleet's verified spawn: its signature and attestation are
 checked, its requested capabilities are held against its manifest ceiling, and only then is its ELF
-mapped (`src/userspace/init/spawn_plan/desktop_fleet.rs:109`, `src/userspace/capsule_wallpaper/spawn.rs:40`).
+mapped (`src/userspace/init/spawn_plan/desktop_fleet/mod.rs`, `src/userspace/capsule_wallpaper/spawn.rs:40`).
 
 1. `_start` initializes the heap, exiting with code 1 on failure, then calls `wait_for_setup`, which
    retries `setup::run` with a yield backoff until it succeeds (`src/main.rs:38`,
@@ -119,9 +119,9 @@ page covers what an absent line means.
   userland/capsule_wallpaper/src/compositor_client/  health, display_info, scene_submit, damage_commit
   userland/capsule_wallpaper/src/state/              color, alpha, policy, fade, ports, applied index
   userland/capsule_wallpaper/Capsule.mk              slug, handle, ports 4340/4341, caps 0x1819
-  src/capabilities/types.rs                          the capability bits
+  src/capabilities/types/defs.rs                          the capability bits
   src/userspace/capsule_wallpaper/spawn.rs           the kernel-side verified spawn, requested caps
-  src/userspace/init/spawn_plan/desktop_fleet.rs     the desktop-fleet spawn entry
+  src/userspace/init/spawn_plan/desktop_fleet/mod.rs     the desktop-fleet spawn entry
 ```
 
 Every reference above is verified against those trees.

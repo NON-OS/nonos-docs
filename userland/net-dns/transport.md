@@ -101,7 +101,7 @@ until it succeeds, so the capsule waits for `net.udp` to come up rather than fai
   userland/capsule_net_dns/src/setup.rs              resolve net.udp, mint and bind the local port, apply DHCP upstream
   userland/capsule_net_dns/src/main.rs               the setup retry loop
   userland/capsule_net_dns/src/server/handlers/resolve_common.rs   the send/recv call sites and the upstream filter
-  src/capabilities/types.rs                          the Crypto bit the entropy source needs
+  src/capabilities/types/defs.rs                          the Crypto bit the entropy source needs
 ```
 
 Every reference above is verified against those trees.

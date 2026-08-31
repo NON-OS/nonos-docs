@@ -37,7 +37,7 @@ every reply back to the sender by pid with `mk_ipc_reply` rather than to a fixed
 (`src/server/respond.rs:31`), so the reply endpoint is the registry-side name for its return path, not an
 address the capsule hardcodes.
 
-The mask `0x0001d` decomposes bit by bit against `src/capabilities/types.rs`:
+The mask `0x0001d` decomposes bit by bit against `src/capabilities/types/defs.rs`:
 
 ```
   0x00001  CoreExec   bit()   1   types.rs:56
@@ -130,7 +130,7 @@ sharp.
   userland/capsule_net_sockets/Cargo.toml         panic = "abort" and the binary name
   src/userspace/capsule_net_sockets/              the kernel-side embed and verified spawn
   src/userspace/init/spawn_plan/network/spawn_sockets.rs  the NET-SOCKETS spawn entry and boot marker
-  src/capabilities/types.rs                       the capability bit values behind the mask
+  src/capabilities/types/defs.rs                       the capability bit values behind the mask
 ```
 
 Every reference above is verified against those trees.

@@ -29,8 +29,8 @@ path installs are covered on the [interrupts](../interrupts/idt.md) page.
 ## Sources
 
 The code for this subsystem lives under `src/hardware/broker/`: `table/` and `class.rs` (device
-discovery and classification), `claim.rs` (claims and epochs), `mmio/`, `dma/`, `irq/`, and `pio/`
-(the four grant classes), `grant.rs` (the MMIO grant table and user VA region), and `pci/` (config
-access). The IRQ backends are under `irq/` with `aarch64/` and `riscv64/` subtrees, and the exit
-revocation is in `src/process/exit/`. Every page is verified against those trees with `file:line`
-references.
+discovery and classification), `claim/` (claims and epochs, split into `types`/`state`/`claim`/`release`/`lookup`),
+`mmio/`, `dma/`, `irq/`, and `pio/` (the four grant classes), `grant.rs` (the MMIO grant table and
+user VA region), and `pci/` (config access). The IRQ backend is under `irq/` with the x86 bind in
+`irq/bind/` and `aarch64/` and `riscv64/` subtrees for GICv3 and PLIC, and the exit revocation is
+in `src/process/exit/`. Every page is verified against those trees with `file:line` references.

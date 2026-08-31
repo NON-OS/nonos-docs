@@ -14,25 +14,33 @@ It reads the faulting address from `CR2`, decodes the error code, and tries to h
 fault before treating it as an error:
 
 ```
-  handle(frame, error_code):
+  handle(frame, error_code):                          # page_fault.rs:31
+      set interrupt context
       addr = CR2
-      increment page-fault stat
-      if try_handle_fault(addr, error_code):  return   // handled, silent
-      dump the trap, log it
-      if fault came from user mode:  terminate_user_process()   // SIGSEGV-equivalent
-      else:                          kernel_panic()             // halt
+      dump_trap("PF", frame, error_code, addr)         # :35  EVERY fault, unconditionally
+      log_page_fault(ctx)                              # :41
+      increment page-fault stat                        # :42
+      if try_handle_fault(ctx, error_code):  return    # :44  handled
+      if fault came from user mode:  terminate_user_process()   # :49  SIGSEGV-equivalent
+      else:                          kernel_panic()             # :51  halt
 ```
 
-`try_handle_fault` (`page_fault.rs:60`) first asks the [hardening](../memory/hardening.md)
-layer whether the address is a guard page, in which case it refuses to handle it and lets the
-fault escalate, and otherwise hands it to the [paging manager](../memory/faults.md), which
-performs demand backing or copy-on-write and returns success if it resolved the fault. A
-handled demand fault returns silently and is not dumped, deliberately: dumping every lazily
-backed page to the serial console would make a large allocation pathologically slow as it
-faults in page by page. Only an unhandled fault is logged, and its disposition depends on
-where it came from, a user-mode fault terminates that process with an error and yields, while
-a kernel-mode fault is unrecoverable and halts. The logged address is passed through
-`redact_address` so a fault log does not leak a raw kernel pointer.
+The order is worth stating precisely because it is the opposite of what one might assume: the
+handler dumps and logs the trap *before* it tries to resolve it. `dump_trap` (`page_fault.rs:35`)
+runs unconditionally and does not rate-limit, so every page fault, including a handled demand
+or copy-on-write fault, prints a `[TRAP PF]` line. There is no silent handled path. This is
+tolerable only because demand faults are rare by design: stacks, heap, and code are mapped
+eagerly, so a healthy capsule demand-faults essentially nothing (see the
+[demand budget](../memory/faults.md)), and a flood of `[TRAP PF]` lines is itself the signal
+that something is faulting when it should not. `try_handle_fault` (`page_fault.rs:55`) first
+asks the [hardening](../memory/hardening.md) layer whether the address is a guard page, in
+which case it refuses to handle it and lets the fault escalate, and otherwise hands it to the
+[paging manager](../memory/faults.md), which performs demand backing or copy-on-write and
+returns success if it resolved the fault. An unhandled fault's disposition depends on where it
+came from: a user-mode fault terminates that process with an error and yields
+(`exit_and_yield(-11, ...)`, `page_fault.rs:76`), while a kernel-mode fault is unrecoverable
+and halts. The logged address is passed through `redact_address` so a fault log does not leak
+a raw kernel pointer.
 
 ## The double fault
 
@@ -131,10 +139,13 @@ a cause: an execute fault on a data page is a control-flow-integrity event, a wr
 read-only page is a bad mapping or a clobbered `.got` (the [capsule RELRO](../process/README.md) story),
 and a non-present read is the ordinary shape of a genuinely bad pointer.
 
-One thing the console will *not* show is a successfully handled demand fault. `try_handle_fault` returns
-before any dump (`page_fault.rs:42`), so a lazily-backed page is silent by design; dumping every one
-would make a large allocation crawl as it faults in page by page. So the absence of `[TRAP PF]` under a
-heavy allocation is correct, and its presence always means the fault was *not* a normal demand fault.
+Note that a successfully handled demand fault is *not* silent: `dump_trap` runs unconditionally at
+`page_fault.rs:35`, before `try_handle_fault` at `page_fault.rs:44`, so every page fault prints a
+`[TRAP PF]` line whether or not the paging manager goes on to resolve it. A handled demand fault is
+distinguished not by the absence of the line but by what follows it: no `terminate_user_process` and no
+kernel panic, because `try_handle_fault` returned `true` and `handle` returned. So under a burst of
+demand paging you will see a run of `[TRAP PF]` lines that resolve quietly; a genuinely bad access is the
+`[TRAP PF]` that is followed by a `Segmentation fault` or a `KERNEL PANIC`.
 For a double fault the record is `log_exception("DOUBLE FAULT", …)`, the `"Double fault error code:"`
 line, the redacted stack and instruction pointers from `dump_stack_info`, and the halt banner; a double
 fault whose reported stack pointer sits in an unexpected IST region points back at the IST assignment in

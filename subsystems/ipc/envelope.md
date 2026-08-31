@@ -41,7 +41,7 @@ them with a domain-separated BLAKE3 derive-key, and stores it in a `Once`:
       IPC_SECRET.call_once(|| key)
 ```
 
-This runs during kernel init (`src/kernel_core/init/entry.rs:36`) and is **fatal on
+This runs during kernel init (`src/kernel_core/init/entry/init_core_services.rs:37`) and is **fatal on
 failure**: if the RNG cannot seed the MAC key, the kernel does not continue with an
 unkeyed IPC path. Every later MAC pulls the key through `get_ipc_secret`, which errors if
 the key was never initialized, so a MAC can never be computed against a zero or absent key.
@@ -99,7 +99,7 @@ step (`hash.rs:83`), so the check does not leak where a forged tag first diverge
 
 **The key is per-boot and fatal to miss.** `init_ipc_secret` (`hash.rs:25`) derives the MAC key from
 32 secure-RNG bytes through a domain-separated BLAKE3 derive-key and is fatal on RNG failure at init
-(`src/kernel_core/init/entry.rs:36`): the kernel does not continue with an unkeyed IPC path. Every MAC
+(`src/kernel_core/init/entry/init_core_services.rs:37`): the kernel does not continue with an unkeyed IPC path. Every MAC
 pulls the key through `get_ipc_secret`, which errors if it was never set, so a tag can never be computed
 against a zero or absent key, and a tag captured on one boot cannot be replayed as valid on the next.
 
@@ -134,7 +134,8 @@ cleanly but a drainer rejected.
   src/ipc/nonos_channel/message.rs   IpcMessage, MAX_MESSAGE_SIZE, new, validate_integrity
   src/ipc/nonos_channel/hash.rs      init_ipc_secret, compute_checksum, the constant-time compare
   src/ipc/nonos_channel/error.rs     ChannelError
-  src/kernel_core/init/entry.rs      the fatal boot-time seed of the MAC key
+  src/ipc/nonos_channel/hash.rs                    init_ipc_secret, get_ipc_secret, the MAC key
+  src/kernel_core/init/entry/init_core_services.rs  the fatal boot-time call to init_ipc_secret
   src/ipc/kernel_ipc.rs              where new is called and from is stamped, ChannelError -> ENOMEM
 ```
 

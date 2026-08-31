@@ -21,10 +21,10 @@ After the boot marker, four capsule-emitted markers tell you how far bring-up go
 
 | Marker | Meaning | Source |
 |---|---|---|
-| `[NET-CORE] registered net.tcp net.udp net.dhcp.client net.dns` | all four services registered | `src/register.rs:36` |
-| `[NET-CORE] registration partial failure` | at least one `mk_service_register` failed | `src/register.rs:39` |
-| `[NET-CORE] lease <ip>/<prefix> gw <gw>` | a DHCP lease was configured | `src/iface/dhcp.rs:65` |
-| `[NET-CORE] lease-status state=<n> ip=<ip>` | the lease self-check re-encoded the status body | `src/iface/dhcp.rs:102` |
+| `[NET-CORE] registered net.tcp net.udp net.dhcp.client net.dns net.ip` | all five services registered | `src/register.rs:49` |
+| `[NET-CORE] registration partial failure` | at least one `mk_service_register` failed | `src/register.rs:52` |
+| `[NET-CORE] lease <ip>/<prefix> gw <gw>` | a DHCP lease was configured | `src/iface/dhcp/emit_lease_marker.rs:21` |
+| `[NET-CORE] lease-status state=<n> ip=<ip>` | the lease self-check re-encoded the status body | `src/iface/dhcp/emit_status_selfcheck.rs:22` |
 
 Registration happens only after setup succeeds, so seeing the registration line means the NIC was found, the
 link was up, the MAC was read, and the smoltcp state was built (`src/main.rs:40`, [device](device.md)). The
@@ -57,7 +57,7 @@ the expected layout, not that the cable is down.
 
 The services registered but no `[NET-CORE] lease ...` line appears, and DNS calls return `E_NO_LEASE`. The
 DHCPv4 client only records a lease and installs the DNS socket on a `Configured` event
-(`src/iface/dhcp.rs:32`), which requires the pump to be exchanging frames with the driver
+(`src/iface/dhcp/handle_configured.rs:24`), which requires the pump to be exchanging frames with the driver
 (`src/iface/poll.rs:24`, [iface](iface.md)). If registration succeeded but no lease arrives, the stack is up
 but is not getting DHCP replies: either no DHCP server is answering on the link, or frames are not actually
 flowing to and from the driver. Confirm the frame path with the next section. Until a lease lands there is no
@@ -96,7 +96,7 @@ buffered to receive (`src/server/handlers/tcp/recv.rs:51`, `src/server/handlers/
   userland/capsule_net_core/src/main.rs                wait_for_setup: retry vs exit on SetupError
   userland/capsule_net_core/src/setup.rs               discovery, link, MAC, and the SetupError mapping
   userland/capsule_net_core/src/register.rs            the registration markers
-  userland/capsule_net_core/src/iface/dhcp.rs          the lease markers and the DHCP event handling
+  userland/capsule_net_core/src/iface/dhcp/            the lease markers and the DHCP event handling
   userland/capsule_net_core/src/device/rx.rs, tx.rs    the frame path behind "no packets"
   userland/capsule_net_core/src/server/handlers/       the socket-level errno paths cited above
 ```

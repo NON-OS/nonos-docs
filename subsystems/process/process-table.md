@@ -78,13 +78,14 @@ id.
 
 ## Creating a process
 
-`create_process` builds a PCB and registers it (`src/process/core/table/create.rs:26`):
+`create_process` (`src/process/core/table/create.rs:27`) and its memory variant both funnel
+into `create_process_with_parent` (`create.rs:49`), which builds a PCB and registers it:
 
 ```
-  create_process_with_mem(name, state, prio, mem_kb):
+  create_process_with_parent(name, state, prio, mem_kb, parent_override):   # create.rs:49
       if name is empty -> Err
-      pid = NEXT_PID.fetch_add(1)
-      parent = current pid
+      pid = allocate_tid()  else Err("pid space exhausted")   # the liveness-checked allocator
+      parent = parent_override.pid  or  current pid
       caps = compute_inherited_caps(pid, parent)
       pcb = build_pcb(pid, parent, name, state, prio, mem_kb/4, caps)
       address_space::lifecycle::allocate(pcb)
@@ -92,7 +93,12 @@ id.
       PROCESS_TABLE.add(pcb)
 ```
 
-The new process inherits its capabilities from its parent through
+The pid comes from `allocate_tid` (`create.rs:59`), the same liveness-checked allocator
+documented above, not a raw `NEXT_PID` bump: the allocator is the single source of ids and
+its `is_active_pid` skip is what keeps a wrapped counter from aliasing a live process. The
+`parent_override` is how a broker-loaded capsule (the installer acting for the terminal) is
+parented to the real requester rather than the broker. The new process inherits its
+capabilities from its parent through
 `compute_inherited_caps`, then `build_pcb` constructs the full control block, an address
 space is allocated for it, and its capability token is re-minted so `subject_asid`
 reflects the real address space rather than the zero the base mint left. That re-mint
@@ -105,7 +111,7 @@ inherited token for the manifest-derived one through the one-shot `install_spawn
 
 ## The initial control block
 
-`build_pcb` (`create.rs:76`) sets every field's initial value, and several of the
+`build_pcb` (`create.rs:94`) sets every field's initial value, and several of the
 defaults are worth stating because they are security-relevant:
 
 ```
@@ -128,7 +134,7 @@ never live without authenticated authority.
 
 ## Threads versus processes
 
-`spawn_thread` (`create.rs:58`) creates a schedulable thread inside the current process
+`spawn_thread` (`create.rs:76`) creates a schedulable thread inside the current process
 rather than a new process. The thread inherits the parent's address space through
 `address_space::lifecycle::inherit`, so it runs on the same CR3, joins the parent's
 thread group by copying its `tgid`, and takes a caller-provided user entry point and
@@ -151,12 +157,12 @@ coordination, and no core can be tricked into acting as another core's current p
 that asks "who is calling" resolves it through this per-CPU slot, which is what makes an authority check
 attributed to the right capsule under real parallelism.
 
-**A process never joins the table without an authenticated token.** `create_process`
-(`table/create.rs:26`) builds the PCB with a token minted for the pid, then re-mints it through
+**A process never joins the table without an authenticated token.** `create_process_with_parent`
+(`table/create.rs:49`) builds the PCB with a token minted for the pid, then re-mints it through
 `caps::rebind_address_space` so `subject_asid` reflects the real address space, and only then calls
 `PROCESS_TABLE.add`. The re-mint fails closed if the boot session nonce is not set, so a process cannot
 be created before the session is established, the same fail-closed rule the
-[signing path](../../security/signing-and-mac.md) enforces. `build_pcb` (`create.rs:76`) sets the
+[signing path](../../security/signing-and-mac.md) enforces. `build_pcb` (`create.rs:94`) sets the
 security-relevant defaults: `io_bitmap` all-ones (every port denied), `kernel_stack_top` zero (no user
 mode until a stack is allocated), and a token minted at construction, so a PCB is never live without
 authority.

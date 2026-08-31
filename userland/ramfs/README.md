@@ -23,14 +23,14 @@ that structure one page per pillar so a page can be read beside the folder it de
 | Capability mask | `0x38` | `Capsule.mk:17` |
 | Kernel mirror | `src/fs/ramfs_capsule` | `Capsule.mk:18` |
 
-The mask decomposes into three bits, checked against `src/capabilities/types.rs`. The manifest comment
+The mask decomposes into three bits, checked against `src/capabilities/types/defs.rs`. The manifest comment
 states the arithmetic, and it holds: `0x08 | 0x10 | 0x20 = 0x38`, that is `8 + 16 + 32 = 56`.
 
 | Bit | Value | Grants | Source |
 |-----|-------|--------|--------|
-| IPC | `0x08` | receive requests and send replies on its endpoints | `src/capabilities/types.rs:59` |
-| Memory | `0x10` | map its own heap for the file map | `src/capabilities/types.rs:60` |
-| Crypto | `0x20` | draw random keys and nonces and seal file bytes | `src/capabilities/types.rs:61` |
+| IPC | `0x08` | receive requests and send replies on its endpoints | `src/capabilities/types/defs.rs` |
+| Memory | `0x10` | map its own heap for the file map | `src/capabilities/types/defs.rs` |
+| Crypto | `0x20` | draw random keys and nonces and seal file bytes | `src/capabilities/types/defs.rs` |
 
 There is no CoreExec bit (`0x01`) in the mask and no filesystem, network, driver, or graphics right. The
 capsule cannot spawn processes, touch hardware, or reach any peer capsule. Compromising it yields its own
@@ -80,5 +80,5 @@ zeroization where ramfs encrypts at rest.
 ## Source map
 
 The capsule source is `userland/capsule_ramfs/` and its manifest `userland/capsule_ramfs/Capsule.mk`. The
-capability bits are defined in `src/capabilities/types.rs`. The kernel-side client, protocol mirror, and
+capability bits are defined in `src/capabilities/types/defs.rs`. The kernel-side client, protocol mirror, and
 path router live under `src/fs/ramfs_capsule/`. Every reference above is verified against those trees.

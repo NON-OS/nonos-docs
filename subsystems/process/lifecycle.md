@@ -64,29 +64,35 @@ called from is dead:
       loop: select_next_process and switch to it, else idle the CPU
 ```
 
-`teardown` (`src/process/exit/teardown.rs:21`) does the release work and is idempotent,
+`teardown` (`src/process/exit/teardown.rs:47`) does the release work and is idempotent,
 returning immediately if the process is already a zombie or terminated:
 
 ```
-  teardown(pid, exit_code, by_signal):
-      if already Zombie or Terminated -> return
+  teardown(pid, exit_code, by_signal):                                # teardown.rs:47
+      if already Zombie or Terminated -> return                       # teardown.rs:52
       release surfaces owned by the pid, and forget its attach mappings
-      release every broker resource: devices, IRQs, DMA, PIO grants
-      defer the kernel-stack release (cannot free the stack it is on)
-      store the exit code, set state = Zombie(exit_code)
+      release every broker resource: devices, IRQs, DMA, PIO grants   # teardown.rs:59
+      release the pid's pending IPC replies                           # teardown.rs:63
+      defer the kernel-stack release (cannot free the stack it is on) # teardown.rs:65
+      store the exit code, set state = Zombie(exit_code)              # teardown.rs:67
+      record the exit in the reap log for a later sys_wait
       remove the pid from the run queue and clear it as current
       clear its preemption ticks
-      enqueue the pid for the reaper
+      enqueue the pid for the reaper                                  # teardown.rs:82
 ```
 
 The order matters for correctness. A dying capsule's [broker](../hardware-broker/README.md)
 grants, its claimed devices, bound IRQs, DMA buffers, and port-IO grants, are all
-released here, so a device a crashed driver held is returned rather than stranded. Its
-[surfaces](../graphics/README.md) are released. The kernel stack cannot be freed while the
-CPU is still executing on it, so its release is deferred. Only then is the process
-marked `Zombie`, taken off the run queue, and enqueued for the reaper. After teardown
-returns, `exit_and_yield` never comes back: it selects another process and switches to
-it, or idles.
+released here (`teardown.rs:59`), so a device a crashed driver held is returned rather than
+stranded. Its [surfaces](../graphics/README.md) are released. Its pending IPC replies are
+released through `release_pending_replies_for_pid` (`teardown.rs:63`), which clears any
+kernel-mediated round trips the pid still owed or was owed, so a peer blocked in
+`mk_ipc_call` on a reply from this dying pid is not stranded and the server-side
+pending-reply table does not desync onto later callers. The kernel stack cannot be freed
+while the CPU is still executing on it, so its release is deferred (`teardown.rs:65`). Only
+then is the process marked `Zombie`, taken off the run queue, and enqueued for the reaper.
+After teardown returns, `exit_and_yield` never comes back: it selects another process and
+switches to it, or idles.
 
 ## Exit, phase two: reap
 
@@ -116,17 +122,22 @@ The lifecycle is where a capsule's authority is granted and, more importantly, w
 An exit that leaves anything behind is an authority leak, so the teardown ordering is the security
 property, not just housekeeping. Three properties hold.
 
-**Exit revokes every hardware authority the capsule held.** `teardown` (`teardown.rs:21`) calls
+**Exit revokes every hardware authority the capsule held.** `teardown` (`teardown.rs:47`) calls
 `release_all_for_pid` across all four broker grant classes: the device claims (`broker::release_all_for_pid`),
 bound IRQs (`irq_release_all_for_pid`), DMA buffers (`dma_release_all_for_pid`), and port-IO grants
 (`pio_release_all_for_pid`), plus the surfaces the pid owned. So a device a crashed driver held is
 returned rather than stranded, and because the claim table drops the claim, no stale grant handle from
 the dead pid can be replayed. This is the process-side half of the [broker claim](../hardware-broker/claim.md)'s
-`release_all_for_pid` contract. The reaper repeats every one of these releases idempotently in
-`finalize_teardown`, so nothing survives even if the first pass was partial.
+`release_all_for_pid` contract. Teardown also releases the pid's pending IPC replies
+(`release_pending_replies_for_pid`, `teardown.rs:63`): the kernel-mediated reply table is keyed by server
+pid and caller inbox, so leaving a dead pid's entries in place would either strand a peer blocked in
+`mk_ipc_call` or, worse, shift a server's FIFO of owed replies onto the wrong later callers. Clearing them
+on exit is what keeps a capsule crash from desyncing another capsule's reply stream. The reaper repeats
+every one of these releases idempotently in `finalize_teardown`, so nothing survives even if the first
+pass was partial.
 
 **Teardown is idempotent and self-fencing.** `teardown` returns immediately if the process is already
-`Zombie` or `Terminated` (`teardown.rs:26`), so a double exit, an `MkExit` racing a kill signal racing a
+`Zombie` or `Terminated` (`teardown.rs:52`), so a double exit, an `MkExit` racing a kill signal racing a
 fault, releases resources exactly once. It marks the process `Zombie`, removes it from the run queue, and
 clears it as current before enqueueing it for the reaper, so a dead pid cannot be selected again. The
 kernel stack it is still executing on cannot be freed inline, so that release is deferred rather than

@@ -3,9 +3,11 @@
 The installer is the keystone that turns a request into a running process. It takes either a capsule name
 or a full artifact set, marshals the four blobs a capsule image needs, and hands them to the kernel's
 verified-load syscall, which runs the entire trust chain before anything spawns. It is the capsule that
-loads every other capsule, and it is deliberately the least privileged actor in that transaction: it holds
+loads every other capsule, and it carries only the authority that job needs: it holds
 no keys, verifies nothing itself, and defers every signature, manifest, and attestation check to the
-kernel. Its whole job is to move bytes into `mk_capsule_load` and relay the kernel's verdict.
+kernel. Its mask adds `SpawnBroker`, so a capsule it loads on a requester's behalf is attributed to the
+requester's pid rather than the installer's, and `FileSystem` for the store path; the verification itself
+stays entirely in the kernel. Its job is to move bytes into `mk_capsule_load` and relay the kernel's verdict.
 
 Its source is organized into two top-level modules, and this documentation mirrors that structure one page
 per pillar so a page can be read beside the folder it describes.
@@ -23,43 +25,43 @@ mirror the `Capsule.mk` fields exactly.
 | Namespace | `systems.nonos.installer` | `Capsule.mk:14` |
 | Service endpoint | `service:4112:installer` | `Capsule.mk:15`, `spawn.rs:29` |
 | Reply endpoint | `reply:4113:endpoint.4294967313` | `Capsule.mk:16`, `spawn.rs:30`, `spawn.rs:31` |
-| Capability mask | `0x19` | `Capsule.mk:18`, `spawn.rs:33` |
+| Capability mask | `0x800059` | `Capsule.mk:20` |
 | Binary name | `installer` | `Capsule.mk:11` |
 | Kernel mirror | `src/userspace/capsule_installer` | `Capsule.mk:19` |
 
-The reply inbox name `endpoint.4294967313` is the decimal form of `0x1_0000_0011`, the constant
-`KERNEL_REPLY_ENDPOINT` the server sends every reply to (`src/protocol/types.rs:22`,
-`src/server/runner.rs:40`). Requests arrive on inbox `0`, the service port (`src/server/runner.rs:31`).
+The reply inbox name `endpoint.4294967322` is the decimal form of `0x1_0000_001A`, the constant
+`KERNEL_REPLY_ENDPOINT` the server sends every reply to (`src/protocol/types.rs:30`). The value moved
+from `0x1_0000_0011` after that collided with the NVMe driver's reply inbox; it must stay unique across
+every capsule (`userland/capsule_installer/src/protocol/types.rs:26`). Requests arrive on inbox `0`, the
+service port.
 
-The mask `0x19` decomposes into three bits, checked against `src/capabilities/types.rs`:
+The mask `0x800059` decomposes into five bits, checked against `src/capabilities/types/defs.rs`:
 
 | Bit | Value | Grants |
 |-----|-------|--------|
-| CoreExec | `0x01` | run as a process |
-| IPC | `0x08` | send and receive on its endpoints |
-| Memory | `0x10` | map its own heap and stack |
+| CoreExec | `0x000001` | run as a process |
+| IPC | `0x000008` | send and receive on its endpoints (`mk_ipc_*`) |
+| Memory | `0x000010` | map its own heap and stack |
+| FileSystem | `0x000040` | the filesystem-capability gate |
+| SpawnBroker | `0x800000` | attribute a loaded capsule to the requester's pid, not its own |
 
 ```
-  0x01  CoreExec   bit()  1   types.rs:56
-  0x08  IPC        bit()  8   types.rs:59
-  0x10  Memory     bit() 16   types.rs:60
-  ----
-  0x19  = 1 + 8 + 16
+  0x800059 = 0x000001 + 0x000008 + 0x000010 + 0x000040 + 0x800000
 ```
 
-The kernel spawn path requests exactly those three capabilities and no others (`spawn.rs:33`,
-`spawn.rs:48`), the same minimal set as the [vfs pool](../vfs/README.md). There is no `Crypto` bit (32),
-so the installer verifies nothing itself; no `FileSystem` bit (64), so it reads the store over IPC to the
-vfs rather than touching a storage surface; and no `Network`, `Driver`, `Mmio`, `Irq`, `Dma`, or `Pio`, so
-a bug in it cannot reach hardware or the wire. The authority that matters, the power to spawn a verified
-capsule, is not a bit in this mask at all: it is the `mk_capsule_load` syscall, and the kernel gates that
-on the trust chain, not on the installer's caps. That is the whole basis of the
-[verified-load](verified-load.md) argument.
-
-The installer holds no filesystem, network, driver, or crypto capability of its own. Every store read,
-name lookup, or payment settlement it performs is a request to another capsule that does hold that right,
-checked at that capsule's boundary. Compromising the installer yields the installer's mask and nothing
-more.
+`SpawnBroker` is the bit that lets the installer load a capsule on a requester's
+behalf and attribute the child process to that requester's pid instead of the
+installer's own, so the requester can `mk_wait`/`mk_kill`/`mk_proc_input`/
+`mk_proc_output` the process it asked for
+(`userland/capsule_installer/Capsule.mk:17`). The installer still holds no
+`Crypto` bit, so it verifies nothing itself; the verification is entirely the
+kernel's, on the `mk_capsule_load` path, which the kernel gates on the trust
+chain rather than on the installer's caps. That separation is the whole basis of
+the [verified-load](verified-load.md) argument: the installer moves bytes and
+attributes the child, but the decision to run is the kernel's. It holds no
+`Network`, `Driver`, `Mmio`, `Irq`, `Dma`, or `Pio`, so a bug in it cannot reach
+hardware or the wire, and every payment settlement or name lookup it performs is
+an IPC request to a capsule that does hold that right, checked at that boundary.
 
 ## The two pillars
 
@@ -105,11 +107,11 @@ decode the header, dispatch one operation, reply to `KERNEL_REPLY_ENDPOINT` (`sr
   userland/capsule_installer/src/protocol/      the wire codec and the op/errno constants
   userland/capsule_installer/src/server/        the loop, dispatch, discovery, and the four handlers
   userland/capsule_installer/Capsule.mk         slug, handle, ports, capability mask, kernel mirror
-  src/capabilities/types.rs                     the capability bits behind the mask
+  src/capabilities/types/defs.rs                     the capability bits behind the mask
   src/userspace/capsule_installer/spawn.rs      the kernel-side embed and verified spawn
   src/userspace/init/spawn_plan/desktop_services.rs   the desktop-fleet spawn entry
 ```
 
 Everything here is drawn from `userland/capsule_installer/` (the capsule source and its `Capsule.mk`),
-`src/capabilities/types.rs` (the capability bits), and the kernel spawn mirror under
+`src/capabilities/types/defs.rs` (the capability bits), and the kernel spawn mirror under
 `src/userspace/capsule_installer/`. Every reference above is verified against those trees.

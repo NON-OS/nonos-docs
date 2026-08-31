@@ -13,7 +13,7 @@ The code is under `src/arch/x86_64/syscall/` and `src/syscall/`.
 On x86_64 the boundary is the `SYSCALL` instruction. `LSTAR` is programmed during core
 init to point at an assembly entry stub, which saves the user state, switches to the
 kernel `GS` and stack, translates the user register layout into the System V calling
-convention, and calls `syscall_handler` (`src/arch/x86_64/syscall/manager/entry.rs:22`):
+convention, and calls `syscall_handler` (`src/arch/x86_64/syscall/manager/entry.rs:23`):
 
 ```
   #[no_mangle]

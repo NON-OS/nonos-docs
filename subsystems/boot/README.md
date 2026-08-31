@@ -7,6 +7,7 @@ capsule fleet that is the actual system.
 
 | Page | What it covers |
 |------|----------------|
+| [bootloader.md](bootloader.md) | The x86_64 UEFI loader pipeline: firmware, kernel load from the ESP, the dual-signature, STARK self-attestation, and TPM anti-rollback trust points, and the jump. |
 | [handoff.md](handoff.md) | The `KernelHandoff` structure (memory, framebuffer, timing, firmware, arch), and the bootloader's hybrid-signature and TPM-rollback verification in front of it. |
 | [kernel-init.md](kernel-init.md) | `microkernel_init`: the ordered bring-up (RNG, IPC key, SMP, scheduler, clock, VM, framebuffer, process, loader, keys, APs) and why the order is fixed. |
 | [userspace-init.md](userspace-init.md) | Creating the init process, crossing into user space, spawning the capsule fleet in dependency order, and the resident supervisor. |
@@ -22,6 +23,8 @@ capsule fleet does the work, which is the whole design of the system in one boot
 ## Sources
 
 The handoff types are `src/boot/handoff/`, the firmware init is `src/boot/firmware.rs`, the kernel init
-sequence is `src/kernel_core/init/`, and the userspace supervisor is `src/userspace/init/`. The
-bootloader that verifies the kernel and produces the handoff is the separate `nonos-bootloader` crate.
-Every page is verified against those trees with `file:line` references.
+sequence is `src/kernel_core/init/entry/`, and the userspace supervisor is `src/userspace/init/`. The
+bootloader that verifies the kernel and produces the handoff is the separate `nonos-bootloader` crate;
+its entry is `nonos-bootloader/src/main.rs` and the aarch64 kernel enters directly through
+`src/arch/aarch64/boot/entry.rs` with no UEFI loader. Every page is verified against those trees with
+`file:line` references.

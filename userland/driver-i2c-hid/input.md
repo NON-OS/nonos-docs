@@ -13,23 +13,23 @@ receive timeout, not by a hardware interrupt. See the pacing note below.
 
 `input::poll` returns immediately unless the driver is armed to read: a descriptor must have been found,
 the derived input register must be non-zero, and the derived input length must be at least five bytes
-(`src/input/poll.rs:23`). Those three come from descriptor discovery (`src/hid/input_register.rs:17`,
+(`src/input/poll/poll.rs`). Those three come from descriptor discovery (`src/hid/input_register.rs:17`,
 `src/hid/input_len.rs:17`); until they are set the report path does nothing and none of the counters move.
 This is the first thing to check when a descriptor is found but no reports arrive; see
 [debugging.md](debugging.md).
 
 ## Reading the report
 
-When the guard passes, `poll` (`src/input/poll.rs:22`):
+When the guard passes, `poll` (`src/input/poll/poll.rs`):
 
-1. Caps the read at `input_len` and at the 64-byte local buffer (`src/input/poll.rs:27`).
-2. Builds the two-byte little-endian input-register address (`src/input/poll.rs:28`).
-3. Bumps `input_polls` (`src/input/poll.rs:29`).
+1. Caps the read at `input_len` and at the 64-byte local buffer (`src/input/poll/poll.rs`).
+2. Builds the two-byte little-endian input-register address (`src/input/poll/poll.rs`).
+3. Bumps `input_polls` (`src/input/poll/poll.rs`).
 4. Asks the I2C controller to write that register address and read back up to `len` bytes through
-   `write_read` (`src/input/poll.rs:30`). A `None` return, a controller error or a timeout, ends the pass
+   `write_read` (`src/input/poll/poll.rs`). A `None` return, a controller error or a timeout, ends the pass
    without bumping any further counter.
-5. Parses the returned bytes with `parse_report` (`src/input/poll.rs:31`). A rejected parse ends the pass.
-6. On a good parse it bumps `input_reports` and calls `publish` (`src/input/poll.rs:32`).
+5. Parses the returned bytes with `parse_report` (`src/input/poll/poll.rs`). A rejected parse ends the pass.
+6. On a good parse it bumps `input_reports` and calls `publish` (`src/input/poll/poll.rs`).
 
 So `input_polls` counts read attempts and `input_reports` counts successful parses; the gap between them
 is transfers that failed or bytes that did not parse.
@@ -96,7 +96,7 @@ one syscall the capsule uses that carries hardware-adjacent authority: the kerne
 
 From there the event is out of the capsule's hands. `mk_input_event_post` lands on the kernel's
 `post_input`, which pushes the event into the bounded MPSC input ring that the input router capsule drains,
-dropping rather than overflowing when the ring is full (`src/kernel_core/surface_registry/input_ring.rs:55`).
+dropping rather than overflowing when the ring is full (`src/kernel_core/surface_registry/input_ring/mod.rs`).
 The full event journey, from a driver post through the ring to the router and on to the focused surface, is
 documented in [the input path](../../subsystems/input/path.md).
 
@@ -123,7 +123,7 @@ device signals a report ready. The doorbell-paced read lives on a different bran
   userland/capsule_driver_i2c_hid/src/hid/input_len.rs       the input length that arms poll
   userland/libc/src/surface_registry/types.rs               the INPUT_KIND_* constants and InputEvent
   src/syscall/contract/cap_table/mk.rs                       the InputSource gate on MkInputEventPost
-  src/kernel_core/surface_registry/input_ring.rs             post_input and the bounded ring
+  src/kernel_core/surface_registry/input_ring/mod.rs             post_input and the bounded ring
 ```
 
 Every reference above is verified against those trees.

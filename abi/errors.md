@@ -38,10 +38,12 @@ numbers:
 |----------|-------|-------|------------------|
 | ERRNO_PERM | -1 | EPERM | Capability denied, or not the owner of a broker grant. |
 | ERRNO_NOENT | -2 | ENOENT | No such inbox, service, or object. |
+| ERRNO_CHILD | -10 | ECHILD | No such child to wait on (returned by `MkWait`). |
 | ERRNO_NOMEM | -12 | ENOMEM | A ring or table was full, or an allocation failed. |
 | ERRNO_ACCES | -13 | EACCES | Access refused by policy. |
 | ERRNO_FAULT | -14 | EFAULT | A user pointer argument was not readable or writable. |
 | ERRNO_BUSY | -16 | EBUSY | The resource is in use, for example a device already claimed. |
+| ERRNO_EXIST | -17 | EEXIST | The object already exists, for example a service name or port already taken. |
 | ERRNO_NODEV | -19 | ENODEV | No such device. |
 | ERRNO_INVAL | -22 | EINVAL | An argument was out of range or malformed. |
 | ERRNO_NOSYS | -38 | ENOSYS | Unknown syscall number, or a number with no handler. |
@@ -123,11 +125,12 @@ whatever now occupies the slot, which is what lets surface and grant handles car
 an epoch and still be safe to hand back to userspace.
 
 The one deliberate non-error is worth stating. The input ring drops events under
-pressure rather than returning `ENOMEM` to the poster
-(`src/syscall/microkernel/memory/mmap.rs` is the hard-limit path for the calls
-that do fail this way). A driver posting input cannot wedge the kernel by
-overrunning the ring; it loses events, and the sequence number the router reads
-tells it that a gap happened.
+pressure rather than returning `ENOMEM` to the poster (the input-event post path
+under `src/syscall/dispatch/router/input_ops/`). `MkMmap`
+(`src/syscall/microkernel/memory/mmap.rs`) is the opposite policy: it returns a
+hard `ENOMEM` when address-space allocation fails. A driver posting input cannot
+wedge the kernel by overrunning the ring; it loses events, and the sequence number
+the router reads tells it that a gap happened.
 
 ## Debugging by errno
 
@@ -142,9 +145,14 @@ that did not resolve, from `MkServiceLookup` when the service is not registered 
 (`src/syscall/microkernel/ipc/lookup.rs`, `src/syscall/microkernel/ipc/recv.rs`).
 `ETIMEDOUT` is a blocking IPC call that ran out its deadline, and a `timeout_ms`
 of zero on `MkIpcCall` selects the five-second default rather than blocking
-forever. `ENOSYS` is the one that is not a denial: the number had no handler, which
-in practice means `MkIrqWait`, so a driver stuck there is wired against a wait that
-never fires and should use the poll-and-ack loop instead.
+forever. `ENOSYS` is the one that is not a denial: the tag in `RAX` did not decode
+to a registered `SyscallNumber`, so `from_u64` rejected it at the boundary before
+any handler ran. In practice that means a caller built the four-character tag wrong,
+is running against a kernel whose registry predates the call, or is naming one of
+the handlers wired in the numeric router but absent from the ABI registry
+(`MADC`/`MDRQ`/`MDRC`; see the [syscall page](syscalls.md)). Note that `MkIrqWait`
+is no longer in this category: it has a real handler
+(`src/syscall/microkernel/irq/wait.rs`) and blocks as documented.
 
 ## Source map
 

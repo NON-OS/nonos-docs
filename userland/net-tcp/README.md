@@ -35,7 +35,7 @@ The reply endpoint has two parts the manifest and the spawn record agree on: the
 reply back to the sender by pid with `mk_ipc_reply` rather than to a fixed inbox (`src/server/respond.rs:38`),
 so the reply endpoint is the registry-side name for its return path, not an address the capsule hardcodes.
 
-The mask `0x0003d` decomposes bit by bit against `src/capabilities/types.rs`:
+The mask `0x0003d` decomposes bit by bit against `src/capabilities/types/defs.rs`:
 
 ```
   0x00001  CoreExec   bit()   1   types.rs:56
@@ -123,7 +123,7 @@ and no name resolution.
   userland/capsule_net_tcp/Cargo.toml         panic = "abort" and the binary name
   src/userspace/capsule_net_tcp/              the kernel-side embed and verified spawn
   src/userspace/init/spawn_plan/network/spawn_tcp.rs  the NET-TCP spawn entry and boot marker
-  src/capabilities/types.rs                   the capability bit values behind the mask
+  src/capabilities/types/defs.rs                   the capability bit values behind the mask
 ```
 
 Every reference above is verified against those trees.

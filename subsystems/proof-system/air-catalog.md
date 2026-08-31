@@ -3,7 +3,7 @@
 The [STARK](stark.md) proves that a trace satisfies an `Air`. The catalog is the set of `Air`
 implementations the kernel carries, from small arithmetic gadgets to the composite AIR that is a
 verifier in itself. This page documents them and how they compose toward recursion. The code is under
-`src/crypto/stark/air/`.
+`nonos-stark/src/air/`.
 
 ## The gadgets
 
@@ -16,13 +16,20 @@ the prover must handle:
   power_chain      f[i+1] = f[i]^7 + c                            degree 7   (exercises the high-degree path)
   poseidon         one row per Poseidon round; proves a preimage  degree 7
   merkle_membership a Poseidon Merkle path from a leaf to a root   degree 7
-  multi_membership  several Merkle openings under one root         degree 7   (a FRI-query verifier)
-  fri_fold          a FRI fold step is correct                     degree 1
-  trace_fold        a FRI fold with the challenge witnessed in the trace   degree 1
-  permutation       multiset equality via a grand product          degree 2
-  copy_constraint   a Plonk-style wiring permutation forces equalities    degree 2
+  multi_membership  several Merkle openings under one root         degree 8   (a FRI-query verifier)
+  fri_fold          a FRI fold step is correct                     degree 4
+  trace_fold        a FRI fold with the challenge witnessed in the trace   degree 4
+  permutation       multiset equality via a grand product          degree 3
+  copy_constraint   a Plonk-style wiring permutation forces equalities    degree 3
   fiat_shamir       a Poseidon transcript challenge was squeezed correctly   degree 7
+  range_check       a value lies in a bounded range                degree 2
+  lookup            a value is one of a committed table's entries   degree 3
 ```
+
+The degrees are read from each gadget's `constraint_degree` (for example `fri_fold.rs:95`,
+`multi_membership.rs:284`, `copy_constraint.rs:108`, `range_check.rs:59`, `lookup.rs:129`). The catalog
+also carries `accumulator` and `poseidon_preimage`, plus quadratic-extension variants of several gadgets
+(the `*_ext` files) that the attestation AIRs use.
 
 The small ones (fibonacci, squaring, power_chain) are the arithmetic backbone and exist to exercise the
 prover at each constraint degree. The consequential ones are the middle group: `poseidon` proves
@@ -118,13 +125,20 @@ most worth isolating when a recursive proof breaks.
 ## Source map
 
 ```
-  src/crypto/stark/air/fibonacci.rs, squaring.rs, power_chain.rs   the arithmetic gadgets
-  src/crypto/stark/air/poseidon.rs, merkle_membership.rs, multi_membership.rs   hashing and membership
-  src/crypto/stark/air/fri_fold.rs, trace_fold.rs                  the FRI-fold gadgets
-  src/crypto/stark/air/permutation.rs, copy_constraint.rs          multiset and wiring constraints
-  src/crypto/stark/air/fiat_shamir.rs                              the in-circuit transcript
-  src/crypto/stark/air/fused.rs, wired.rs                          fusion and the mega-AIR backbone
+  nonos-stark/src/air/fibonacci.rs, squaring.rs, power_chain.rs   the arithmetic gadgets
+  nonos-stark/src/air/poseidon.rs, merkle_membership.rs, multi_membership.rs   hashing and membership
+  nonos-stark/src/air/fri_fold.rs, trace_fold.rs                  the FRI-fold gadgets
+  nonos-stark/src/air/permutation.rs, copy_constraint.rs          multiset and wiring constraints
+  nonos-stark/src/air/fiat_shamir.rs                              the in-circuit transcript
+  nonos-stark/src/air/fused.rs, wired.rs, fusion.rs               fusion, the mega-AIR backbone, and the region-stacking helper
+  nonos-stark/src/air/range_check.rs, lookup.rs, accumulator.rs, poseidon_preimage.rs   further gadgets
+  nonos-stark/src/attest_params.rs                                the attestation soundness constants
 ```
+
+`fused` and `wired` do not carry a fixed constraint degree; each computes its degree dynamically from
+the gadgets it stacks (`fused.rs:107`, `wired.rs:183`). `fusion.rs` is the shared region-stacking helper
+both engines use, and `*_ext` variants (`fused_ext.rs`, `wired_ext.rs`, `wired_multi_ext.rs`) run the
+same construction over the quadratic extension.
 
 Every reference above is verified against those trees. The prover and verifier that operate on these AIRs,
 and the shape-then-algebra check a bad witness fails, are on the [STARK](stark.md) page; the field and the

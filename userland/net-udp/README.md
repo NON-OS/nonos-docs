@@ -31,7 +31,7 @@ The service port `4420` and the reply port `4421` are the numbers the kernel bin
 capsule (`spawn.rs:36`, `spawn.rs:38`); the reply inbox name `endpoint.net.udp.reply` is the string the
 manifest carries as the reply endpoint (`Capsule.mk:13`, `spawn.rs:37`).
 
-The mask `0x0001d` decomposes bit by bit against `src/capabilities/types.rs`:
+The mask `0x0001d` decomposes bit by bit against `src/capabilities/types/defs.rs`:
 
 ```
   0x00001  CoreExec   bit()    1   types.rs:55
@@ -112,7 +112,7 @@ built on, not the policy.
   userland/capsule_net_udp/Capsule.mk         slug, handle, ports, capability mask, kernel mirror
   src/userspace/capsule_net_udp/              the kernel-side embed and verified spawn
   src/userspace/init/spawn_plan/network/spawn_udp.rs   the NET-UDP spawn entry
-  src/capabilities/types.rs                   the capability bit values behind the mask
+  src/capabilities/types/defs.rs                   the capability bit values behind the mask
 ```
 
 Every reference above is verified against those trees.

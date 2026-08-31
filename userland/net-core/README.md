@@ -30,16 +30,17 @@ Everything the kernel and the service registry need to name and reach the capsul
 
 The `net.core` handle at port 4480 is the identity the kernel spawns and the registry knows the capsule by
 (`src/userspace/capsule_net_core/spawn.rs:31`). It is not the service applications call. Once the capsule is
-up it registers four separate service names of its own, each at its own port (`src/register.rs:29`):
+up it registers five separate service names of its own, each at its own port (`src/register.rs:41`):
 
 | Service | Port | Source |
 |---|---|---|
-| `net.tcp` | 4476 | `src/register.rs:19`, `src/register.rs:24` |
-| `net.udp` | 4472 | `src/register.rs:20`, `src/register.rs:25` |
-| `net.dhcp.client` | 4474 | `src/register.rs:21`, `src/register.rs:26` |
-| `net.dns` | 4478 | `src/register.rs:22`, `src/register.rs:27` |
+| `net.tcp` | 4476 | `src/register.rs:19`, `src/register.rs:25` |
+| `net.udp` | 4472 | `src/register.rs:20`, `src/register.rs:26` |
+| `net.dhcp.client` | 4474 | `src/register.rs:21`, `src/register.rs:27` |
+| `net.dns` | 4478 | `src/register.rs:22`, `src/register.rs:28` |
+| `net.ip` | 4479 | `src/register.rs:23`, `src/register.rs:29` |
 
-The mask `0x0043d` decomposes bit by bit against `src/capabilities/types.rs`:
+The mask `0x0043d` decomposes bit by bit against `src/capabilities/types/defs.rs`:
 
 ```
   0x00001  CoreExec         bit()       1   types.rs:56
@@ -57,7 +58,7 @@ RegisterService` (`src/userspace/capsule_net_core/spawn.rs:50`), which is `0x43c
 `Capsule.mk` is `0x43d`, the same set plus `CoreExec` (bit 1), the run-as-a-process bit every capsule holds
 to execute at all. The capsule holds `Network` (its reason to exist), `Crypto` (it draws a random seed for
 smoltcp at build time, `src/iface/build.rs:27`), `RegisterService` (it registers `net.tcp`, `net.udp`,
-`net.dhcp.client`, and `net.dns`, `src/register.rs:29`), and the `IPC` and `Memory` bits every capsule
+`net.dhcp.client`, `net.dns`, and `net.ip`, `src/register.rs:41`), and the `IPC` and `Memory` bits every capsule
 needs. It holds no driver-broker authority: no `DeviceEnum`, `Driver`, `Mmio`, `Irq`, `Dma`, or `Pio`. It
 never touches the NIC directly; it reaches a driver capsule that holds those bits, over IPC. Compromising
 `net_core` yields a hostile TCP/IP stack, which is why it is isolated from both the applications above it
@@ -80,7 +81,7 @@ sockets and lease every request works against.
 
 | Page | Mirrors | What it covers |
 |------|---------|----------------|
-| [protocol.md](protocol.md) | `src/protocol/`, `src/register.rs` | The four wire protocols (`NNET`, `NTCP`, `NUDP`, `NDNS`, `NDHC`), the shared 20-byte header, the full op list per service, the errno sets, and the service names and ports the capsule registers. |
+| [protocol.md](protocol.md) | `src/protocol/`, `src/register.rs` | The five wire protocols (`NTCP`, `NUDP`, `NDNS`, `NDHC`, `NIP4`) over the shared `NNET` 20-byte header, the full op list per service, the errno sets, and the service names and ports the capsule registers. |
 | [server.md](server.md) | `src/server/` | The single-threaded request loop that also pumps the stack, the header parse and magic dispatch, the reply encoder, and every handler: TCP connect/send/recv/close/state, UDP bind/send/recv/unbind, DNS resolve, DHCP lease status, and health. |
 | [device.md](device.md) | `src/device/`, `src/setup.rs` | The NIC discovery and link bring-up, the `NicDevice` smoltcp `phy::Device` bridge, the RX and TX frame path over IPC, and the request-id sequence. |
 | [iface.md](iface.md) | `src/iface/`, `src/state.rs`, `src/handles.rs`, `src/udp_ports.rs` | Building the smoltcp `Interface`, the poll loop, the DHCPv4 client and DNS socket install, the shared `NetState`, and the per-client socket tables. |
@@ -122,7 +123,7 @@ a live boot (`Cargo.toml:15`).
   userland/capsule_net_core/Capsule.mk         slug, handle, ports, capability mask, kernel mirror
   src/userspace/capsule_net_core/              the kernel-side embed and verified spawn
   src/userspace/init/spawn_plan/network/       the NET-CORE spawn entry
-  src/capabilities/types.rs                    the capability bit values behind the mask
+  src/capabilities/types/defs.rs                    the capability bit values behind the mask
 ```
 
 Every reference above is verified against those trees.

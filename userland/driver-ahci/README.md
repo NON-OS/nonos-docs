@@ -35,18 +35,18 @@ sends every response to. That id is `KERNEL_REPLY_ENDPOINT = 0x1_0000_000f` in t
 
 ### The capability mask
 
-The mask `0xf8019` decomposes bit by bit against `src/capabilities/types.rs`, where each capability's
+The mask `0xf8019` decomposes bit by bit against `src/capabilities/types/bit.rs` (the enum is in `src/capabilities/types/defs.rs`), where each capability's
 numeric value is the return of its `bit()` method:
 
 ```
-  0x00001  CoreExec     bit()      1     types.rs:56
-  0x00008  IPC          bit()      8     types.rs:59
-  0x00010  Memory       bit()     16     types.rs:60
-  0x08000  DeviceEnum   bit()  32768     types.rs:71
-  0x10000  Driver       bit()  65536     types.rs:72
-  0x20000  Mmio         bit() 131072     types.rs:73
-  0x40000  Irq          bit() 262144     types.rs:74
-  0x80000  Dma          bit() 524288     types.rs:75
+  0x00001  CoreExec     bit()      1     types/bit.rs:23
+  0x00008  IPC          bit()      8     types/bit.rs:26
+  0x00010  Memory       bit()     16     types/bit.rs:27
+  0x08000  DeviceEnum   bit()  32768     types/bit.rs:38
+  0x10000  Driver       bit()  65536     types/bit.rs:39
+  0x20000  Mmio         bit() 131072     types/bit.rs:40
+  0x40000  Irq          bit() 262144     types/bit.rs:41
+  0x80000  Dma          bit() 524288     types/bit.rs:42
   -------
   0xf8019  = 1 + 8 + 16 + 32768 + 65536 + 131072 + 262144 + 524288
 ```
@@ -54,9 +54,9 @@ numeric value is the return of its `bit()` method:
 Those are exactly the capabilities a bus-mastering MMIO device driver needs and nothing more.
 `DeviceEnum` is enumerate-only, `Driver` allows claim and release of one device, `Mmio` maps a device's
 register window, `Irq` binds its interrupt, and `Dma` allocates device-visible buffers; the comment on
-the capability enum spells out that split (`src/capabilities/types.rs:35`). There is no `Pio` bit
-(0x100000, `types.rs:76`), no `FileSystem` bit (64, `types.rs:62`), no `Network` bit (4, `types.rs:58`),
-and no `Admin` (512, `types.rs:65`) or `Debug` (256, `types.rs:64`). The driver cannot touch an I/O port,
+the capability enum spells out that split (`src/capabilities/types/defs.rs`). There is no `Pio` bit
+(0x100000, `types/bit.rs:43`), no `FileSystem` bit (64, `types/bit.rs:29`), no `Network` bit (4, `types/bit.rs:25`),
+and no `Admin` (512, `types/bit.rs:32`) or `Debug` (256, `types/bit.rs:31`). The driver cannot touch an I/O port,
 read a file, open a socket, or reach raw kernel memory.
 
 The `Dma` bit is the one that separates this driver from a non-bus-mastering device driver such as `hda`
@@ -150,7 +150,7 @@ The full request and reply layouts, the errno set, and the range and size checks
   src/constants/                     HBA/port register offsets, ATA commands, signatures, port kinds
   src/error/                         AhciError and the setup exit-code mapping
   Capsule.mk                         slug, handle, ports, capability mask
-  src/capabilities/types.rs          the capability bits the mask decomposes into
+  src/capabilities/types/bit.rs      the capability bit values the mask decomposes into
   src/hardware/ahci_capsule/         the kernel-side embed, verified spawn, and client
   src/userspace/init/spawn_plan/drivers_storage.rs   the storage-fleet spawn entry
   docs/subsystems/hardware-broker/   the claim, mmio, dma, and irq grant contracts

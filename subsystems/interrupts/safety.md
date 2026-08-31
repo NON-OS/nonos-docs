@@ -12,12 +12,16 @@ creation it reads the current interrupt-enable flag, disables interrupts if they
 and remembers what it found; on drop it re-enables them only if they had been enabled:
 
 ```
-  InterruptGuard::new():
+  disable_interrupts_guard() -> InterruptGuard:     // guard.rs:46, the public entry
       was_enabled = interrupts_enabled()      // read IF from RFLAGS
       if was_enabled: cli
   Drop:
       if was_enabled: sti
 ```
+
+Callers construct one through `disable_interrupts_guard()` (`guard.rs:46`), not
+`InterruptGuard::new()` (`guard.rs:27`), which is private; the guard itself does the read and
+`cli` on construction and the conditional `sti` on drop.
 
 Restoring the prior state rather than unconditionally enabling is what makes the guard safe to
 nest: a guard taken inside another guard's section finds interrupts already disabled, records
@@ -28,7 +32,7 @@ restores state even on an unwinding path because it lives in `Drop`.
 ## Interrupt context
 
 Separately, each handler records that its CPU is in interrupt context. `set_interrupt_context`
-(`src/interrupts/safety/context.rs:74`) returns a guard that bumps a per-CPU nesting depth and
+(`src/interrupts/safety/context.rs:79`) returns a guard that bumps a per-CPU nesting depth and
 sets a per-CPU in-interrupt flag; the guard's `Drop` decrements the depth and clears the flag
 only when the outermost handler exits:
 
@@ -65,7 +69,7 @@ critical section cannot leak interrupts-disabled state to the code that follows 
 
 **The depth counter, not a boolean, tracks nesting.** `set_interrupt_context` bumps a per-CPU
 `INTERRUPT_DEPTH` and sets the `IN_INTERRUPT` flag; the guard's `Drop` clears the flag only when the
-depth returns to zero (`context.rs:63`). A higher-priority interrupt taken inside a handler increments
+depth returns to zero (`context.rs:69`). A higher-priority interrupt taken inside a handler increments
 the depth and the flag stays set until the last one unwinds, so `in_interrupt_context()` stays honest
 under nesting. That flag is the thing that lets code elsewhere refuse to sleep on a path that must not,
 so a false negative there would be a real bug, which is why it is a counter and not a bare bool.

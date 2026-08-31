@@ -288,10 +288,14 @@ why that matters. The compositor is the only desktop service that carries graphi
 authority beyond surface create; its mask is `0x7919`, which adds `GraphicsSurfaceMap`
 and `GraphicsPresent` on top of the display-query and surface-create bits, because it is
 the one capsule that maps shared surfaces and presents pixels to the display backend
-(`src/capabilities/types.rs:54`). The WM and the input router carry only `0x19`, CoreExec
-plus IPC plus Memory, because they move metadata and route events, not pixels; neither can
-present to the display even if it wanted to. The desktop shell sits at `0x1819`, the same
-app-class mask its clients hold. So the trust is split: the compositor is trusted with the
+(`src/capabilities/types/defs.rs:18`). The WM carries only `0x19`, CoreExec plus IPC plus
+Memory, because it moves window metadata and focus, not pixels. The input router carries
+`0x200019`: the same three bits plus `InputSource`, which is now the privileged authority
+for draining the raw-input ring (the gate excludes `Irq` so a driver cannot steal the
+keystroke stream, `src/syscall/contract/cap_table/mk.rs:106`). Neither the WM nor the router
+can present to the display. The desktop shell sits at `0x100191D`, which adds `Network`,
+`SpawnWindow`, and `Debug` to the app-class bits: `SpawnWindow` is its authority to ask the
+kernel to open another window instance of an app capsule. So the trust is split: the compositor is trusted with the
 framebuffer, the WM is trusted with window geometry and focus, the router is trusted with
 input routing, and no single one of them holds all three. A fault in the WM cannot corrupt
 the framebuffer, and a fault in the compositor cannot silently re-route input.
@@ -328,7 +332,7 @@ draws but does not receive input is usually a focus or subscription mismatch: th
 delivers by the WM's focus answer, so if the WM reports a different window focused than the
 one on screen, keys go to the wrong place. And a desktop that boots but shows nothing is a
 spawn-order problem, not a render problem; the desktop fleet spawns GUI core first, then
-WM, wallpaper, shell, and services (`src/userspace/init/spawn_plan/desktop_fleet.rs:17`),
+WM, wallpaper, shell, and services (`src/userspace/init/spawn_plan/desktop_fleet/mod.rs`),
 so a blank screen with the compositor up but the WM down is a different failure than one
 where the compositor never spawned. The `capsule spawned` boot marker for each service is
 the ground truth for which of them actually started.

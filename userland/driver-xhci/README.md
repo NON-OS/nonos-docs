@@ -87,17 +87,17 @@ Everything the kernel and the service registry need to name and reach the driver
 The reply endpoint id `4294967307` is `0x1_0000_000B`, the same constant the capsule hardcodes as its
 fallback reply target for kernel-internal (pid 0) callers (`src/protocol/endpoint.rs:16`).
 
-The mask `0xF8019` decomposes bit by bit against `src/capabilities/types.rs`:
+The mask `0xF8019` decomposes bit by bit against `src/capabilities/types/bit.rs` (the enum is in `src/capabilities/types/defs.rs`):
 
 ```
-  0x00001  CoreExec     1        types.rs:56
-  0x00008  IPC          8        types.rs:59
-  0x00010  Memory       16       types.rs:60
-  0x08000  DeviceEnum   32768    types.rs:71
-  0x10000  Driver       65536    types.rs:72
-  0x20000  Mmio         131072   types.rs:73
-  0x40000  Irq          262144   types.rs:74
-  0x80000  Dma          524288   types.rs:75
+  0x00001  CoreExec     1        types/bit.rs:23
+  0x00008  IPC          8        types/bit.rs:26
+  0x00010  Memory       16       types/bit.rs:27
+  0x08000  DeviceEnum   32768    types/bit.rs:38
+  0x10000  Driver       65536    types/bit.rs:39
+  0x20000  Mmio         131072   types/bit.rs:40
+  0x40000  Irq          262144   types/bit.rs:41
+  0x80000  Dma          524288   types/bit.rs:42
   -------
   0xF8019  = 1 + 8 + 16 + 32768 + 65536 + 131072 + 262144 + 524288
 ```
@@ -151,7 +151,7 @@ error each missing marker names.
   src/error/                      XhciError and its errno mapping
   Capsule.mk                      slug, handle, ports, capability mask, kernel mirror
   src/hardware/xhci_capsule       the kernel-side embed and verified spawn
-  src/capabilities/types.rs       the capability bit values the mask decomposes into
+  src/capabilities/types/bit.rs   the capability bit values the mask decomposes into
   docs/subsystems/hardware-broker/   the claim/mmio/dma/irq grant paths this capsule calls
 ```
 

@@ -8,7 +8,7 @@ source is organized into code pillars, and this documentation mirrors that struc
 so a page can be read beside the folder it describes.
 
 The kernel spawns it under service handle `desktop_shell` on service port 4410 with a reply inbox on
-port 4411, and its capability mask is `0x1819` (`userland/capsule_desktop_shell/Capsule.mk:16`).
+port 4411, and its capability mask is `0x100191D` (`userland/capsule_desktop_shell/Capsule.mk:20`).
 
 ## Identity
 
@@ -22,37 +22,49 @@ Everything the kernel and the service registry need to name and reach the shell 
 | Namespace | `systems.nonos.desktop_shell` | `Capsule.mk:11` |
 | Service endpoint | `service:4410:desktop_shell` | `Capsule.mk:12`, `spawn.rs:32` |
 | Reply endpoint | `reply:4411:endpoint.desktop_shell.reply` | `Capsule.mk:13`, `spawn.rs:33`, `spawn.rs:34` |
-| Capability mask | `0x1819` | `Capsule.mk:16` |
+| Capability mask | `0x100191D` | `Capsule.mk:20` |
 | Binary name | `desktop_shell` | `Capsule.mk:9` |
 | Kernel mirror | `src/userspace/capsule_desktop_shell` | `Capsule.mk:17` |
 
-The mask `0x1819` decomposes into five bits, checked against `src/capabilities/types.rs`:
+The committed mask `0x100191D` decomposes into eight bits, checked against `src/capabilities/types/defs.rs`:
 
-| Bit | Value | Grants | Source |
-|---|---|---|---|
-| CoreExec | `0x0001` | run as a process | `types.rs:56` |
-| IPC | `0x0008` | send and receive on its endpoints | `types.rs:59` |
-| Memory | `0x0010` | map its own heap and stack | `types.rs:60` |
-| GraphicsDisplayQuery | `0x0800` | ask the compositor for the display geometry | `types.rs:67` |
-| GraphicsSurfaceCreate | `0x1000` | create the overlay surface it draws into | `types.rs:68` |
+| Bit | Value | Grants |
+|---|---|---|
+| CoreExec | `0x0000001` | run as a process |
+| Network | `0x0000004` | call the network stack (the shell queries link status) |
+| IPC | `0x0000008` | send and receive on its endpoints |
+| Memory | `0x0000010` | map its own heap and stack |
+| Debug | `0x0000100` | emit `MkDebug` markers (the shell-frametime counter) |
+| GraphicsDisplayQuery | `0x0000800` | ask the compositor for the display geometry |
+| GraphicsSurfaceCreate | `0x0001000` | create the overlay surface it draws into |
+| SpawnWindow | `0x1000000` | ask the kernel to open another window instance of an app capsule |
 
 ```
-  0x0001  CoreExec               = 1
-  0x0008  IPC                    = 8
-  0x0010  Memory                 = 16
-  0x0800  GraphicsDisplayQuery   = 2048
-  0x1000  GraphicsSurfaceCreate  = 4096
-  ------
-  0x1819  = 1 + 8 + 16 + 2048 + 4096
+  0x0000001  CoreExec               = 1
+  0x0000004  Network                = 4
+  0x0000008  IPC                    = 8
+  0x0000010  Memory                 = 16
+  0x0000100  Debug                  = 256
+  0x0000800  GraphicsDisplayQuery   = 2048
+  0x0001000  GraphicsSurfaceCreate  = 4096
+  0x1000000  SpawnWindow            = 16777216
+  ---------
+  0x100191D
 ```
 
-The kernel spawn path requests exactly those five capabilities and no others
-(`src/userspace/capsule_desktop_shell/spawn.rs:50`). There is no `Network` bit (4, `types.rs:58`), no
-`FileSystem` bit (64, `types.rs:62`), and no hardware, driver, DMA, or `GraphicsPresent` bit (16384,
-`types.rs:70`). The shell can create a surface, ask the display for its size, and speak IPC; it cannot
-present a frame itself, read a device, open a socket, or touch the filesystem. It looks like the most
-privileged capsule on the desktop because it coordinates everyone, but its authority is exactly the app
-envelope, and compromising it yields that envelope and nothing more.
+`SpawnWindow` is the bit that sets the shell apart from an ordinary app: it is the
+authority to ask the kernel to open a second window instance of an embedded app
+capsule, and the kernel restricts that syscall to a `SpawnWindow`-trusted capsule
+(`src/syscall/contract/cap_table/mk.rs:111`). `Network` lets the shell read
+link status for the tray. `Debug` is present for the shell-frametime counter; the
+`Capsule.mk` comment computes the mask without it (`0x100181d`) and notes the bit
+must stay in sync with `requested_caps` in the spawn mirror
+(`userland/capsule_desktop_shell/Capsule.mk:17`,
+`src/userspace/capsule_desktop_shell/spawn.rs`). There is no `FileSystem` bit
+(64), no hardware, driver, DMA, or `GraphicsPresent` bit (16384): the shell drives
+the desktop through IPC to the compositor, wm, vfs, and installer, and cannot
+present a frame itself or touch a device register. It coordinates everyone, but
+its own authority is bounded, and compromising it yields that mask and nothing more.
 
 ## The code pillars
 
@@ -85,9 +97,9 @@ supplies its own frame protocol and its own paint routines; it is not built on t
 the [terminal](../terminal/README.md) is.
 
 1. The kernel spawns the capsule through the desktop-fleet plan, which logs under the tag `DESKTOP-SHELL`
-   and calls `spawn_desktop_shell_capsule` (`src/userspace/init/spawn_plan/desktop_fleet.rs:118`). That
+   and calls `spawn_desktop_shell_capsule` (`src/userspace/init/spawn_plan/desktop_fleet/mod.rs`). That
    path decodes the trust anchor, verifies the embedded ELF, id cert, manifest, and attestation, requests
-   the five-capability mask, registers `desktop_shell` on port 4410 with the reply inbox on 4411, and
+   the eight-bit capability mask, registers `desktop_shell` on port 4410 with the reply inbox on 4411, and
    marks the capsule alive (`src/userspace/capsule_desktop_shell/spawn.rs:38`, `spawn.rs:57`).
 2. `wait_for_setup` retries `setup::run` until it succeeds (`src/wait_for_setup.rs:19`). One pass resolves
    and health-checks the peers, applies the wallpaper policy, allocates the overlay, builds the `Context`,
@@ -104,6 +116,6 @@ the [terminal](../terminal/README.md) is.
 
 The whole capsule lives at `userland/capsule_desktop_shell/`. The pages above draw from `src/render/`,
 `src/server/`, `src/protocol/`, `src/state/`, `src/setup/`, and the outbound clients at the crate root,
-plus `Capsule.mk` for identity, `src/capabilities/types.rs` for the mask bits, and the kernel spawn
+plus `Capsule.mk` for identity, `src/capabilities/types/defs.rs` for the mask bits, and the kernel spawn
 mirror under `src/userspace/capsule_desktop_shell/`. Every reference above is verified against those
 trees.

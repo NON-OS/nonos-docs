@@ -181,9 +181,10 @@ work, it is the epoch. If a specific token dies but the process keeps working, i
 is the per-token set. If everything the capsule holds is dead from its first
 syscall, and this is the first boot after a reboot, it is the session nonce. The
 anchor lists never show up here at all: a revoked publisher or certificate is
-refused at [verified spawn](capsules-and-trust.md) as a `[RUNTIME-LOAD] FAILED
-reason=id_cert` (variant `Revoked` or `NonosIdRevoked`), before the capsule ever
-holds a token, so a running capsule losing authority is never the anchor list.
+refused at [verified spawn](capsules-and-trust.md) as a
+`SpawnError::NonosIdCertRejected(IdCertVerifyError::Revoked)` or `NonosIdRevoked`,
+before the capsule ever holds a token, so a running capsule losing authority is
+never the anchor list.
 
 ## Source map
 

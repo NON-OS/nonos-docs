@@ -14,33 +14,43 @@ set of bits a capsule is allowed to hold in the first place.
 
 ## The capability set
 
-A capability is a single bit. The set is closed and small: twenty-two variants
-of the `Capability` enum in `src/capabilities/types.rs:18`. Each variant maps to
-one bit through `Capability::bit()` (`types.rs:54`), and the bits are the plain
-powers of two, so a set of capabilities is a `u64` bitmask.
+A capability is a single bit. The set is closed and small: thirty-one variants
+of the `Capability` enum in `src/capabilities/types/defs.rs:18`. Each variant maps
+to one bit through `Capability::bit()` (`src/capabilities/types/bit.rs:20`), and the
+bits are the plain powers of two, so a set of capabilities is a `u64` bitmask.
 
 ```
-  CoreExec               1        DeviceEnum         32768
-  IO                     2        Driver             65536
-  Network                4        Mmio              131072
-  IPC                    8        Irq               262144
-  Memory                16        Dma               524288
-  Crypto                32        Pio              1048576
-  FileSystem            64        InputSource      2097152
-  Hardware             128
-  Debug                256        Admin                512
-  RegisterService     1024        GraphicsDisplayQuery   2048
-  GraphicsSurfaceCreate 4096      GraphicsSurfaceMap     8192
-  GraphicsPresent      16384
+  CoreExec               1        DeviceEnum          32768
+  IO                     2        Driver              65536
+  Network                4        Mmio               131072
+  IPC                    8        Irq                262144
+  Memory                16        Dma                524288
+  Crypto                32        Pio               1048576
+  FileSystem            64        InputSource       2097152
+  Hardware             128        TimeSet           4194304
+  Debug                256        SpawnBroker       8388608
+  Admin                512        SpawnWindow      16777216
+  RegisterService     1024        ProcessControl   33554432
+  GraphicsDisplayQuery   2048     StoreWrite       67108864
+  GraphicsSurfaceCreate  4096     EnrolDevRoot    134217728
+  GraphicsSurfaceMap     8192     Keyring         268435456
+  GraphicsPresent       16384     Entropy         536870912
+                                  AppInstall     1073741824
 ```
 
 The enum is the single source of the bit mapping. No other part of the kernel
 writes a raw literal for a capability; grant, revoke, and test all go through the
 bitmask algebra in `src/capabilities/bits.rs`, which is nothing more than `OR`,
 `AND` with a complement, and `AND` against a single bit. Keeping the whole
-authority surface to twenty-two bits is deliberate: it is small enough to audit
+authority surface to thirty-one bits is deliberate: it is small enough to audit
 in one reading, and every action a capsule performs that reaches beyond its own
-address space is one of these bits.
+address space is one of these bits. The tail of the set is the newer, narrower
+authorities: `TimeSet` to set the clock, `SpawnBroker` / `SpawnWindow` /
+`ProcessControl` for the process and window managers, `StoreWrite` for the
+installer, `EnrolDevRoot` to enrol a signing root (see
+[developer roots](developer-roots.md)), `Keyring` to reach the keyring capsule,
+`Entropy` to reseed the RNG, and `AppInstall` for the installer. Each is held only
+by the one capsule that needs it.
 
 Several bits form structured groups rather than standing alone.
 
@@ -53,14 +63,23 @@ DMA-coherent buffer, or a port-window grant. A capsule holding `Driver` alone ca
 own a device but touch none of it.
 
 `Admin` is a super-grant over that family. The token predicates that gate the
-broker treat `Admin` as satisfying the requirement (`token/types.rs:134`), so a
-capsule with `Admin` passes `can_driver`, `can_mmio`, `can_irq`, `can_dma`, and
-`can_pio` without holding those individual bits. `Admin` is itself a capability
+broker treat `Admin` as satisfying the requirement
+(`src/capabilities/token/types/authority_broker.rs:24`, `:31`, `:38`, `:45`, `:52`),
+so a capsule with `Admin` passes `can_driver`, `can_mmio`, `can_irq`, `can_dma`,
+and `can_pio` without holding those individual bits. `Admin` is itself a capability
 that a capsule holds only if its verified manifest was granted it, so this is a
-concentration of authority, not a bypass of the check. `InputSource`, the
-authority to post input events, is likewise implied by `Irq` or `Admin`, on the
-reasoning that a capsule already driving an input device's interrupt is by
-construction an input source.
+concentration of authority, not a bypass of the check.
+
+Input authority is deliberately split into a producer side and a consumer side, and
+the two predicates are not the same set. `can_input_source`
+(`authority_broker.rs:59`), the right to *post* an input event, is satisfied by
+`InputSource`, `Irq`, or `Admin`, on the reasoning that a capsule already driving an
+input device's interrupt is by construction an input source. `can_input_consumer`
+(`authority_broker.rs:71`), the right to *drain* the input ring, is satisfied by
+`InputSource` or `Admin` but deliberately not by `Irq`: every device driver holds
+`Irq`, and accepting `Irq` here would let any driver read every keystroke, which is
+exactly a keylogger. Only a capsule explicitly granted `InputSource`, the input
+router, may consume the ring (comment at `authority_broker.rs:66-68`).
 
 A driver capsule is the clearest example of a focused grant. The PS/2 input
 driver requests exactly the bits it needs (`src/hardware/ps2_kbd_capsule/spawn.rs:51`):
@@ -92,7 +111,7 @@ installed into the process control block and minted into a token.
 The token is the proof a capsule carries at runtime. It is not a bearer secret
 that can be copied between capsules or replayed across boots. It is a structure
 authenticated by a keyed MAC and bound to a boot and an address space
-(`src/capabilities/token/types.rs:23`):
+(`src/capabilities/token/types/defs.rs:23`):
 
 ```
   CapabilityToken
@@ -225,8 +244,9 @@ stands:
 
   Memory        MkMmap (allocate), MkMunmap (deallocate)
   IPC           MkSpawn, all MkIpc*, MkServiceLookup/Register,
-                MkCapGrant, MkCapRevoke, MkThreadSpawn, MkProcOutput,
-                MkInputEventDrain, MkInputEventWait
+                MkCapGrant, MkCapRevoke, MkThreadSpawn, MkProcOutput
+  InputSource   MkInputEventPost (can_input_source: InputSource|Irq|Admin, mk.rs:99)
+                MkInputEventDrain, MkInputEventWait (can_input_consumer: InputSource|Admin, mk.rs:106)
   CoreExec      MkGetPid, MkArgs  (via can_getpid)
   CoreExec+IPC+Memory  MkCapsuleLoad  (all three required)
 
@@ -242,15 +262,18 @@ stands:
   GraphicsSurfaceMap     MkSurfaceAttach
   GraphicsPresent        MkSurfacePresent
   GraphicsDisplayQuery   MkDisplayVsyncWait
-  InputSource            MkInputEventPost
 ```
 
 Two details of the table are worth stating because they are easy to assume
 wrong. Draining and waiting on the input ring (`MkInputEventDrain`,
-`MkInputEventWait`) require `IPC`, not `InputSource`; only posting an event
-(`MkInputEventPost`) requires `InputSource`. And a syscall the `Mk` table does
-not name at all falls through with `None` (`mk.rs:82`), which lets another
-capability family claim it or, failing that, denies it.
+`MkInputEventWait`) require `can_input_consumer` (`mk.rs:106-107`), which is
+`InputSource` or `Admin` but pointedly not `Irq`, while posting an event
+(`MkInputEventPost`, `mk.rs:99`) requires `can_input_source`, which does accept
+`Irq`. The split is the anti-keylogging boundary described above: any driver can
+generate input off its own interrupt, but only the router may read the ring. And a
+syscall the `Mk` table does not name at all falls through with `_ => return None`
+(`mk.rs:118`), which lets another capability family claim it or, failing that,
+denies it.
 
 The broker calls layer one more check on top of the capability. Holding `Irq`
 lets a capsule call `MkIrqPoll`, but the broker still returns `EPERM` if the
@@ -305,7 +328,7 @@ To decode which bit a syscall needs, read the `Mk` table
 (`src/syscall/contract/cap_table/mk.rs`) reproduced above: `MkMmioMap` needs
 `Mmio`, `MkIrqBind` needs `Irq`, `MkDeviceClaim` needs `Driver`, and so on. Then
 compare against the bits the capsule actually holds, which are the powers of two in
-`src/capabilities/types.rs` decoded by `bits_to_caps` (`src/capabilities/bits.rs:29`)
+`src/capabilities/types/bit.rs` decoded by `bits_to_caps` (`src/capabilities/bits.rs:29`)
 from the token's `permissions`. A `[CAP-DENY]` on `MkIrqBind` from a capsule whose
 grant did not include `Irq` (`262144`) is a manifest problem, not a runtime bug:
 the capsule was admitted without the bit it is now trying to use, and the fix is in
@@ -318,16 +341,18 @@ One more distinction, because it is the common confusion: a capsule that never
 starts at all is not a `[CAP-DENY]`. A denial is a running capsule losing one
 syscall. A capsule that fails to spawn because its requested caps exceed the
 manifest or certificate ceiling fails much earlier, at
-[verified spawn](capsules-and-trust.md), and shows up as
-`[RUNTIME-LOAD] FAILED name=<name> reason=manifest:caps_ceiling` or
-`reason=manifest:grant`, not as a runtime `EPERM`.
+[verified spawn](capsules-and-trust.md), as a
+`SpawnError::ManifestRejected(ManifestVerifyError::CapsExceedCeiling)` or
+`GrantOutsideManifest`, not as a runtime `EPERM`.
 
 ## Source map
 
 ```
-  src/capabilities/types.rs             the Capability enum and bit mapping
+  src/capabilities/types/defs.rs        the Capability enum (31 variants)
+  src/capabilities/types/bit.rs         Capability::bit(), the power-of-two mapping
   src/capabilities/bits.rs              caps_to_bits, bits_to_caps, the bitmask algebra
-  src/capabilities/token/types.rs       the CapabilityToken and predicates
+  src/capabilities/token/types/defs.rs  the CapabilityToken struct
+  src/capabilities/token/types/authority_broker.rs  can_driver/mmio/irq/dma/pio, can_input_source/consumer
   src/capabilities/token/material.rs    the 128-byte MAC material and mac64
   src/capabilities/token/verify.rs      verify_token
   src/capabilities/token/validate.rs    is_token_valid
@@ -342,6 +367,6 @@ manifest or certificate ceiling fails much earlier, at
 ```
 
 The spawn side that decides the bits a capsule may hold, and its own
-`[RUNTIME-LOAD]` reason strings, are on the
+`SpawnError` variants, are on the
 [verified spawn](capsules-and-trust.md) page; the signing key and MAC underneath
 the token are on the [signing and MAC](signing-and-mac.md) page.

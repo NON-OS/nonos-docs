@@ -18,7 +18,7 @@ one check that failed. Its source is a single file, so this documentation is a s
 | Reply endpoint | `reply:4501:endpoint.proof_io.reply` | `Capsule.mk:15` |
 | Capability mask | `0x19` | `Capsule.mk:17` |
 
-The mask decomposes into three bits, checked against `src/capabilities/types.rs`:
+The mask decomposes into three bits, checked against `src/capabilities/types/defs.rs`:
 
 | Bit | Value | Grants |
 |-----|-------|--------|
@@ -27,7 +27,7 @@ The mask decomposes into three bits, checked against `src/capabilities/types.rs`
 | Memory | `0x10` | map its own heap and stack |
 
 `0x01 | 0x08 | 0x10 = 0x19`. The bit values are `CoreExec => 1`, `IPC => 8`, and `Memory => 16` in
-`src/capabilities/types.rs:56,59,60`. The kernel spawn mirror requests exactly these three,
+`src/capabilities/types/defs.rs,59,60`. The kernel spawn mirror requests exactly these three,
 `Capability::CoreExec.bit() | Capability::IPC.bit() | Capability::Memory.bit()`, so the manifest ceiling
 and the requested set agree bit for bit (`src/userspace/capsule_proof_io/spawn.rs:49`).
 
@@ -86,6 +86,6 @@ It reports on two channels, both observable from the boot serial:
 ## Source map
 
 Everything here is drawn from `userland/capsule_proof_io/` (the capsule source, its `Capsule.mk`, and its
-`Cargo.toml`), `userland/libc/` (the `mk_*` syscall helpers), `src/capabilities/types.rs` (the capability
+`Cargo.toml`), `userland/libc/` (the `mk_*` syscall helpers), `src/capabilities/types/defs.rs` (the capability
 bits), and the kernel spawn mirror under `src/userspace/capsule_proof_io/`. Every reference above is
 verified against those trees.

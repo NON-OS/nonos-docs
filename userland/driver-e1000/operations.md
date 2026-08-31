@@ -136,7 +136,7 @@ capability to reach `driver.e1000_0` and speak this protocol; it never gets a ha
   userland/capsule_driver_e1000/src/constants/frame.rs     the 60..1514 Ethernet size window
   userland/capsule_driver_e1000/Cargo.toml                 panic = "abort"
   src/hardware/e1000_capsule/protocol/ops.rs               the kernel client's op set (1 through 5)
-  src/capabilities/types.rs                                the capability bits the mask decodes into
+  src/capabilities/types/bit.rs                              the capability bit values the mask decodes into
 ```
 
 Every reference above is verified against those trees.

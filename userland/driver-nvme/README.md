@@ -30,16 +30,16 @@ Everything the kernel and the service registry need to name and reach the driver
 The reply endpoint number `4294967313` is `0x1_0000_0011`, the kernel reply-inbox constant the capsule
 sends every reply to (`src/protocol/endpoint.rs:18`, `src/server/error.rs:26`).
 
-The mask `0xF8019` decomposes bit by bit against `src/capabilities/types.rs`:
+The mask `0xF8019` decomposes bit by bit against `src/capabilities/types/bit.rs` (the enum is in `src/capabilities/types/defs.rs`):
 
 ```
-  0x00008  IPC          bit()      8   types.rs:59
-  0x00010  Memory       bit()     16   types.rs:60
-  0x08000  DeviceEnum   bit()  32768   types.rs:71
-  0x10000  Driver       bit()  65536   types.rs:72
-  0x20000  Mmio         bit() 131072   types.rs:73
-  0x40000  Irq          bit() 262144   types.rs:74
-  0x80000  Dma          bit() 524288   types.rs:75
+  0x00008  IPC          bit()      8   types/bit.rs:26
+  0x00010  Memory       bit()     16   types/bit.rs:27
+  0x08000  DeviceEnum   bit()  32768   types/bit.rs:38
+  0x10000  Driver       bit()  65536   types/bit.rs:39
+  0x20000  Mmio         bit() 131072   types/bit.rs:40
+  0x40000  Irq          bit() 262144   types/bit.rs:41
+  0x80000  Dma          bit() 524288   types/bit.rs:42
   -------
   0xF8019  = 8 + 16 + 32768 + 65536 + 131072 + 262144 + 524288
 ```
@@ -49,7 +49,7 @@ The kernel spawn path requests exactly those seven capabilities and no others
 (`Capsule.mk:15`). Unlike an application capsule, this driver holds the hardware-broker authority bits:
 `DeviceEnum` (enumerate devices), `Driver` (claim and release a device), `Mmio` (map device registers),
 `Irq` (bind a device interrupt), and `Dma` (map DMA), the exact set the broker checks before it hands out
-any grant (`src/capabilities/types.rs:34`). It has no `Network` bit (4), no `FileSystem` bit (64), and no
+any grant (`src/capabilities/types/defs.rs`). It has no `Network` bit (4), no `FileSystem` bit (64), and no
 graphics or raw-physmem authority. `IPC` and `Memory` are the only bits it shares with an ordinary app.
 The security consequences of holding those bits are worked through on the
 [bring-up](bring-up.md) page; the [claim](../../subsystems/hardware-broker/claim.md) page documents how
@@ -115,7 +115,7 @@ built on, not the policy.
   userland/capsule_driver_nvme/src/error/         NvmeError and the exit-code mapping
   userland/capsule_driver_nvme/Capsule.mk         slug, handle, ports, capability mask, kernel mirror
   src/hardware/nvme_capsule/                       the kernel-side embed and verified spawn
-  src/capabilities/types.rs                        the capability bit values behind the mask
+  src/capabilities/types/bit.rs                    the capability bit values behind the mask
 ```
 
 Every reference above is verified against those trees.

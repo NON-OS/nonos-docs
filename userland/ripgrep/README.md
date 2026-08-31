@@ -46,7 +46,7 @@ is declared to be, not a service that is currently answering.
 The required mask and the ceiling are the same value, `0x19`, so the manifest ceiling grants nothing the
 capsule does not already request (`Capsule.mk:24`, `Capsule.mk:25`).
 
-The mask decomposes into three bits, checked against `src/capabilities/types.rs`:
+The mask decomposes into three bits, checked against `src/capabilities/types/defs.rs`:
 
 | Bit | Value | Grants | Source |
 |---|---|---|---|
@@ -92,7 +92,7 @@ identity and the build recipe describe.
 ## Source map
 
 Everything here is drawn from `userland/capsule_ripgrep/` (the capsule's `README.md` and `Capsule.mk`; note
-there is no `src/` or `Cargo.toml`), `src/capabilities/types.rs` (the capability bits), the kernel spawn
+there is no `src/` or `Cargo.toml`), `src/capabilities/types/defs.rs` (the capability bits), the kernel spawn
 mirror under `src/userspace/capsule_ripgrep/`, the feature wiring in `src/userspace/init/entry.rs` and
 `Cargo.toml`, and the upstream build recipe in the repository `Makefile`. Every reference above is verified
 against those trees.

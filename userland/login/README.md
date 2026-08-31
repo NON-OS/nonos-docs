@@ -38,7 +38,7 @@ its kernel-side spawn record.
 | Binary name | `login` | `Capsule.mk:5` |
 | Kernel mirror | `src/userspace/capsule_login` | `Capsule.mk:12` |
 
-The mask `0x19` decomposes bit by bit against `src/capabilities/types.rs`:
+The mask `0x19` decomposes bit by bit against `src/capabilities/types/defs.rs`:
 
 ```
   0x01  CoreExec   bit()  1    types.rs:56
@@ -53,7 +53,7 @@ that the `Capsule.mk` comment reads `IPC | Memory = 0x08 | 0x10 = 0x19`, which i
 `0x18`, and the extra bit is `CoreExec` (`0x01`), which every capsule carries to run at all. The value on
 the line, `0x19`, is the one that is enforced, and it decodes to CoreExec, IPC, and Memory. There is no
 `Crypto` bit (32), no `GraphicsSurfaceCreate` (4096) or `GraphicsPresent` (16384), no `Network` (4),
-`FileSystem` (64), or any hardware bit (`src/capabilities/types.rs:61`, `:62`, `:58`). Login speaks IPC,
+`FileSystem` (64), or any hardware bit (`src/capabilities/types/defs.rs`, `:62`, `:58`). Login speaks IPC,
 has a heap, and runs; it cannot sign, cannot own the screen, cannot touch a device, and cannot reach the
 network or a filesystem.
 
@@ -115,7 +115,7 @@ path in full, and the [protocol](protocol.md) page follows the loop.
   userland/capsule_login/src/render/        the locked/unlocked overlay painter (no text)
   userland/capsule_login/src/setup/         peer discovery, surface bring-up, submit at z=1
   userland/capsule_login/Capsule.mk         slug, endpoints, CAPSULE_REQUIRED_CAPS = 0x19
-  src/capabilities/types.rs                 the capability bit values behind the mask
+  src/capabilities/types/defs.rs                 the capability bit values behind the mask
   src/userspace/capsule_login/spawn.rs      the kernel-side embed and verified spawn
   src/userspace/init/spawn_plan/desktop_services.rs   the desktop-fleet spawn entry (LOGIN)
 ```

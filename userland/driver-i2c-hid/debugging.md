@@ -45,11 +45,11 @@ registered before this one; without it, `_start` exits 1 (`src/main.rs:38`) and 
 `OP_HEALTHCHECK` shows `found` set but `input_reports` flat. Two cases:
 
 - If `input_polls` is also flat, the poll guard is rejecting the setup: the derived input register is zero
-  or the input length is under five bytes (`src/input/poll.rs:23`). Those come from descriptor offsets 8..10
+  or the input length is under five bytes (`src/input/poll/poll.rs`). Those come from descriptor offsets 8..10
   and 10..12 (`src/hid/input_register.rs:17`, `src/hid/input_len.rs:17`).
 - If `input_polls` climbs while `input_reports` stays flat, the transfer is failing or the returned bytes
   are not parsing: `write_read` returned `None`, a controller error or a 250 ms timeout
-  (`src/input/poll.rs:30`, `src/i2c_client/transfer.rs:16`), or `parse_report` rejected the length prefix
+  (`src/input/poll/poll.rs`, `src/i2c_client/transfer.rs:16`), or `parse_report` rejected the length prefix
   (`src/input/parse_report.rs:24`).
 
 ### Reports arrive but the pointer misbehaves or coordinates are wrong
@@ -65,7 +65,7 @@ absolute path would touch and the note that it is on a different branch.
 If `post_failures` climbs, the kernel is refusing the post
 (`src/input/publish.rs:43`), which points at the `InputSource` capability check
 (`src/syscall/contract/cap_table/mk.rs:78`) or a full input ring
-(`src/kernel_core/surface_registry/input_ring.rs:59`). If `post_failures` stays flat and events still do
+(`src/kernel_core/surface_registry/input_ring/mod.rs`). If `post_failures` stays flat and events still do
 not appear, the input path past the ring is the suspect, not this driver; see
 [the input path](../../subsystems/input/path.md).
 
@@ -85,7 +85,7 @@ not appear, the input path past the ring is the suspect, not this driver; see
   userland/capsule_driver_i2c_hid/src/input/parse_report.rs     the length-prefix and relative decode
   userland/capsule_driver_i2c_hid/src/input/publish.rs          post_failures
   src/syscall/contract/cap_table/mk.rs                          the InputSource gate
-  src/kernel_core/surface_registry/input_ring.rs                the bounded ring drop
+  src/kernel_core/surface_registry/input_ring/mod.rs                the bounded ring drop
 ```
 
 Every reference above is verified against those trees.

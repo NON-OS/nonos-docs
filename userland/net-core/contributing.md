@@ -18,7 +18,7 @@ heap, waits for setup, registers its services, and enters the server loop, which
 |---|---|---|
 | `src/protocol/` | the `NNET`, `NTCP`, `NUDP`, `NDNS`, `NDHC` wire formats, ops, and errnos | you change a request or reply layout, or add an op or errno |
 | `src/register.rs` | the four `net.*` service names and their ports | you add or rename a served service |
-| `src/server/runner.rs` | the poll-then-serve loop and the magic dispatch | you add a protocol or change the loop |
+| `src/server/runner/mod.rs` | the poll-then-serve loop and the magic dispatch | you add a protocol or change the loop |
 | `src/server/handlers/` | one handler per op, grouped by protocol | you add or change a service op |
 | `src/server/parse_req.rs`, `src/server/respond.rs` | the header parse and the reply encoder | you change the header or the reply shape |
 | `src/device/` | the NIC driver link, the `phy::Device` bridge, and the RX/TX frame path | you change how frames reach the driver |
@@ -43,7 +43,7 @@ There are three edits, and the dispatch wiring is the load-bearing one. Take a n
    answers `E_BAD_OP`, so an unrouted op fails closed.
 
 A new protocol is the same shape one level up: a new magic in `src/protocol/`, a new `dispatch` module under
-`src/server/handlers/`, a new arm in the magic match (`src/server/runner.rs:52`), and, if applications call
+`src/server/handlers/`, a new arm in the magic match (`src/server/runner/mod.rs`), and, if applications call
 it, a new service name and port in `src/register.rs:29`.
 
 ## Build and sign

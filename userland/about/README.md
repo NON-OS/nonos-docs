@@ -22,7 +22,7 @@ documentation mirrors that structure so a page can be read beside the folder it 
 
 The mask `0x1819` decomposes bit by bit. The names and role text come from the app's own capability table
 (`src/about/data/caps.rs:23`), and each bit value is checked against the kernel's `Capability::bit`
-(`src/capabilities/types.rs:54`):
+(`src/capabilities/types/defs.rs`):
 
 ```
   0x0001  CoreExec                bit  1        types.rs:56
@@ -93,7 +93,7 @@ boot line means and what its absence points at.
   userland/capsule_about/src/about/theme.rs        colors and window geometry
   userland/capsule_about/build.rs                  stamps the git SHA into ABOUT_GIT_SHA
   userland/capsule_about/Capsule.mk                slug, handle, ports, capability mask, kernel mirror
-  src/capabilities/types.rs                        the capability bit values
+  src/capabilities/types/defs.rs                        the capability bit values
   src/userspace/capsule_about/spawn.rs             the kernel-side embed and verified spawn
   src/userspace/init/spawn_plan/apps.rs            the desktop-fleet spawn entry
   userland/libc/src/graphics/display_dimensions.rs the display-size syscall

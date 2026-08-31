@@ -51,7 +51,7 @@ four steps.
 2. **Set `CAPSULE_REQUIRED_CAPS` to what the code exercises, and no more.** The BGA source uses five
    capability bits: `CoreExec` (`0x1`), `DeviceEnum` (`0x8000`), `Driver` (`0x10000`), `Mmio` (`0x20000`),
    and, once it serves clients and owns a heap, `IPC` (`0x8`) and `Memory` (`0x10`), decomposed against
-   `src/capabilities/types.rs:56`. Do not add `Irq` (`0x40000`), `Dma` (`0x80000`), or `Pio` (`0x100000`):
+   `src/capabilities/types/bit.rs:23`. Do not add `Irq` (`0x40000`), `Dma` (`0x80000`), or `Pio` (`0x100000`):
    the source touches no IRQ, DMA, or PIO wrapper, so those bits would be authority the code never uses.
    This is where the BGA manifest diverges from virtio-gpu, whose mask carries all three because that
    driver does use them.
@@ -87,7 +87,7 @@ These are the standards the capsule already meets, and a change must keep them.
   userland/capsule_driver_bga/src/dispi/              the mode-set and clear (see mode-set.md)
   userland/capsule_driver_bga/src/constants.rs        the mode constants a promoted version would negotiate
   userland/capsule_driver_bga/Cargo.toml              crate and binary name, panic=abort
-  src/capabilities/types.rs                           the capability bits a promoted manifest would declare
+  src/capabilities/types/bit.rs                       the capability bit values a promoted manifest would declare
   userland/capsule_driver_virtio_gpu/Capsule.mk       the sibling driver's manifest, as the promotion model
   nonos-mk/capsule.mk                                 the per-slug target template promotion would enable
 ```

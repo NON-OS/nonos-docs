@@ -16,8 +16,8 @@ authority, an absent marker points upstream at xHCI discovery or the port state,
 
 Two kernel-side markers confirm the post path. The kernel emits the one-shot bench marker
 `input_post_first` on the very first successful post into the ring
-(`src/kernel_core/surface_registry/input_ring.rs:68`) and `input_drain_first` on the first drain by
-the router (`src/syscall/dispatch/router/input_ops.rs:79`). `input_post_first` present but the desktop
+(`src/kernel_core/surface_registry/input_ring/mod.rs`) and `input_drain_first` on the first drain by
+the router (`src/syscall/dispatch/router/input_ops/mod.rs`). `input_post_first` present but the desktop
 still dead means events are entering the ring but the router or focus path is the suspect, covered in
 the [input path debugging](../../subsystems/input/path.md); `input_post_first` absent after
 `[USB-HID-ENUM] tablet bound` means the parser is running but every post is failing, which shows up as
@@ -85,8 +85,8 @@ probes as `E_INVAL` will also fail to bind on real hardware.
   src/server/handlers/get_state.rs                 the counters and post-failure fields
   src/server/handlers/probe_config.rs              E_INVAL / E_NO_HID for a probed descriptor
   src/syscall/contract/cap_table/mk.rs             the InputSource gate on the post
-  src/kernel_core/surface_registry/input_ring.rs   input_post_first
-  src/syscall/dispatch/router/input_ops.rs         input_drain_first
+  src/kernel_core/surface_registry/input_ring/mod.rs   input_post_first
+  src/syscall/dispatch/router/input_ops/mod.rs         input_drain_first
 ```
 
 Every reference above is verified against those trees.

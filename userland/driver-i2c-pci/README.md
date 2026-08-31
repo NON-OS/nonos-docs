@@ -26,8 +26,9 @@ Everything the kernel and the service registry need to name and reach the driver
 | Capability mask | `0x78019` | `Capsule.mk:16` |
 | Kernel mirror | `src/hardware/i2c_pci_capsule` | `Capsule.mk:17` |
 
-The mask `0x78019` decomposes bit by bit against `src/capabilities/types.rs`. Each bit is the value of
-`Capability::bit()` for that variant (`src/capabilities/types.rs:52`):
+The mask `0x78019` decomposes bit by bit against `src/capabilities/types/bit.rs` (the enum is in
+`src/capabilities/types/defs.rs`). Each bit is the value of `Capability::bit()` for that variant
+(`src/capabilities/types/bit.rs:21`):
 
 ```
   0x00008  IPC          bit()      8   run send/recv on its endpoints
@@ -44,7 +45,7 @@ The kernel spawn path requests exactly those six capabilities and no others
 (`src/hardware/i2c_pci_capsule/spawn.rs:42`). The semantics of the four broker bits are documented on the
 capability type itself: `DeviceEnum` is enumerate-only, `Driver` lets a capsule claim and release a
 device, `Mmio` lets a claim holder map a slice of a BAR, and `Irq` lets a claim holder bind a device
-interrupt (`src/capabilities/types.rs:35`). There is no `CoreExec` (this is not a top-level app), no
+interrupt (`src/capabilities/types/defs.rs`). There is no `CoreExec` (this is not a top-level app), no
 `Dma`, no `Pio`, no `FileSystem`, no `Network`, and no display or input-focus capability. The whole
 hardware footprint is the register window it maps and the interrupt it binds.
 
@@ -115,7 +116,7 @@ limits, not safety ones.
   userland/capsule_driver_i2c_pci/src/main.rs   _start -> setup::run -> server::run
   userland/capsule_driver_i2c_pci/src/driver.rs the runtime Driver state
   userland/capsule_driver_i2c_pci/src/          protocol/, server/, setup/, init/, transaction/, discover.rs, constants/
-  src/capabilities/types.rs                     the capability bits behind the mask
+  src/capabilities/types/bit.rs                 the capability bit values behind the mask
   src/hardware/i2c_pci_capsule/                 the kernel-side embed and verified spawn
   src/userspace/init/spawn_plan/drivers_bus.rs  the bus-driver spawn entry
   userland/capsule_driver_i2c_hid/src/i2c_client/  the i2c-hid client that drives OP_TRANSFER

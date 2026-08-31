@@ -3,11 +3,11 @@
 The proof system is built over one field and one arithmetization-friendly hash. Everything else,
 the STARK, the FRI test, the Merkle commitments, the in-circuit transcript, is expressed in terms of
 these two. This page documents them, and it is precise about what the hash is and is not. The code is
-under `src/crypto/stark/field/` and `src/crypto/stark/air/poseidon.rs`.
+under `nonos-stark/src/field/` and `nonos-stark/src/air/poseidon.rs`.
 
 ## The Goldilocks field
 
-The field is Goldilocks, the prime `p = 2^64 - 2^32 + 1` (`src/crypto/stark/field/element.rs:19`):
+The field is Goldilocks, the prime `p = 2^64 - 2^32 + 1` (`nonos-stark/src/field/element.rs:20`):
 
 ```
   pub const P: u64 = 0xFFFF_FFFF_0000_0001;   // 2^64 - 2^32 + 1
@@ -23,7 +23,7 @@ field.
 ## The hash: an honest description
 
 The proof system's algebraic hash is a Poseidon-*style* permutation over Goldilocks
-(`src/crypto/stark/air/poseidon.rs`). It is important to describe it exactly, because it is not a
+(`nonos-stark/src/air/poseidon.rs`). It is important to describe it exactly, because it is not a
 drop-in of the published reference Poseidon, and overstating that would be wrong. What the code
 actually implements is:
 
@@ -40,13 +40,23 @@ a **full S-box layer on every round** rather than the standard Poseidon mix of a
 many cheaper partial rounds; this is a more conservative and more uniform round function, at a higher
 cost, not the published round schedule. Second, the **round constants are self-derived by a
 nothing-up-my-sleeve rule**, the BLAKE3 hash of the domain string `NONOS-POSEIDON-GOLDILOCKS-RC` with
-the round and lane indices (`poseidon.rs:224`), rather than the published reference constant set. So
+the round and lane indices (`poseidon.rs:281`, domain string at `poseidon.rs:55`), rather than the published reference constant set. So
 this is a transparent, arithmetization-friendly hash of the Poseidon family; its trustworthiness comes
 from the parameters being reproducible and free of hidden structure (anyone can regenerate the
 constants from the domain string, and the Cauchy matrix is provably MDS), not from matching a
 published parameter set or reference test vectors. There are correspondingly no reference-vector tests
 for it, because it is not claiming to reproduce a reference; the guarantee is the auditability of the
 derivation.
+
+One clarification that matters for anyone reading the crate. There are in fact two Poseidon
+implementations in `nonos-stark`, and this page describes the one the proof system actually uses. The
+one above is the width-8 permutation in `nonos-stark/src/air/poseidon.rs` (Cauchy MDS, all full rounds,
+self-derived constants); it is the hash the AIR gadgets, the Poseidon Merkle tree, the recursion-friendly
+FRI, and both the capsule and kernel attestation are built on (`nonos-stark/src/poseidon_merkle/tree.rs`
+imports `air::{Poseidon, RATE}`, and `src/security/kernel_attest.rs:25` uses the same). A second module,
+`nonos-stark/src/poseidon/`, implements a standard width-12 Poseidon with the published Plonky2 constant
+set and the usual 4-full / 22-partial / 4-full round schedule; it is not on the attestation, Merkle, or
+FRI path. Where this page says "the hash," it means the width-8 `air` Poseidon.
 
 ## Why an algebraic hash
 
@@ -109,7 +119,7 @@ difference silently produces a different hash and every Merkle root and transcri
 diverges. This is the most likely cause of a whole class of proofs failing at once rather than one.
 
 **Field-arithmetic mistakes surface as non-canonical elements.** `Fp` holds its value canonically in
-`[0, p)` with `p = 0xFFFF_FFFF_0000_0001` (`field/element.rs:19`). A reduction bug leaves an element at or
+`[0, p)` with `p = 0xFFFF_FFFF_0000_0001` (`field/element.rs:20`). A reduction bug leaves an element at or
 above `p`, which then compares unequal to its canonical twin and breaks the constant-time equality checks
 the verifiers rely on. The signature is a proof that fails only for certain inputs (the ones that hit the
 unreduced range) while most pass, which distinguishes it from the hash-parameter case above where nothing
@@ -118,9 +128,9 @@ verifies at all.
 ## Source map
 
 ```
-  src/crypto/stark/field/element.rs   the Goldilocks prime and Fp
-  src/crypto/stark/field/            add/sub/mul, exp, inverse
-  src/crypto/stark/air/poseidon.rs    the permutation: params, S-box, MDS, NUMS constants, sponge, compress
+  nonos-stark/src/field/element.rs   the Goldilocks prime and Fp
+  nonos-stark/src/field/            add/sub/mul, exp, inverse
+  nonos-stark/src/air/poseidon.rs    the permutation: params, S-box, MDS, NUMS constants, sponge, compress
 ```
 
 Every reference above is verified against those trees. The AIR gadgets that express this hash as

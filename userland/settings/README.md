@@ -17,26 +17,29 @@ the folder it describes.
 | Namespace | `systems.nonos.app.settings` | `Capsule.mk:7` |
 | Service endpoint | `service:4728:app.settings` | `Capsule.mk:8` |
 | Reply endpoint | `reply:4729:endpoint.app.settings.reply` | `Capsule.mk:9` |
-| Capability mask | `0x1819` | `Capsule.mk:11` |
+| Capability mask | `0x981d` | `Capsule.mk:13` |
 | Binary name | `settings` | `Capsule.mk:5` |
 | Kernel mirror | `src/userspace/capsule_settings` | `Capsule.mk:12` |
 
-The mask decomposes into five bits, checked against `src/capabilities/types.rs`:
+The mask decomposes into seven bits, checked against `src/capabilities/types/defs.rs`:
 
 | Bit | Value | Grants |
 |-----|-------|--------|
 | CoreExec | `0x0001` | run as a process |
+| Network | `0x0004` | call `net.dhcp.client` for the Wi-Fi lease status |
 | IPC | `0x0008` | send and receive on its endpoints |
 | Memory | `0x0010` | map its own heap and stack |
 | GraphicsDisplayQuery | `0x0800` | ask the compositor for the display geometry |
 | GraphicsSurfaceCreate | `0x1000` | create the window surface it draws into |
+| DeviceEnum | `0x8000` | enumerate devices for the settings panels |
 
-So `0x1819 = 0x0001 + 0x0008 + 0x0010 + 0x0800 + 0x1000`. The kernel spawn path requests exactly those
-five capabilities and no others (`src/userspace/capsule_settings/spawn.rs:49`). There is no Network bit
-(`0x0004`), no FileSystem bit (`0x0040`), and no hardware, driver, MMIO, or DMA capability. Settings can
-create a surface, ask the display for its size, and speak IPC, and nothing else. Its power to change
-system policy is not a capability it holds; it comes entirely from the policy service recognising its
-service name, which is the whole basis of the [policy client and write gate](policy.md) page.
+So `0x981d = 0x0001 + 0x0004 + 0x0008 + 0x0010 + 0x0800 + 0x1000 + 0x8000`. The kernel spawn path requests
+exactly those seven capabilities and no others (`src/userspace/capsule_settings/spawn.rs:49`). `Network`
+is required to read the Wi-Fi lease status from the DHCP client (`userland/capsule_settings/Capsule.mk:12`),
+and `DeviceEnum` lets the panels enumerate devices. There is no FileSystem bit (`0x0040`), and no
+hardware, driver, MMIO, or DMA capability. Its power to change system policy is not a capability it holds;
+it comes entirely from the policy service recognising its service name, which is the whole basis of the
+[policy client and write gate](policy.md) page.
 
 ## The pillars
 
@@ -91,7 +94,7 @@ capsule spawned` on the boot log (`src/userspace/init/spawn_plan/boot.rs:26`).
 ## Source map
 
 Everything here is drawn from `userland/capsule_settings/` (the capsule source and its `Capsule.mk`),
-`src/capabilities/types.rs` (the capability bits), the kernel spawn mirror under
+`src/capabilities/types/defs.rs` (the capability bits), the kernel spawn mirror under
 `src/userspace/capsule_settings/`, and the shared `userland/policy_proto/` crate (the `Field` enum,
 labels, kinds, ranges, enum tables, and wire header). Every reference above is verified against those
 trees.

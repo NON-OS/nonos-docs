@@ -8,7 +8,7 @@ and `src/arch/mod.rs`.
 ## One trait, one alias
 
 The generic kernel never names an architecture. It calls the active backend through the `Arch` type
-alias, which `src/arch/mod.rs:46` selects by target:
+alias, which `src/arch/mod.rs:62` selects by target:
 
 ```
   #[cfg(target_arch = "x86_64")]  pub type Arch = x86_64::abi::X86_64;

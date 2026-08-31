@@ -7,16 +7,16 @@ clients, the header parse and the magic dispatch, the reply encoder, and every h
 
 ## One loop, poll then serve
 
-The whole server is one loop that never returns (`src/server/runner.rs:33`). Each iteration does two things
+The whole server is one loop that never returns (`src/server/runner/mod.rs`). Each iteration does two things
 in order: it pumps the smoltcp stack once, then it waits a bounded time for one client request and answers
 it. Pumping first means the stack advances even when no client is calling, so DHCP, retransmits, and
-incoming data keep moving (`src/server/runner.rs:37`, [iface](iface.md)).
+incoming data keep moving (`src/server/runner/mod.rs`, [iface](iface.md)).
 
 The receive is `mk_ipc_recv_from` on the service inbox with a 50 ms poll timeout, which also yields the
-sender's pid (`src/server/runner.rs:39`). A non-positive length or a zero sender pid is skipped
-(`src/server/runner.rs:46`); the zero-pid guard matters because every handler scopes a socket to the pid
+sender's pid (`src/server/runner/mod.rs`). A non-positive length or a zero sender pid is skipped
+(`src/server/runner/mod.rs`); the zero-pid guard matters because every handler scopes a socket to the pid
 that owns it, so an unattributed message is never served. The buffers are allocated once outside the loop at
-`HDR_LEN + IPC_BUF_MAX` bytes, where `IPC_BUF_MAX` is 1024 (`src/server/runner.rs:34`,
+`HDR_LEN + IPC_BUF_MAX` bytes, where `IPC_BUF_MAX` is 1024 (`src/server/runner/mod.rs`,
 `src/server/parse_req.rs:20`).
 
 ## Parse and dispatch
@@ -26,13 +26,13 @@ rejects a short buffer with `E_BAD_LEN`, a version other than 1 with `E_BAD_VERS
 length that overflows or exceeds the received bytes with `E_BAD_LEN` (`src/server/parse_req.rs:30`). On
 success it returns a `Request` carrying the magic, op, and request id, plus a body slice sized exactly to
 the declared payload length (`src/server/parse_req.rs:44`). A parse failure drops the message silently and
-the loop continues (`src/server/runner.rs:49`).
+the loop continues (`src/server/runner/mod.rs`).
 
-Dispatch is two-level (`src/server/runner.rs:50`). `OP_HEALTHCHECK` (1) is matched first, before the magic,
+Dispatch is two-level (`src/server/runner/mod.rs`). `OP_HEALTHCHECK` (1) is matched first, before the magic,
 so it answers for any protocol (`src/server/handlers/health.rs:23`). Otherwise the magic selects the
 protocol module: `NDHC` to `dhcp_status::dispatch`, `NTCP` to `tcp::dispatch`, `NUDP` to `udp::dispatch`,
-`NDNS` to `dns::dispatch` (`src/server/runner.rs:52`). An unknown magic is answered with `E_BAD_MAGIC`
-(`src/server/runner.rs:65`). Each protocol's `dispatch` then matches the op and answers `E_BAD_OP` for one
+`NDNS` to `dns::dispatch` (`src/server/runner/mod.rs`). An unknown magic is answered with `E_BAD_MAGIC`
+(`src/server/runner/mod.rs`). Each protocol's `dispatch` then matches the op and answers `E_BAD_OP` for one
 it does not handle (for example `src/server/handlers/tcp/mod.rs:36`).
 
 ## Encoding a reply

@@ -127,7 +127,7 @@ polls but never calls `MkIrqAck` sees the sequence advance once and then stall.
 ## Source map
 
 ```
-  src/hardware/broker/claim.rs      the claim table, the epoch, claim/release,
+  src/hardware/broker/claim/        the claim table, the epoch, claim/release,
                                     and release_all_for_pid from process exit
   src/hardware/broker/mmio/         MkMmioMap/Unmap and the BAR range validation
   src/hardware/broker/irq/          MkIrqBind/Poll/Ack/Unbind and the mask policy

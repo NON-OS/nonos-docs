@@ -122,7 +122,7 @@ classes for the device first, then drops the claim:
 The caller's CR3 is active on this path, so the MMIO and DMA unmaps and their TLB shootdowns run
 in-context. Grants are torn down before the claim is dropped, which means there is never a moment
 where the claim is gone but a live mapping into the device's BAR remains. `release_device`
-(`claim.rs:60`) is holder-checked: a pid that is not the recorded holder gets `NotHolder`
+(`claim/release.rs:22`) is holder-checked: a pid that is not the recorded holder gets `NotHolder`
 (`ERRNO_PERM`), and a device nobody holds gets `NotClaimed` (`ERRNO_NODEV`).
 
 ## Exit wiring
@@ -150,7 +150,7 @@ are unbound.
 ## Revocation and the epoch
 
 Revocation does not itself stamp an epoch. The [claim](claim.md) epoch is a single monotonic counter
-bumped only on a successful `claim` (`claim.rs:41`); `release` and the drains do not touch it. The
+bumped only on a successful `claim` (`claim/state.rs:27`); `release` and the drains do not touch it. The
 interaction runs the other way: revocation drops the claim, and the *next* claim on that device gets
 a fresh epoch. That is what makes a stale grant handle from a prior ownership useless. A grant
 record carries the `claim_epoch` it was issued under (`grant.rs:42` for MMIO, mirrored in each
@@ -219,7 +219,7 @@ anything the broker prints.
   src/hardware/broker/irq/release.rs                 IRQ INTx/MSI-X teardown and slot free
   src/hardware/broker/pio/release.rs                 PIO record removal
   src/hardware/broker/grant.rs                       the MMIO grant table, remove and the drains
-  src/hardware/broker/claim.rs                       release and release_all_for_pid for claims
+  src/hardware/broker/claim/release.rs               release and release_all_for_pid for claims
   src/memory/paging/manager/api/mapping.rs           unmap_user_mmio / unmap_user_dma and the TLB shootdown
   src/syscall/microkernel/device.rs                  MkDeviceRelease: four drains then claim drop
   src/process/exit/teardown.rs                       the four-class revoke on exit with the self-context flag

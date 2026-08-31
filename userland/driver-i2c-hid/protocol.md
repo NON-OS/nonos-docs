@@ -121,7 +121,7 @@ The client protocol is magic `NI2C` `0x4E493243`, version 1, 20-byte header, `OP
 
 The HID-over-I2C register model rides on top of this: the driver writes a little-endian register address,
 then reads the report bytes back, both inside one `OP_TRANSFER` envelope. It never touches a controller
-register directly (`src/hid/probe.rs:9`, `src/input/poll.rs:30`).
+register directly (`src/hid/probe.rs:9`, `src/input/poll/poll.rs`).
 
 ## Descriptor discovery
 
@@ -148,7 +148,7 @@ derives:
   (`src/hid/input_len.rs:17`).
 
 Those two values are what arm the report path: `input::poll` refuses to run until a descriptor is found,
-the input register is non-zero, and the input length is at least five bytes (`src/input/poll.rs:23`). See
+the input register is non-zero, and the input length is at least five bytes (`src/input/poll/poll.rs`). See
 [input.md](input.md).
 
 ## Source map

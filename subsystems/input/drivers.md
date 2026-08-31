@@ -13,7 +13,7 @@ hardware.
 |---------|--------|---------|-----------------|--------------------------|
 | `capsule_driver_ps2_input` | PS/2 keyboard + AUX mouse | `driver.ps2_kbd0` (4208) | `0x358019` | port I/O grant + IRQ 1 / IRQ 12 |
 | `capsule_driver_i2c_pci` | Intel LPSS i2c controller | `driver.i2c_pci0` (4230) | `0x78019` | MMIO grant + IRQ, no input of its own |
-| `capsule_driver_i2c_hid` | i2c-HID touchpad / keyboard | `driver.i2c_hid0` (4232) | `0x200019` | IPC to `i2c_pci`, then `MkInputEventPost` |
+| `capsule_driver_i2c_hid` | i2c-HID touchpad / keyboard | `driver.i2c_hid0` (4232) | `0x200119` | IPC to `i2c_pci`, then `MkInputEventPost` |
 | `capsule_driver_usb_hid` | USB HID keyboard / mouse / tablet | `driver.usb_hid0` (4222) | `0x200019` | IPC to the xHCI driver, then `MkInputEventPost` |
 
 ## Contents
@@ -161,8 +161,9 @@ and exposes a transaction service. It posts no input events of its own; it is pu
 `capsule_driver_i2c_hid` owns the *device*. It never touches a bus register; it sends i2c transactions
 to `driver.i2c_pci0` over IPC (`i2c_client/`), reads the HID descriptor and input reports that way,
 parses each report (`input/parse_report.rs`), and posts pointer and key events (`input/post.rs`). Its
-capability mask (`0x200019`) is the input-post right plus IPC and memory, and nothing else, because it
-reaches all of its hardware through another capsule. The device address and the interrupt come from
+capability mask (`0x200119`, `Capsule.mk:14`) is the input-post right plus IPC, memory, and the
+serial-log `Debug` bit, and no hardware right at all, because it reaches all of its hardware through
+another capsule. The device address and the interrupt come from
 ACPI: the touchpad is described in the DSDT, not on PCI, so it is discovered by walking the ACPI
 namespace (`src/arch/x86_64/acpi/devices/i2c/`) rather than enumerating a bus.
 
@@ -185,7 +186,7 @@ through another capsule and needs only the right to post.
 
 The drivers are mutually distrustful ring-3 programs, so the kernel's ring gives them properties none
 of them has to coordinate. Posting is bounded and non-blocking: `post_input`
-(`src/kernel_core/surface_registry/input_ring.rs`) takes the ring mutex only long enough to store one
+(`src/kernel_core/surface_registry/input_ring/post.rs:22`) takes the ring mutex only long enough to store one
 record and advance the head, and if the 1024-entry ring is full it increments a dropped counter and
 returns rather than blocking the driver. Ordering across drivers is total: the ring is MPSC, so a key
 from PS/2 and a motion from the touchpad interleave in posting order and the single router drains them
@@ -197,17 +198,18 @@ one syscall and the kernel provides the bound, the order, and the wakeup.
 ## Security analysis
 
 The capability masks are not decoration; they are the least-privilege boundary, and they decode
-exactly to what each driver's job needs (bits from `src/capabilities/types.rs`):
+exactly to what each driver's job needs (bits from `src/capabilities/types/bit.rs`):
 
 | Driver | Mask | Capabilities |
 |--------|------|--------------|
 | ps2_input | `0x358019` | CoreExec, IPC, Memory, DeviceEnum, Driver, Irq, **Pio**, **InputSource** |
 | i2c_pci | `0x78019` | CoreExec, IPC, Memory, DeviceEnum, Driver, **Mmio**, **Irq** |
-| i2c_hid | `0x200019` | CoreExec, IPC, Memory, **InputSource** |
+| i2c_hid | `0x200119` | CoreExec, IPC, Memory, Debug, **InputSource** |
 | usb_hid | `0x200019` | CoreExec, IPC, Memory, **InputSource** |
 
 Three properties fall straight out of that table. First, the HID drivers hold *no hardware capability
-at all*: `i2c_hid` and `usb_hid` have `InputSource` and IPC and nothing else, so a compromised HID
+at all*: `i2c_hid` and `usb_hid` have `InputSource` and IPC (the i2c-HID driver also carries the
+serial-log `Debug` bit, which is not a hardware right) and nothing else, so a compromised HID
 report parser, the most complex and most exposed code in the input path, cannot map an MMIO region,
 touch a port, take an interrupt, or program DMA. The worst it can do with its authority is post forged
 input events, which is bounded by the ring and visible to the router. Second, the bus driver holds the
@@ -280,8 +282,8 @@ tablets; the full report-descriptor generality of arbitrary HID devices is not i
 - `userland/capsule_driver_usb_hid/` - the USB HID driver: `xhci/`, `descriptors/`, `hid/keymap.rs`,
   `hid/tablet.rs`.
 - Kernel side: the ring and event type in `src/kernel_core/surface_registry/`, the post/drain/wait
-  syscalls in `src/syscall/dispatch/router/input_ops.rs`, the capability bits in
-  `src/capabilities/types.rs`, the driver spawn plan in `src/userspace/init/spawn_plan/drivers_input.rs`,
+  syscalls in `src/syscall/dispatch/router/input_ops/mod.rs`, the capability bits in
+  `src/capabilities/types/bit.rs`, the driver spawn plan in `src/userspace/init/spawn_plan/drivers_input.rs`,
   and the broker grant paths in `src/hardware/broker/`.
 
 Every reference above is verified against those trees. The router capsule that drains the ring and fans

@@ -33,7 +33,7 @@ The service endpoint number `4400` is the port the kernel binds the service to, 
 port; both are constants in the spawn mirror (`spawn.rs:36`, `spawn.rs:38`). The reply inbox name
 `endpoint.net.l2.reply` matches the manifest byte for byte (`Capsule.mk:14`, `spawn.rs:37`).
 
-The mask `0x0001d` decomposes bit by bit against `src/capabilities/types.rs`:
+The mask `0x0001d` decomposes bit by bit against `src/capabilities/types/defs.rs`:
 
 ```
   0x00001  CoreExec     bit()      1   types.rs:56
@@ -118,7 +118,7 @@ persist frames; it is the link-layer mechanism a higher-level IP stack is built 
   userland/capsule_net_l2/Capsule.mk         slug, handle, ports, capability mask, kernel mirror
   src/userspace/capsule_net_l2/spawn.rs      the kernel-side verified spawn: name, ports, requested caps
   src/userspace/init/spawn_plan/network/spawn_l2.rs  the feature-gated spawn entry and boot marker
-  src/capabilities/types.rs                  the capability bit values behind the mask
+  src/capabilities/types/defs.rs                  the capability bit values behind the mask
 ```
 
 Every reference above is verified against those trees.

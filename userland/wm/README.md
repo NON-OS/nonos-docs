@@ -24,7 +24,7 @@ and its kernel-side spawn record. The two agree exactly.
 | Binary name | `wm` | `Capsule.mk:11` |
 | Kernel mirror | `src/userspace/capsule_wm` | `Capsule.mk:20` |
 
-The mask `0x19` decomposes bit by bit against `src/capabilities/types.rs`:
+The mask `0x19` decomposes bit by bit against `src/capabilities/types/defs.rs`:
 
 | Bit | Value | Grants |
 |-----|-------|--------|
@@ -71,7 +71,7 @@ The wm is a `no_std`/`no_main` capsule that is, in steady state, a single reques
 
 1. The kernel spawns the capsule at boot through the desktop fleet plan, which verifies the embedded ELF,
    certificate, manifest, and attestation, registers `wm` on port 4330, and logs `[WM] capsule spawned`
-   (`src/userspace/init/spawn_plan/desktop_fleet.rs:100`, `src/userspace/capsule_wm/spawn.rs:34`,
+   (`src/userspace/init/spawn_plan/desktop_fleet/mod.rs`, `src/userspace/capsule_wm/spawn.rs:34`,
    `src/userspace/init/capsule_boot/run.rs:29`).
 2. `_start` initializes the heap, then blocks in `wait_for_setup` until `setup::run` succeeds: it resolves
    the `compositor` service, probes it, and reads the display width and height, yielding between attempts
@@ -104,7 +104,7 @@ it pushes a `FOCUS_SET` to the compositor so the compositor can restyle the focu
   userland/capsule_wm/src/setup/              resolve + probe compositor, read display size
   userland/capsule_wm/Capsule.mk              slug, handle, ports, capability mask, kernel mirror
   src/userspace/capsule_wm/spawn.rs           the kernel-side embed and verified spawn
-  src/capabilities/types.rs                   the capability bit table (0x19 decomposition)
+  src/capabilities/types/defs.rs                   the capability bit table (0x19 decomposition)
 ```
 
 Every reference above is verified against those trees.

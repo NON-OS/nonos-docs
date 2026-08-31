@@ -3,7 +3,7 @@
 All input in NØNOS funnels through one bounded ring in the kernel. Driver capsules post events
 into it; a single router capsule drains it. The kernel owns only this ring, the sequence counter,
 and the single wakeup slot; the policy of routing events to windows lives in the router capsule.
-This page documents the ring. The code is `src/kernel_core/surface_registry/input_ring.rs`, and the
+This page documents the ring. The code is `src/kernel_core/surface_registry/input_ring/mod.rs`, and the
 event layout and capacity live in `src/kernel_core/surface_registry/types.rs`.
 
 ## A bounded MPSC ring
@@ -164,7 +164,7 @@ router to classify.
 ## Syscall surface
 
 Three syscalls sit on top of the ring, dispatched in
-`src/syscall/dispatch/router/input_ops.rs` and tagged in `src/syscall/numbers/defs.rs`:
+`src/syscall/dispatch/router/input_ops/mod.rs` and tagged in `src/syscall/numbers/defs.rs`:
 
 ```
   MkInputEventPost   ("MIEP", defs.rs:96)   do_post   input_ops.rs:53   -> post_input
@@ -254,11 +254,11 @@ confirm the consumer armed itself before any synthetic input is posted.
 ## Source map
 
 ```
-  src/kernel_core/surface_registry/input_ring.rs   the ring, post, drain, sequence, waiter, markers
+  src/kernel_core/surface_registry/input_ring/mod.rs   the ring, post, drain, sequence, waiter, markers
   src/kernel_core/surface_registry/types.rs        InputEvent, INPUT_RING_CAP, RegistryError
   src/kernel_core/surface_registry/mod.rs          re-exports of the ring API
   src/kernel_core/surface_registry/inject.rs       optional input-probe-inject synthetic poster
-  src/syscall/dispatch/router/input_ops.rs         the post/drain/wait syscall handlers
+  src/syscall/dispatch/router/input_ops/mod.rs         the post/drain/wait syscall handlers
   src/syscall/dispatch/router/dispatch_fn.rs       routing of the three input syscalls
   src/syscall/numbers/defs.rs                      MkInputEventPost/Drain/Wait tags
   src/syscall/contract/cap_table/mk.rs             capability gate for the three syscalls

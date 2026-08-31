@@ -62,7 +62,7 @@ manifest endpoint (`src/server/runner.rs:25`). The reply endpoint declares port 
 not bind a reply port of its own; it replies directly to the attested sender pid returned by the receive
 (`src/server/runner.rs:47`).
 
-The mask `0x219` decomposes bit by bit against `src/capabilities/types.rs`:
+The mask `0x219` decomposes bit by bit against `src/capabilities/types/defs.rs`:
 
 | Bit | Value | Grants | Source |
 |-----|-------|--------|--------|
@@ -129,7 +129,7 @@ not a boot marker. The [debugging](debugging.md) page covers what a caller sees 
   src/syscall/dispatch/router/admin/    AdminReboot / AdminShutdown kernel dispatch
   src/syscall/contract/cap_table/       the Admin capability gate on the admin syscalls
   src/arch/x86_64/acpi/                  real reboot; shutdown E_NOTSUP until an AML evaluator lands
-  src/capabilities/types.rs             the capability bit values
+  src/capabilities/types/defs.rs             the capability bit values
   src/userspace/init/spawn_plan/        the init fleet; searched and confirmed to have no power entry
 ```
 

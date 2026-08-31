@@ -28,7 +28,7 @@ and its kernel-side spawn record.
 | Namespace | `systems.nonos.driver.e1000_0` | `Capsule.mk:15` |
 | Service endpoint | `service:4210:driver.e1000_0` | `Capsule.mk:16`, `src/hardware/e1000_capsule/spawn.rs:38` |
 | Reply endpoint | `reply:4211:endpoint.4294967308` | `Capsule.mk:17`, `src/hardware/e1000_capsule/spawn.rs:39` |
-| Capability mask | `0xF8019` | `Capsule.mk:19` |
+| Capability mask | `0xF8039` | `Capsule.mk:19` |
 | Binary name | `driver_e1000` | `Capsule.mk:13`, `Cargo.toml:22` |
 | Kernel mirror | `src/hardware/e1000_capsule` | `Capsule.mk:20`, `src/hardware/e1000_capsule/spawn.rs` |
 
@@ -37,23 +37,28 @@ every reply to: it is slot 12 in the per-service reply numbering (ramfs=1 throug
 sides as `endpoint.4294967308` in the kernel client (`src/hardware/e1000_capsule/client/transport.rs:25`)
 and as `KERNEL_REPLY_ENDPOINT = 0x1_0000_000C` in the capsule (`src/protocol/endpoint.rs:22`).
 
-The mask `0xF8019` decomposes bit by bit against `src/capabilities/types.rs`:
+The mask `0xF8039` decomposes bit by bit against `src/capabilities/types/bit.rs` (the enum is in
+`src/capabilities/types/defs.rs`):
 
 ```
-  0x00008  IPC          bit()      8   types.rs:59
-  0x00010  Memory       bit()     16   types.rs:60
-  0x08000  DeviceEnum   bit()  32768   types.rs:71
-  0x10000  Driver       bit()  65536   types.rs:72
-  0x20000  Mmio         bit() 131072   types.rs:73
-  0x40000  Irq          bit() 262144   types.rs:74
-  0x80000  Dma          bit() 524288   types.rs:75
+  0x00001  CoreExec     bit()      1   types/bit.rs:23
+  0x00008  IPC          bit()      8   types/bit.rs:26
+  0x00010  Memory       bit()     16   types/bit.rs:27
+  0x00020  Crypto       bit()     32   types/bit.rs:28
+  0x08000  DeviceEnum   bit()  32768   types/bit.rs:38
+  0x10000  Driver       bit()  65536   types/bit.rs:39
+  0x20000  Mmio         bit() 131072   types/bit.rs:40
+  0x40000  Irq          bit() 262144   types/bit.rs:41
+  0x80000  Dma          bit() 524288   types/bit.rs:42
   -------
-  0xF8019  = 8 + 16 + 32768 + 65536 + 131072 + 262144 + 524288
+  0xF8039  = 1 + 8 + 16 + 32 + 32768 + 65536 + 131072 + 262144 + 524288
 ```
 
-The kernel spawn path requests exactly those seven capabilities and no others, building the mask by ORing
-the same seven bits (`src/hardware/e1000_capsule/spawn.rs:56`), which matches the comment and value in the
-manifest (`Capsule.mk:19`). Like the NVMe driver and unlike an application capsule, this driver holds the
+The kernel spawn path requests `IPC | Memory | Crypto | Driver | DeviceEnum | Mmio | Irq | Dma`
+(`src/hardware/e1000_capsule/spawn.rs:56`); `CoreExec` is granted to every executable process. The
+`Crypto` bit is the one that separates this NIC's mask from the paravirtual drivers: the driver draws its
+station MAC through `CryptoRandom`, which is gated on `Crypto`, and the draw fails closed without it
+(`spawn.rs:59`). It matches the value in the manifest (`Capsule.mk:19`). Like the NVMe driver and unlike an application capsule, this driver holds the
 hardware-broker authority bits: `DeviceEnum` (enumerate devices), `Driver` (claim and release a device),
 `Mmio` (map device registers), `Irq` (bind a device interrupt), and `Dma` (map DMA), the exact set the
 broker checks before it hands out any grant. It has no `Network` bit (4): a NIC driver moves frames, it does
@@ -131,7 +136,7 @@ on, not the policy.
   userland/capsule_driver_e1000/Capsule.mk         slug, handle, ports, capability mask, kernel mirror
   src/hardware/e1000_capsule/                       the kernel-side embed, spawn, and network client
   src/userspace/init/spawn_plan/drivers_nic.rs      the NIC bring-up plan that spawns this capsule
-  src/capabilities/types.rs                         the capability bit values behind the mask
+  src/capabilities/types/bit.rs                     the capability bit values behind the mask
 ```
 
 Every reference above is verified against those trees.

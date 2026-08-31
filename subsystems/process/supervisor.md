@@ -57,7 +57,7 @@ When a process exits, [teardown](lifecycle.md) marks it a zombie, releases its b
 resources, takes it off the run queue, and enqueues its pid on a pending list
 (`src/process/exit/pending.rs:18`). The pending list is drained and finalized by the
 kernel reaper, and the reaper is driven by the preemption timer. On each tick the timer
-interrupt calls `drain_pending_teardowns` (`src/interrupts/isr/timer_trampoline.rs:193`),
+interrupt calls `drain_pending_teardowns` (`src/interrupts/isr/timer_trampoline/handler.rs:91`),
 which is `drain`:
 
 ```
@@ -113,7 +113,7 @@ userspace that only spawns and observes, while the reaper is the kernel half tha
 scrubs. Three properties matter.
 
 **The reaper never blocks the timer.** `drain` runs in the timer interrupt via
-`drain_pending_teardowns` (`timer_trampoline.rs:193`) and takes the pending list with `try_lock`, not a
+`drain_pending_teardowns` (`process/exit/`, called from `timer_trampoline/handler.rs:91`) and takes the pending list with `try_lock`, not a
 blocking lock (`pending.rs:26`): if it cannot take the list this tick it simply reaps on the next one.
 This is the same interrupt discipline the [usercopy](../memory/usercopy.md) and preemption paths use, a
 path that runs at interrupt priority must never wait on a lock, and it means a contended pending list
@@ -161,7 +161,8 @@ itself failing.
   src/userspace/init/supervisor/loop_impl.rs      the init supervisor loop
   src/process/exit/pending.rs                     the zombie pending-list and drain
   src/process/exit/finalize.rs                    finalize_teardown
-  src/interrupts/isr/timer_trampoline.rs          the timer-driven reap
+  src/interrupts/isr/timer_trampoline/handler.rs  the timer-driven reap call site
+  src/process/exit/                                drain_pending_teardowns, finalize_teardown
   src/process/core/init.rs                        reparent_orphans
 ```
 

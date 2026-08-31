@@ -19,7 +19,8 @@ authority, before a single instruction of it executes.
 | [manifest-schema.md](manifest-schema.md) | Every field of the `CapsuleManifest`, the fixed sizes, the endpoint and publisher-signature sub-schemas, what the signatures cover, and which verification step reads each field. |
 | [certificate-schema.md](certificate-schema.md) | Every field of the NØNOS-ID certificate, the capability ceiling and namespace globs, the publisher keys that sign manifests, and the two signing layers from anchor to certificate to manifest. |
 | [trust-anchor.md](trust-anchor.md) | The baked, non-optional anchor policy, its signing keys and their windows, the epoch anti-rollback, the three revocation lists, and exactly what it enforces on a certificate. |
-| [attestation.md](attestation.md) | The attestation gate and its two backends: the production transparent post-quantum STARK membership proof and the earlier enrolled-secret proof, their feature gating, the trailer formats, and what the proof binds. |
+| [attestation.md](attestation.md) | The attestation gate and its two backends: the production transparent post-quantum STARK membership proof and the earlier enrolled-secret proof, their feature gating, the trailer formats, the four `[ZK-ATTEST]` markers, and what the proof binds. |
+| [developer-roots.md](developer-roots.md) | How a machine runs software it built itself without weakening the gate: the vendor-first verify order, the `Vendor`/`Developer` authority recorded on every proof, the two-step trusted-path consent enrolment, and the per-boot local-build identity. |
 
 ## Enforcement
 
@@ -28,7 +29,7 @@ on, and how it is withdrawn.
 
 | Page | What it covers |
 |------|----------------|
-| [capabilities-and-tokens.md](capabilities-and-tokens.md) | The twenty-two capability bits, the driver-broker layering and the `Admin` super-grant, the capability token and its bindings, the syscall-to-capability table, and the ordered resolve chain. |
+| [capabilities-and-tokens.md](capabilities-and-tokens.md) | The thirty-one capability bits, the driver-broker layering and the `Admin` super-grant, the input producer/consumer split, the capability token and its bindings, the syscall-to-capability table, and the ordered resolve chain. |
 | [signing-and-mac.md](signing-and-mac.md) | The per-boot signing key, the 128-byte MAC material and the two-pass keyed BLAKE3, the mint and sign and verify paths, the boot-session nonce, and the constant-time comparison. |
 | [delegation.md](delegation.md) | The `Delegation` structure, the subset and expiry rules enforced at creation, the domain-separated MAC, the three verification entry points, and every error. |
 | [revocation.md](revocation.md) | The four scopes of revocation: the per-boot key and nonce, the per-process epoch, the per-token revoked set, and the anchor lists, with where each takes effect. |

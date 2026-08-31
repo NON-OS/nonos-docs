@@ -18,23 +18,25 @@ concerns they form so a page can be read beside the folder it describes.
 | Reply endpoint | `reply:4725:endpoint.app.file_manager.reply` | `Capsule.mk:9`, `spawn.rs:33` |
 | Binary name | `file_manager` | `Capsule.mk:5` |
 | Kernel mirror | `src/userspace/capsule_file_manager` | `Capsule.mk:12` |
-| Capability mask | `0x1819` | `Capsule.mk:11` |
+| Capability mask | `0x1859` | `Capsule.mk:12` |
 
-The mask `0x1819` decomposes into exactly five bits, checked against `src/capabilities/types.rs`:
+The mask `0x1859` decomposes into exactly six bits, checked against `src/capabilities/types/defs.rs`:
 
 | Bit | Value | Grants |
 |-----|-------|--------|
-| CoreExec | `0x0001` | run as a process (`types.rs:56`) |
-| IPC | `0x0008` | send and receive on its endpoints (`types.rs:59`) |
-| Memory | `0x0010` | map its own heap and stack (`types.rs:60`) |
-| GraphicsDisplayQuery | `0x0800` | ask the compositor for the display geometry (`types.rs:67`) |
-| GraphicsSurfaceCreate | `0x1000` | create the window surface it draws into (`types.rs:68`) |
+| CoreExec | `0x0001` | run as a process |
+| IPC | `0x0008` | send and receive on its endpoints |
+| Memory | `0x0010` | map its own heap and stack |
+| FileSystem | `0x0040` | the filesystem-capability gate its vfs calls are checked against |
+| GraphicsDisplayQuery | `0x0800` | ask the compositor for the display geometry |
+| GraphicsSurfaceCreate | `0x1000` | create the window surface it draws into |
 
-`0x1819 = 0x0001 + 0x0008 + 0x0010 + 0x0800 + 0x1000`. The kernel spawn path requests exactly those
-five capabilities and no others (`src/userspace/capsule_file_manager/spawn.rs:49`). There is no Network
-bit (`0x0004`), no FileSystem bit (`0x0040`), and no hardware, driver, MMIO, or DMA capability. The
-capsule cannot read a block device, open a socket, or touch a device register on its own. Every action
-that appears to touch a file is an IPC call to the `vfs_pool` service, which holds the real authority.
+`0x1859 = 0x0001 + 0x0008 + 0x0010 + 0x0040 + 0x0800 + 0x1000`. The kernel spawn path requests exactly
+those six capabilities and no others (`src/userspace/capsule_file_manager/spawn.rs:49`). There is no
+Network bit (`0x0004`), and no hardware, driver, MMIO, or DMA capability. The capsule holds `FileSystem`
+as the capability gate for its vfs requests, but it cannot read a block device, open a socket, or touch a
+device register on its own: every action that touches a file is an IPC call to the `vfs_pool` service,
+which holds the storage authority and enforces the path checks.
 
 ## The pillars
 
@@ -85,6 +87,6 @@ markers.
 ## Source map
 
 Everything here is drawn from `userland/capsule_file_manager/` (the capsule source and its `Capsule.mk`),
-`src/capabilities/types.rs` (the capability bits), the kernel spawn mirror under
+`src/capabilities/types/defs.rs` (the capability bits), the kernel spawn mirror under
 `src/userspace/capsule_file_manager/`, and the shared vfs client under
 `userland/app_skeleton/src/clients/vfs/`. Every reference above is verified against those trees.

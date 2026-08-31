@@ -28,7 +28,7 @@ The reply endpoint id `4294967298` is `0x1_0000_0002`, the constant the server s
 (`KERNEL_REPLY_ENDPOINT`, `src/protocol/types.rs:32`). The manifest reply port is 4099; the kernel routes
 the reply frame from that endpoint id back to the caller that issued the `mk_ipc_call`.
 
-The mask `0x39` decomposes into four bits, checked against `src/capabilities/types.rs`:
+The mask `0x39` decomposes into four bits, checked against `src/capabilities/types/defs.rs`:
 
 | Bit | Value | Grants |
 |-----|-------|--------|
@@ -119,7 +119,7 @@ and wipes the buffer. The [debugging](debugging.md) page covers what the marker 
   userland/capsule_keyring/src/server/             the loop, dispatch, handlers, and signing builders
   userland/capsule_keyring/src/store/              the key store and its owner-checked operations
   userland/capsule_keyring/Capsule.mk              slug, handle, ports, capability mask, kernel mirror
-  src/capabilities/types.rs                        the capability bit values
+  src/capabilities/types/defs.rs                        the capability bit values
   src/security/keyring_capsule/                    the kernel-side embed and verified spawn
   src/security/capsule_manifest/verify/caps.rs     the installed-caps rule (required | optional & granted)
   src/kernel_core/process_spawn/capsule_spawn/runner/verified.rs   caps come from the manifest

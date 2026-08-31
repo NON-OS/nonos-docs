@@ -10,14 +10,15 @@ the [GPU client](gpu-client.md), and the [cursor and input](cursor-and-input.md)
 The first thing to confirm is that the capsule spawned. On a successful boot the kernel logs
 `[COMPOSITOR] capsule spawned`: the desktop fleet calls `boot("COMPOSITOR", "compositor", ...)` and its `Ok`
 arm calls `boot_log::ok(prefix, "capsule spawned")`
-(`src/userspace/init/spawn_plan/desktop_fleet.rs:93`, `src/userspace/init/capsule_boot/run.rs:29`). If that
+(`src/userspace/init/spawn_plan/desktop_fleet/mod.rs`, `src/userspace/init/capsule_boot/run.rs:29`). If that
 line is absent the capsule never started, and the `Err` arm logged an error line through `boot_log::error`
 instead (`capsule_boot/run.rs:32`), which is the usual signature, manifest, or capability failure.
 
-The install path also emits a `[SPAWN]` line: `[SPAWN] name=compositor pid=0x... caps=0x7819 entry=0x...`
-(`src/kernel_core/process_spawn/capsule_spawn/runner/install/spawn_log.rs:18` through `:26`). Note
-`caps=0x7819`, the granted mask, not the `0x7919` manifest ceiling (the two differ only in the `Debug` bit,
-[README](README.md)).
+The install path also emits a `[SPAWN]` line: `[SPAWN] name=compositor pid=0x... caps=0x7919 entry=0x...`
+(`src/kernel_core/process_spawn/capsule_spawn/runner/install/spawn_log.rs:18` through `:26`). The field
+reads `caps=0x7919`: the marker prints the manifest-derived installed mask, not the `0x7819`
+`requested_caps` the spawn site passes, so the `Debug` bit the compositor requires is present
+([README](README.md)).
 
 The compositor is the display service the desktop fleet's clients wait on: the boot splash and wallpaper
 poll `mk_service_lookup("compositor")` and retry until it resolves, so a desktop that never paints usually
@@ -83,7 +84,7 @@ follow-up (`src/state/damage.rs:18`).
 ## Source map
 
 ```
-  src/userspace/init/spawn_plan/desktop_fleet.rs   the [COMPOSITOR] boot marker call
+  src/userspace/init/spawn_plan/desktop_fleet/mod.rs   the [COMPOSITOR] boot marker call
   src/userspace/init/capsule_boot/run.rs           the ok / error boot-log arms
   src/kernel_core/.../install/spawn_log.rs          the [SPAWN] name=/caps=/entry= line
   userland/compositor/src/wait_for_setup.rs         backend selection and the acquisition hang point

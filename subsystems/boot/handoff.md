@@ -22,11 +22,12 @@ The bootloader passes a `KernelHandoff` (`src/boot/handoff/kernel_handoff/handof
 This is the contract between the bootloader and the kernel: the memory map the [frame allocator](../memory/physical-frames.md)
 seeds from, the framebuffer the [display](../graphics/README.md) maps, the timing the
 [clock](../time-and-clock/calibration.md) uses to skip re-calibrating what the bootloader already
-measured, and the firmware tables. The `arch` field is an enum whose only arm today is `X86_64`,
-carrying the arch-specific handoff; other architectures add arms as their boot trees land, which is
-the same [multi-architecture](../smp/README.md) boundary the rest of the kernel uses. The kernel
-downcasts the arch field once, in the three `init_arch_*` helpers, keeping the ISA-specific handoff
-handling in one place.
+measured, and the firmware tables. The `arch` field is the `ArchSpecificHandoff` enum
+(`src/boot/handoff/kernel_handoff/arch.rs:24`); it carries an `X86_64` arm (built from the loader's
+`BootHandoffV1`, `.../x86_64/from.rs:29`) and an `Aarch64` arm (built from the device-tree `BootInfo`,
+`.../aarch64/from.rs:27`), which is the same [multi-architecture](../smp/README.md) boundary the rest of
+the kernel uses. The kernel downcasts the arch field once, in the `init_arch_*` helpers, keeping the
+ISA-specific handoff handling in one place.
 
 ## Verification before handoff
 
@@ -36,14 +37,15 @@ bootloader authenticates the kernel image with the same hybrid signature posture
 an anti-rollback index against a TPM monotonic counter so an attacker cannot downgrade the kernel to an
 older, vulnerable signed image.
 
-With the `stark-kernel-attest` feature the bootloader adds a third check on top of the signature and the
-rollback index: it verifies the kernel's own transparent STARK self-attestation before the jump. It
-measures the kernel image with BLAKE3 and checks the proof, carried in the image footer, that this
+With the default `stark-kernel-attest` feature the bootloader adds a third check on top of the signature
+and the rollback index: it verifies the kernel's own transparent STARK self-attestation before the jump.
+It measures the kernel image with BLAKE3 and checks the proof, carried in the image trailer, that this
 measurement is a leaf of the enrolled kernel root
-(`nonos-bootloader/src/kernel_verify/stark_attest.rs:44`). The proof is verified by the same `nonos-stark`
+(`nonos-bootloader/src/kernel_verify/stark_attest.rs:43`). The proof is verified by the same `nonos-stark`
 crate the kernel links, so the prover and the verifier are one implementation. A zeroed root trusts
 nothing, so an un-enrolled build cannot be spoofed. Only a kernel that passes the signature check, the
-rollback check, and, when enabled, the self-attestation, is executed and handed the structure above.
+rollback check, and, when enabled, the self-attestation, is executed and handed the structure above. The
+full loader pipeline is documented on the [bootloader](bootloader.md) page.
 
 This means the trust chain is unbroken from the
 firmware root to the running capsules: the bootloader vouches for the kernel, the baked trust anchor in
@@ -66,20 +68,20 @@ that matter here are about what has already been proven by the time the kernel i
 not about the structure itself.
 
 **Fail-closed rollback in front of the handoff.** The bootloader's `check_rollback`
-(`nonos-bootloader/src/boot/crypto/rollback.rs:30`) parses the production footer, reads the
-`rollback_index`, and compares it against both the recorded kernel version (`check_kernel_version`) and
-a TPM monotonic floor (`read_floor`). When the mode requires a signature and either check fails, it
-calls `fatal_reset` (`rollback.rs:53`, `rollback.rs:65`), so a downgraded image does not reach the
-handoff at all. The floor is committed forward on a good boot by `commit_rollback` (`rollback.rs:70`),
-which pushes the index into the TPM counter through `commit_floor` (`rollback.rs:101`). The honest
-boundary the code records: when the mode does not require a signature, a detected rollback logs
-"rollback detected but dev mode - continuing" (`rollback.rs:55`) and proceeds, so the anti-rollback
-guarantee holds only for signature-enforcing boots.
+(`nonos-bootloader/src/boot/crypto/rollback/check.rs:28`) gates on the signed `rollback_index`
+(`check.rs:42`) and compares it against both the recorded kernel version (`check_kernel_version`,
+`check.rs:43`) and the TPM monotonic floor (`read_floor`, `check.rs:64`). When the mode requires a
+signature and either check fails, it calls `fatal_reset` (`check.rs:59`, `check.rs:73`), so a downgraded
+image does not reach the handoff at all. The floor is committed forward on a good boot by
+`commit_rollback` (`nonos-bootloader/src/boot/crypto/rollback/commit.rs:28`), which pushes the index into
+the TPM counter through `commit_floor` (`commit.rs:61`). The honest boundary the code records: when the
+mode does not require a signature, a detected rollback logs "rollback detected but dev mode - continuing"
+(`check.rs:61`) and proceeds, so the anti-rollback guarantee holds only for signature-enforcing boots.
 
 **The trust chain is unbroken by construction.** The bootloader authenticates the kernel before it
 jumps to it, so the running kernel is vouched for by the firmware-rooted bootloader. The kernel in turn
-carries a baked trust anchor (`BAKED_TRUST_ANCHOR_POLICY`, decoded at each capsule spawn in
-`src/security/*_capsule/spawn.rs`) that every capsule certificate is checked against. Nothing in the
+carries a baked trust anchor (decoded at each capsule spawn in the mirror's
+`src/userspace/capsule_*/spawn.rs`) that every capsule certificate is checked against. Nothing in the
 handoff structure is trusted as authority: it is a description of the machine (memory map, framebuffer,
 timing, CPU topology), and the security-relevant decisions were already made before it was populated.
 
@@ -88,24 +90,25 @@ timing, CPU topology), and the security-relevant decisions were already made bef
 The machine this runs on may have no serial port, and the kernel's on-screen text console is off by
 design (see [kernel init](kernel-init.md)), so the primary handoff diagnostic is the bootloader's own
 log, which draws to the GOP framebuffer before the kernel takes over. On a signature-enforcing boot the
-lines to look for are "Anti-rollback check PASSED" (`rollback.rs:44`) and the
-"tpm floor {} index {}" info line (`rollback.rs:59`), which print the floor the TPM counter enforces and
-the index the image carries. A boot that dead-ends on the bootloader's red "Rollback attack detected"
-screen (`show_error_screen`, `rollback.rs:51` / `rollback.rs:63`) is the footer version or the TPM floor
-rejecting the image, not a kernel fault. If the footer itself will not parse, `commit_rollback` logs
-"kernel version footer parse failed" (`rollback.rs:78`) and resets. When the bootloader log shows the
-image accepted but the kernel never prints its own first serial line, the handoff structure reached the
-kernel and the fault is in early kernel bring-up rather than verification.
+lines to look for are "Anti-rollback check PASSED" (`check.rs:47`) and the
+"tpm floor {} index {}" info line (`check.rs:65`), which print the floor the TPM counter enforces and
+the index the image carries. A boot that dead-ends on the bootloader's red error screen
+(`show_error_screen`, `check.rs:57` / `check.rs:71`) is the footer version or the TPM floor rejecting the
+image, not a kernel fault. If the footer itself will not parse, `commit_rollback` logs "kernel version
+footer parse failed" (`commit.rs:36`) and resets. When the bootloader log shows the image accepted but
+the kernel never prints its own first serial line, the handoff structure reached the kernel and the fault
+is in early kernel bring-up rather than verification.
 
 ## Source map
 
 ```
-  src/boot/handoff/kernel_handoff/handoff.rs   the KernelHandoff structure (memory, cpus, console,
-                                               framebuffer, timing, measurement, arch)
-  src/boot/handoff/types/                       the handoff payload types
-  src/boot/firmware/                            the ACPI / SMBIOS init from the handoff
-  nonos-bootloader/src/boot/crypto/rollback.rs  check_rollback / commit_rollback, the TPM floor
-  nonos-bootloader/                             the bootloader crate (kernel signature verification)
+  src/boot/handoff/kernel_handoff/handoff.rs        the KernelHandoff structure (memory, cpus, console,
+                                                    framebuffer, timing, measurement, arch)
+  src/boot/handoff/kernel_handoff/arch.rs           the ArchSpecificHandoff enum (X86_64, Aarch64 arms)
+  src/boot/handoff/types/                            the handoff payload types
+  src/boot/firmware.rs                               the ACPI / SMBIOS init from the handoff
+  nonos-bootloader/src/boot/crypto/rollback/         check_rollback / commit_rollback, the TPM floor
+  nonos-bootloader/                                  the bootloader crate (kernel signature verification)
 ```
 
 Every reference above is verified against those trees. The init sequence the kernel runs once it holds

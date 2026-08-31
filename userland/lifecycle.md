@@ -54,9 +54,9 @@ keyring, entropy, crypto, and policy (`src/userspace/init/spawn_plan/core.rs:22`
 Driver startup is grouped as virtio, bus, input, NIC, USB, and storage
 (`src/userspace/init/spawn_plan/orchestrator.rs:29`). Network startup calls L2,
 IP, UDP, DHCP, TCP, DNS, Nym, and sockets in that order
-(`src/userspace/init/spawn_plan/network.rs:17`). Desktop startup calls GUI core,
+(`src/userspace/init/spawn_plan/network/mod.rs`). Desktop startup calls GUI core,
 WM, wallpaper catalog, wallpaper, shell, and desktop services
-(`src/userspace/init/spawn_plan/desktop_fleet.rs:17`). Desktop services are image
+(`src/userspace/init/spawn_plan/desktop_fleet/mod.rs`). Desktop services are image
 codec, clipboard, attest, login, and toolkit
 (`src/userspace/init/spawn_plan/desktop_services.rs:17`).
 

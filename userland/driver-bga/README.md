@@ -43,7 +43,7 @@ need is spelled out by its sibling, the virtio-gpu driver, whose manifest declar
 `CAPSULE_REQUIRED_CAPS := 0x1F9019` for `CoreExec | IPC | Memory | GraphicsSurfaceCreate | DeviceEnum |
 Driver | Mmio | Irq | Dma | Pio` (`userland/capsule_driver_virtio_gpu/Capsule.mk:16`). The BGA capsule
 uses a strict subset of the broker syscalls (no IRQ, no DMA, no PIO, no surface), so the capabilities its
-code actually exercises are exactly these five, each decomposed against `src/capabilities/types.rs`:
+code actually exercises are exactly these five, each decomposed against `src/capabilities/types/bit.rs`:
 
 ```
   0x00001  CoreExec       bit()      1     types.rs:56    the capsule runs at all
@@ -56,7 +56,7 @@ code actually exercises are exactly these five, each decomposed against `src/cap
 
 The `DeviceEnum` / `Driver` / `Mmio` split is the broker's own vocabulary: `DeviceEnum` is
 enumerate-only, `Driver` lets a capsule claim and release a device, and `Mmio` lets a claim holder map a
-BAR slice into its own address space (`src/capabilities/types.rs:35`). The BGA source touches no IRQ, DMA,
+BAR slice into its own address space (`src/capabilities/types/defs.rs`). The BGA source touches no IRQ, DMA,
 or PIO wrapper, so a promoted manifest would not carry `Irq` (0x40000), `Dma` (0x80000), or `Pio`
 (0x100000).
 
@@ -165,7 +165,7 @@ ever released (`src/main.rs:33`, `src/handles.rs:31`).
   userland/capsule_driver_bga/src/constants.rs    PCI identity, BAR indices, DISPI indices, mode, clear colour
   userland/capsule_driver_bga/Cargo.toml          crate and binary name, panic=abort
   userland/capsule_driver_bga/README.md           the crate README: parked status and the promotion checklist
-  src/capabilities/types.rs                       the capability bits a promoted manifest would declare
+  src/capabilities/types/bit.rs                   the capability bit values a promoted manifest would declare
   userland/capsule_driver_virtio_gpu/Capsule.mk   the sibling driver's manifest, as the promotion model
   docs/subsystems/hardware-broker/                the claim, mmio, and pio grant contracts
 ```

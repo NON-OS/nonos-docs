@@ -1,8 +1,8 @@
 # The Node Directory
 
 This page documents the signed node directory: the `NYMD` wire format, the Ed25519 authority check, the
-validity window and epoch anti-rollback, the node record parse, the layered five-hop route selection, and the
-HTTP fetch that pulls a directory over `net.tcp`. It mirrors `src/topology/` and `src/directory_sync/`. The
+validity window and epoch anti-rollback, the node record parse, the layered four-hop route selection, and the
+TLS fetch that pulls a directory over `net.tcp`. It mirrors `src/topology/` and `src/directory_sync/`. The
 route header that consumes the selected hops is on the [mixnet](mixnet.md) page; the trusted-authority store
 the verify path consults is on the [state](state.md) page.
 
@@ -29,12 +29,12 @@ A directory is a 128-byte header followed by fixed-size node records (`src/topol
   24      8     not-after (ms)                      parse.rs:56
   32      32    issuer public key                   parse.rs:64
   64      64    Ed25519 signature                   verify.rs:31
-  128     ..    node records, 74 bytes each         NODE_WIRE_LEN:21
+  128     ..    node records, 76 bytes each         NODE_WIRE_LEN:7
 ```
 
 `layout::check_len` requires the body to be at least the 128-byte header, reads the node count, rejects zero
 (`Empty`) and a count over `NODE_CAP` (128) (`TooLarge`), and requires the body length to be exactly
-`128 + count * 74` (`src/topology/layout.rs:21`). Each node record is 74 bytes:
+`128 + count * 76` (`src/topology/layout.rs:21`). Each node record is 76 bytes:
 
 ```
   offset  size  field                     node.rs
@@ -42,12 +42,15 @@ A directory is a 128-byte header followed by fixed-size node records (`src/topol
   1       1     layer
   2       2     delay_ms
   4       4     IP
-  8       2     port
+  8       2     port     (routing / mix port a header names)
   10      32    identity
   42      32    packet_key (X25519 public)
+  74      2     ws_port  (WebSocket port a client dials)
 ```
 
-`node::parse` reads those fields and rejects an unknown role byte (`src/topology/node.rs:19`).
+`node::parse` reads those fields and rejects an unknown role byte (`src/topology/node.rs:3`). A node carries
+both ports because a gateway answers on a different port for client sessions than for the packets it routes,
+so a routing address cannot double as a dial address (`src/topology/types.rs:26`).
 
 ## The signature check
 
@@ -79,47 +82,69 @@ the same predicates: `Missing`, `Ready`, `Expired`, `Clock`, or `UntrustedAuthor
 
 ## Route selection
 
-`route` selects five hops from the current directory using the route seed (`src/topology/select.rs:22`). The
-route is fixed shape: an entry gateway, three mixes at layers 1, 2, and 3, and an exit gateway:
+`route` selects four hops from the current directory using the route seed (`src/topology/select.rs:29`). The
+route is fixed shape: three mixes at layers 1, 2, and 3, then an exit gateway:
 
 ```
-  hop 0  EntryGateway  (any layer)
-  hop 1  Mix layer 1
-  hop 2  Mix layer 2
-  hop 3  Mix layer 3
-  hop 4  ExitGateway   (any layer)
+  hop 0  Mix layer 1     select.rs:32
+  hop 1  Mix layer 2     select.rs:33
+  hop 2  Mix layer 3     select.rs:34
+  hop 3  ExitGateway     select.rs:35
 ```
+
+Five nodes carry a packet, but only these four are hops the header holds a layer for. The **entry gateway is
+not a Sphinx hop**: the capsule already holds a session with it, hands it the packet directly, and it forwards
+to the first mix the header names (`select.rs:22`, `ROUTE_HOPS = 4` at `src/topology/types.rs:11`). Listing
+the entry gateway as hop 0 would ask it to forward the packet to itself. The two route variants that pin the
+last hop, `route_to` (ending at the recipient's gateway) and `route_home` (ending at ours), are on the
+[mixnet subsystem](../../subsystems/networking/mixnet.md) page.
 
 For each position, `pick` filters the node set to the matching role and, for mixes, the matching layer, then
-selects one deterministically by taking a seed byte modulo the number of candidates (`select.rs:33`). An empty
+selects one deterministically by taking a seed byte modulo the number of candidates (`select.rs:39`). An empty
 candidate set at any position is `MissingHop`, which becomes `E_NO_ROUTE` at the send site. The selection is
 deterministic given the seed, so the same session and payload reproduce the same route, while different
 sessions spread across the available nodes. `snapshot` is what enforces that selection only ever runs against
-a fresh, trusted directory (`select.rs:23`).
+a fresh, trusted directory (`select.rs:30`).
 
-## Fetching a directory over net.tcp
+## Two ways a directory is installed
 
-`OP_SYNC_DIRECTORY` fetches a directory rather than taking it in the request body. `directory_sync::fetch`
-opens a TCP stream to the source, sends a plain HTTP/1.1 GET, reads the response, closes the stream, and
-parses the body (`src/directory_sync/http.rs:27`). The source is an IPv4 address, a port, a host string, and a
-path, parsed from the op body with bounded host and path lengths, a non-zero port, and a leading `/` on the
-path (`src/directory_sync/source.rs:30`). A source given once is remembered, so a later `OP_SYNC_DIRECTORY`
-with an empty body reuses it, and an empty body with no stored source is `E_DIRECTORY_SOURCE`
-(`src/server/handlers/sync_directory.rs:47`). The HTTP client is deliberately small: it builds a
-`Connection: close` request (`src/directory_sync/http/request.rs:21`), reads until the headers complete and
-the `Content-Length` body has arrived or the peer closes (`src/directory_sync/http/read.rs:23`), requires a
-`200` status, and returns the body bytes (`src/directory_sync/http/parse.rs:21`). Those body bytes are then
-fed to the same signed `install` path as `OP_SET_TOPOLOGY`, so a fetched directory is verified exactly like a
-pushed one; the transport is untrusted and the signature is what is trusted (`sync_directory.rs:56`).
+There are two install paths, with two different trust models. Both feed the same `store`, freshness, and epoch
+rules above once the node set is in hand.
+
+**Signed push (`OP_SET_TOPOLOGY`, `OP_SYNC_DIRECTORY`).** A `NYMD` body is verified through the Ed25519
+`install` path: the transport is untrusted and the operator signature is what is trusted. `OP_SYNC_DIRECTORY`
+can fetch that body rather than take it in the request; the source is a bounded IPv4 address, port, host, and
+path (`src/directory_sync/source.rs:30`), and a source given once is remembered so a later empty-body sync
+reuses it (`src/server/handlers/sync_directory.rs`).
+
+**Live TLS fetch (`directory_tick`).** The path that actually runs at boot pulls the current node list from
+the real Nym validator API over the stack's own [TLS 1.3](../../subsystems/networking/tls.md), not plain HTTP.
+`live::fetch_role` calls `fetch_tls(tcp_port, "validator.nymtech.net", path)` and parses the JSON node objects
+the API returns (`src/directory_sync/live.rs:60`, `:9`), across three separate fetches, one per role:
+mixnodes, entry gateways, and exit gateways (`live.rs:14`). This directory is authenticated only by the TLS
+certificate chain, which is weaker than an operator-pinned signature, so it is recorded as `fetched` rather
+than `Signed` (`live.rs:23`). It is installed through `install_fetched`, still subject to the freshness and
+epoch store.
+
+The fetch is deliberately hardened against boot-time crypto contention, because each TLS handshake can lose
+its certificate hash to a busy crypto pool and come back as a certificate error (net/nym code 20). The three
+stages retry: the gateway and exit fetches each re-ask up to twelve times (`src/directory_sync/stages.rs:49`,
+`:82`), and the directory tick is not considered done until the installed directory carries **both** a gateway
+and an exit (`src/server/directory_tick.rs:56`). An earlier revision fetched the gateway list once with no
+retry; an empty gateway list made a route home impossible and every send was refused, and stopping on a
+gateways-but-no-exit sync left the mixnet unusable in a way that never recovered. After a successful sync,
+`rebind_if_unknown` drops the boot-time gateway if the fresh directory does not describe it and the serve loop
+dials one it does (`src/server/rebind.rs:34`). The full sequence is on the
+[mixnet subsystem](../../subsystems/networking/mixnet.md) page.
 
 ## Real versus design
 
 The verify, epoch, freshness, and selection logic is real and self-contained: it makes a genuine
-`crypto_ed25519_verify` call, enforces anti-rollback, and produces a concrete five-hop route. What the tree
-does not contain is a NONOS-run directory authority or a live set of mix nodes, so the directory has to be
-supplied by an external operator, pushed with `OP_SET_TOPOLOGY` or fetched with `OP_SYNC_DIRECTORY` from a
-server that publishes the `NYMD` format. The capsule is the client and verifier of a directory; it is not the
-authority that issues one.
+`crypto_ed25519_verify` call, enforces anti-rollback, and produces a concrete four-hop route. What the tree
+does not contain is a NONOS-run directory authority or a NONOS-operated set of mix nodes. The live path
+therefore points at the public Nym validator and trusts the TLS chain; a `NYMD`-signing operator can be
+supplied through `OP_SET_TOPOLOGY` for the stronger signed model. The capsule is the client and verifier of a
+directory; it is not the authority that issues one.
 
 ## Source map
 
@@ -130,14 +155,15 @@ authority that issues one.
   userland/capsule_net_nym/src/topology/verify.rs     the trusted-authority gate and Ed25519 verify
   userland/capsule_net_nym/src/topology/node.rs       the 74-byte node record parse
   userland/capsule_net_nym/src/topology/store.rs      the epoch anti-rollback and freshness store
-  userland/capsule_net_nym/src/topology/select.rs     the layered five-hop route selection
+  userland/capsule_net_nym/src/topology/select.rs     the layered four-hop route selection
   userland/capsule_net_nym/src/topology/status.rs     the OP_TOPOLOGY_STATUS predicates
   userland/capsule_net_nym/src/topology/clock.rs      the mk_time_millis wrapper
-  userland/capsule_net_nym/src/directory_sync/http.rs        the fetch pipeline over net.tcp
-  userland/capsule_net_nym/src/directory_sync/source.rs      the HTTP source parse
-  userland/capsule_net_nym/src/directory_sync/http/request.rs the GET request build
-  userland/capsule_net_nym/src/directory_sync/http/read.rs    the response read
-  userland/capsule_net_nym/src/directory_sync/http/parse.rs   the status and body parse
+  userland/capsule_net_nym/src/directory_sync/live.rs       the live TLS fetch of the Nym validator API
+  userland/capsule_net_nym/src/directory_sync/stages.rs     the three-stage fetch with gateway/exit retry
+  userland/capsule_net_nym/src/directory_sync/https.rs      the TLS fetch over net.tcp
+  userland/capsule_net_nym/src/directory_sync/source.rs     the signed-push source parse
+  userland/capsule_net_nym/src/server/directory_tick.rs     the idle-tick sync, done only with gateway+exit
+  userland/capsule_net_nym/src/server/rebind.rs             move onto a directory-described gateway
 ```
 
 Every reference above is verified against those trees.

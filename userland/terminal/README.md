@@ -13,21 +13,32 @@ so a page can be read beside the folder it describes.
 | Service handle | `app.terminal` | `Capsule.mk:2` |
 | Service endpoint | `service:4722:app.terminal` | `Capsule.mk:8` |
 | Reply endpoint | `reply:4723:endpoint.app.terminal.reply` | `Capsule.mk:9` |
-| Capability mask | `0x1819` | `Capsule.mk:11` |
+| Capability mask | `0x187d` | `Capsule.mk:18` |
 
-The mask decomposes into five bits, checked against `src/capabilities/types.rs`:
+The mask `0x187d` decomposes into eight bits, checked against `src/capabilities/types/defs.rs`:
 
 | Bit | Value | Grants |
 |-----|-------|--------|
 | CoreExec | `0x0001` | run as a process |
+| Network | `0x0004` | reach the network stack for the `nox`, `ping`, and mixnet builtins |
 | IPC | `0x0008` | send and receive on its endpoints |
 | Memory | `0x0010` | map its own heap and stack |
+| Crypto | `0x0020` | drive the kernel crypto path its builtins use |
+| FileSystem | `0x0040` | the filesystem-capability gate for its file builtins |
 | GraphicsDisplayQuery | `0x0800` | ask the compositor for the display geometry |
 | GraphicsSurfaceCreate | `0x1000` | create the window surface it draws into |
 
-The terminal holds no filesystem, network, driver, or crypto capability of its own. Every file listing,
-name lookup, or install it performs is a request to another capsule that does hold that right, checked at
-that capsule's boundary. Compromising the terminal yields the terminal's mask and nothing more.
+```
+  0x187d = 0x0001 + 0x0004 + 0x0008 + 0x0010 + 0x0020 + 0x0040 + 0x0800 + 0x1000
+```
+
+The terminal is a wider capsule than a pure GUI app because its shell reaches
+services directly: the `nox`/`ping`/mixnet builtins need `Network`, the file
+builtins carry `FileSystem`, and `Crypto` backs the kernel crypto path those
+builtins drive. It still holds no driver, MMIO, IRQ, or DMA capability, so it
+cannot touch hardware; and the heavy work still lands at the boundary of whatever
+service actually holds the data (vfs, net, market). Compromising the terminal
+yields this mask and nothing more.
 
 ## The four pillars
 
@@ -61,5 +72,5 @@ the input-driven paint loop. A successful spawn prints `[TERMINAL] capsule spawn
 ## Source map
 
 Everything here is drawn from `userland/capsule_terminal/` (the capsule source and its `Capsule.mk`),
-`src/capabilities/types.rs` (the capability bits), and the kernel spawn mirror under
+`src/capabilities/types/defs.rs` (the capability bits), and the kernel spawn mirror under
 `src/userspace/capsule_terminal/`. Every reference above is verified against those trees.

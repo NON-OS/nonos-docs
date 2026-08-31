@@ -56,9 +56,10 @@ and storage groups each call their capsule spawn functions in fixed order
 
 ## 2. Driver contract table
 
-Each of the thirteen non-network drivers has a dedicated page in
-[capsule-catalog](capsule-catalog/) with the full operation reference, bring-up,
-and source map; the `Page` column links it. The five network drivers
+Each of the thirteen non-network drivers has a dedicated page in its own
+`driver-<name>/` folder here (for example [driver-nvme](driver-nvme/README.md))
+with the full operation reference, bring-up, and source map; the `Page` column
+links it. The five network drivers
 (`e1000`, `iwlwifi`, `rtl8139`, `rtl8169`, `virtio_net`) are documented by the
 [networking subsystem](../subsystems/networking/README.md) and have no dedicated
 capsule page. Masks below are the signed `CAPSULE_REQUIRED_CAPS` from each
@@ -67,22 +68,22 @@ capsule's `Capsule.mk`.
 | Capsule | Service | Caps | Protocol operations | Entrypoint | Page | Spec refs |
 |---------|---------|------|---------------------|------------|------|-----------|
 | `driver.virtio_rng` | `service:4200:driver.virtio_rng` | `0x1F8019` | fill random, healthcheck | `userland/capsule_driver_virtio_rng/src/main.rs:35` | [driver-virtio-rng](driver-virtio-rng/README.md) | `userland/capsule_driver_virtio_rng/Capsule.mk:13`, `userland/capsule_driver_virtio_rng/Capsule.mk:17`, `userland/capsule_driver_virtio_rng/src/protocol/ops.rs:21` |
-| `driver.virtio_blk0` | `service:4202:driver.virtio_blk0` | `0x1F8019` | healthcheck, capacity, read blocks, write blocks, flush | `userland/capsule_driver_virtio_blk/src/main.rs:30` | [driver-virtio-blk](driver-virtio-blk/README.md) | `userland/capsule_driver_virtio_blk/Capsule.mk:13`, `userland/capsule_driver_virtio_blk/Capsule.mk:16`, `userland/capsule_driver_virtio_blk/src/protocol/ops.rs:16` |
-| `driver.virtio_net0` | `service:4204:driver.virtio_net0` | `0x1F8019` | healthcheck, link status, MAC address, TX packet, RX packet | `userland/capsule_driver_virtio_net/src/main.rs:36` | [networking](../subsystems/networking/README.md) | `userland/capsule_driver_virtio_net/Capsule.mk:14`, `userland/capsule_driver_virtio_net/Capsule.mk:17`, `userland/capsule_driver_virtio_net/src/protocol/ops.rs:21` |
-| `driver.virtio_gpu0` | `service:4226:driver.virtio_gpu0` | `0x1F9019` | healthcheck, controller info, display info, controlq state, query caps, create resource, attach backing, transfer to host, set scanout, flush, mode list, primary surface | `userland/capsule_driver_virtio_gpu/src/main.rs:35` | [driver-virtio-gpu](driver-virtio-gpu/README.md) | `userland/capsule_driver_virtio_gpu/Capsule.mk:12`, `userland/capsule_driver_virtio_gpu/Capsule.mk:16`, `userland/capsule_driver_virtio_gpu/src/protocol/ops.rs:16` |
+| `driver.virtio_blk0` | `service:4202:driver.virtio_blk0` | `0x1F8119` | healthcheck, capacity, read blocks, write blocks, flush | `userland/capsule_driver_virtio_blk/src/main.rs:30` | [driver-virtio-blk](driver-virtio-blk/README.md) | `userland/capsule_driver_virtio_blk/Capsule.mk:13`, `userland/capsule_driver_virtio_blk/Capsule.mk:16`, `userland/capsule_driver_virtio_blk/src/protocol/ops.rs:16` |
+| `driver.virtio_net0` | `service:4204:driver.virtio_net0` | `0x1F8119` | healthcheck, link status, MAC address, TX packet, RX packet | `userland/capsule_driver_virtio_net/src/main.rs:36` | [networking](../subsystems/networking/README.md) | `userland/capsule_driver_virtio_net/Capsule.mk:14`, `userland/capsule_driver_virtio_net/Capsule.mk:17`, `userland/capsule_driver_virtio_net/src/protocol/ops.rs:21` |
+| `driver.virtio_gpu0` | `service:4226:driver.virtio_gpu0` | `0x1F9119` | healthcheck, controller info, display info, controlq state, query caps, create resource, attach backing, transfer to host, set scanout, flush, mode list, primary surface | `userland/capsule_driver_virtio_gpu/src/main.rs:35` | [driver-virtio-gpu](driver-virtio-gpu/README.md) | `userland/capsule_driver_virtio_gpu/Capsule.mk:12`, `userland/capsule_driver_virtio_gpu/Capsule.mk:16`, `userland/capsule_driver_virtio_gpu/src/protocol/ops.rs:16` |
 | `driver.xhci0` | `service:4206:driver.xhci0` | `0xF8019` | healthcheck, controller status, port status, enable slot, disable slot, address device, device descriptor, config descriptor, transfer ring allocation, control transfer, interrupt in | `userland/capsule_driver_xhci/src/main.rs:36` | [driver-xhci](driver-xhci/README.md) | `userland/capsule_driver_xhci/Capsule.mk:13`, `userland/capsule_driver_xhci/Capsule.mk:16`, `userland/capsule_driver_xhci/src/protocol/ops.rs:16` |
 | `driver.ps2_kbd0` | `service:4208:driver.ps2_kbd0` | `0x358019` | healthcheck, poll events, get state, controller status, poll mouse | `userland/capsule_driver_ps2_input/src/main.rs:31` | [driver-ps2-input](driver-ps2-input/README.md) | `userland/capsule_driver_ps2_input/Capsule.mk:13`, `userland/capsule_driver_ps2_input/Capsule.mk:17`, `userland/capsule_driver_ps2_input/src/protocol/ops.rs:16` |
-| `driver.e1000_0` | `service:4210:driver.e1000_0` | `0xF8019` | healthcheck, link status, MAC address, TX packet, RX packet, stats | `userland/capsule_driver_e1000/src/main.rs:38` | [networking](../subsystems/networking/README.md) | `userland/capsule_driver_e1000/Capsule.mk:16`, `userland/capsule_driver_e1000/Capsule.mk:19`, `userland/capsule_driver_e1000/src/protocol/ops.rs:23` |
+| `driver.e1000_0` | `service:4210:driver.e1000_0` | `0xF8039` | healthcheck, link status, MAC address, TX packet, RX packet, stats | `userland/capsule_driver_e1000/src/main.rs:38` | [networking](../subsystems/networking/README.md) | `userland/capsule_driver_e1000/Capsule.mk:16`, `userland/capsule_driver_e1000/Capsule.mk:19`, `userland/capsule_driver_e1000/src/protocol/ops.rs:23` |
 | `driver.rtl8139_0` | `service:4212:driver.rtl8139_0` | `0x1D8019` | healthcheck, link status, MAC address, TX packet, RX packet, stats | `userland/capsule_driver_rtl8139/src/main.rs:35` | [networking](../subsystems/networking/README.md) | `userland/capsule_driver_rtl8139/Capsule.mk:13`, `userland/capsule_driver_rtl8139/Capsule.mk:16`, `userland/capsule_driver_rtl8139/src/protocol/ops.rs:17` |
 | `driver.rtl8169_0` | `service:4214:driver.rtl8169_0` | `0xF8019` | healthcheck, link status, MAC address, TX packet, RX packet, stats | `userland/capsule_driver_rtl8169/src/main.rs:40` | [networking](../subsystems/networking/README.md) | `userland/capsule_driver_rtl8169/Capsule.mk:13`, `userland/capsule_driver_rtl8169/Capsule.mk:16`, `userland/capsule_driver_rtl8169/src/protocol/ops.rs:17` |
 | `driver.ahci0` | `service:4216:driver.ahci0` | `0xf8019` | healthcheck, controller info, port list | `userland/capsule_driver_ahci/src/main.rs:37` | [driver-ahci](driver-ahci/README.md) | `userland/capsule_driver_ahci/Capsule.mk:14`, `userland/capsule_driver_ahci/Capsule.mk:16`, `userland/capsule_driver_ahci/src/protocol/ops.rs:17` |
-| `driver.hda0` | `service:4218:driver.hda0` | `0x78019` | healthcheck, controller info, codec mask, stream layout, codec list | `userland/capsule_driver_hda/src/main.rs:37` | [driver-hda](driver-hda/README.md) | `userland/capsule_driver_hda/Capsule.mk:14`, `userland/capsule_driver_hda/Capsule.mk:17`, `userland/capsule_driver_hda/src/protocol/ops.rs:17` |
+| `driver.hda0` | `service:4218:driver.hda0` | `0xF8119` | healthcheck, controller info, codec mask, stream layout, codec list, play tone, write PCM, stream start, stream stop | `userland/capsule_driver_hda/src/main.rs:37` | [driver-hda](driver-hda/README.md) | `userland/capsule_driver_hda/Capsule.mk:14`, `userland/capsule_driver_hda/Capsule.mk:17`, `userland/capsule_driver_hda/src/protocol/ops.rs:17` |
 | `driver.nvme0` | `service:4220:driver.nvme0` | `0xF8019` | healthcheck, controller info, identify controller, identify namespace, SMART health | `userland/capsule_driver_nvme/src/main.rs:39` | [driver-nvme](driver-nvme/README.md) | `userland/capsule_driver_nvme/Capsule.mk:14`, `userland/capsule_driver_nvme/Capsule.mk:16`, `userland/capsule_driver_nvme/src/protocol/ops.rs:17` |
 | `driver.usb_hid0` | `service:4222:driver.usb_hid0` | `0x200019` | healthcheck, probe config, feed keyboard report, feed mouse report, poll keys, poll mouse, get state | `userland/capsule_driver_usb_hid/src/main.rs:33` | [driver-usb-hid](driver-usb-hid/README.md) | `userland/capsule_driver_usb_hid/Capsule.mk:13`, `userland/capsule_driver_usb_hid/Capsule.mk:15`, `userland/capsule_driver_usb_hid/src/protocol/ops.rs:17` |
 | `driver.usb_msc0` | `service:4224:driver.usb_msc0` | `0x19` | healthcheck, probe config, build inquiry, build read capacity, build read10, build write10, accept CSW, get state | `userland/capsule_driver_usb_msc/src/main.rs:32` | [driver-usb-msc](driver-usb-msc/README.md) | `userland/capsule_driver_usb_msc/Capsule.mk:13`, `userland/capsule_driver_usb_msc/Capsule.mk:18`, `userland/capsule_driver_usb_msc/src/protocol/ops.rs:17` |
 | `driver.iwlwifi0` | `service:4228:driver.iwlwifi0` | `0xF8019` | healthcheck, device info, firmware info, RF state, DMA state, firmware stage, alive wait | `userland/capsule_driver_iwlwifi/src/main.rs:35` | [networking](../subsystems/networking/README.md) | `userland/capsule_driver_iwlwifi/Capsule.mk:12`, `userland/capsule_driver_iwlwifi/Capsule.mk:15`, `userland/capsule_driver_iwlwifi/src/protocol/ops.rs:9` |
 | `driver.i2c_pci0` | `service:4230:driver.i2c_pci0` | `0x78019` | healthcheck, controller info, register snapshot, timing info, transfer, probe | `userland/capsule_driver_i2c_pci/src/main.rs:19` | [driver-i2c-pci](driver-i2c-pci/README.md) | `userland/capsule_driver_i2c_pci/Capsule.mk:13`, `userland/capsule_driver_i2c_pci/Capsule.mk:16`, `userland/capsule_driver_i2c_pci/src/protocol/ops.rs:1` |
-| `driver.i2c_hid0` | `service:4232:driver.i2c_hid0` | `0x200019` | healthcheck, probe, descriptor | `userland/capsule_driver_i2c_hid/src/main.rs:32` | [driver-i2c-hid](driver-i2c-hid/README.md) | `userland/capsule_driver_i2c_hid/Capsule.mk:12`, `userland/capsule_driver_i2c_hid/Capsule.mk:14`, `userland/capsule_driver_i2c_hid/src/protocol/ops.rs:1` |
+| `driver.i2c_hid0` | `service:4232:driver.i2c_hid0` | `0x200119` | healthcheck, probe, descriptor | `userland/capsule_driver_i2c_hid/src/main.rs:32` | [driver-i2c-hid](driver-i2c-hid/README.md) | `userland/capsule_driver_i2c_hid/Capsule.mk:12`, `userland/capsule_driver_i2c_hid/Capsule.mk:14`, `userland/capsule_driver_i2c_hid/src/protocol/ops.rs:1` |
 
 The `i2c_hid` capsule on this branch is the relative-mouse driver: it posts
 relative pointer, wheel, and button events
@@ -100,6 +101,46 @@ build-and-sign system; its README calls it a parked source inventory for a
 future brokered BGA display capsule
 (`userland/capsule_driver_bga/README.md:5`). Treat it as reference source, not a
 shipping driver.
+
+## 2a. Maturity and hardware coverage
+
+The contract table says what each driver exposes; it does not say how far each one is actually proven,
+and the honest answer is uneven. This matrix is the load-bearing status. Coverage is split into QEMU
+(the virtual model each driver was written against) and real hardware (silicon it has actually run on).
+The maturity tag reads: PROVEN (a machine-checked proof crate or a live boot path that depends on it),
+DEMONSTRATED (shown running but without a proof artifact), IMPLEMENTED (code complete, end-to-end result
+not asserted in-repo), PARTIAL (only part of the device's function), STUB (framing or enumeration only).
+Be brutal about the difference between "the code exists" and "a byte moved."
+
+| Driver | Class | What works | Stub / partial / unproven | QEMU | Real HW | Tag |
+|--------|-------|-----------|---------------------------|------|---------|-----|
+| `virtio_gpu` (2D) | display | primary B8G8R8A8 surface, `SET_SCANOUT`/`TRANSFER_TO_HOST_2D`/`RESOURCE_FLUSH`; drives the desktop every frame | panel size from `GET_DISPLAY_INFO`, 1280x720 fallback; no EDID | yes, drives desktop | not on GPU silicon (compositor uses GOP there) | DEMONSTRATED |
+| `virtio_gpu` (3D) | display | full VirGL/Gallium stream builder, boot `SUBMIT_3D` self-test, `virgl_ready` via `QUERY_CAPS` | no shipping capsule issues `SUBMIT_3D`; needs host virglrenderer behind `virtio-vga-gl` | probe only | no | IMPLEMENTED, NOT USED |
+| `bga` | display | one-shot 1024x768x32 Bochs/BGA mode-set | parked: no `Capsule.mk`, no service, no broker path | Bochs/QEMU/VBox model | no | PARTIAL (parked) |
+| `virtio_blk` | block | real split-virtqueue DMA read and write; serves `/data` at boot | write op gated to pid 0; no proof crate | yes, boot path | paravirtual only | DEMONSTRATED |
+| `nvme` | block | admin + I/O queues, identify, SMART, 512 and 4096 LBA read/write engine | service exposes enumeration ops; read/write via block layer; no proof crate | yes | NVMe is real-HW class per coverage notes | IMPLEMENTED |
+| `ahci` | block | ATA `READ_DMA_EXT`/`WRITE_DMA_EXT` engine, port enumeration | service exposes controller-info/port-list; polled, no IRQ path; no proof crate | yes | AHCI is real-HW class per coverage notes | IMPLEMENTED |
+| `ps2_input` | input | 8042 keyboard + mouse, PIO + IRQ, posts to input ring | none material | yes | yes, real laptops | PROVEN |
+| `usb_hid` | input | boot-protocol keyboard/mouse/tablet over xHCI, posts events | client of xHCI, which is weak on real silicon | yes | partial (xHCI-dependent) | DEMONSTRATED |
+| `i2c_hid` | input | ACPI-described touchpad over `i2c_pci`, PTP report parse, posts events | depends on i2c_pci + correct ACPI `_CRS`; brittle on real HW | limited | partial | PARTIAL |
+| `i2c_pci` | bus | Intel LPSS controller bring-up, SCL timing, transaction service | no DMA; real-HW SCL/clock quirks; enumeration + transfer only | limited | partial | PARTIAL |
+| `xhci` | USB host | controller reset, port enumeration, slot/address, control + interrupt transfers | no bulk-transfer op, so mass-storage data path is unwired end to end | yes | partial | PARTIAL |
+| `usb_msc` | block-over-USB | builds/validates BOT CBW/CSW and SCSI CDBs | runs no transfer, publishes no block device, holds zero broker grants | n/a (no I/O) | n/a | STUB |
+| `hda` | audio | controller reset, codec probe, CORB/RIRB verbs, BDL, stream setup/run, PCM/tone ops | no proof or test that a sample reaches a speaker; playback unasserted | untested audio | untested audio | IMPLEMENTED, NOT PROVEN |
+| `virtio_net` | network | full split-virtqueue tx/rx; best-covered NIC | none material; QEMU-only device | yes, 8 proof bins | paravirtual only | PROVEN |
+| `e1000` | network | DMA descriptor rings, tx + rx, stats; MAC via Crypto-gated draw | real e1000e variants listed but not asserted | yes (`0x100E`), 6 proof bins | plausible, not asserted | DEMONSTRATED |
+| `rtl8139` | network | PIO tx/rx, ring buffers | QEMU model device | yes, 7 proof bins | not asserted | DEMONSTRATED |
+| `rtl8169` | network | MMIO tx/rx, descriptor rings | no proof crate; least-covered wired NIC | yes | not asserted | IMPLEMENTED |
+| `rtl8821ce` | wifi | firmware download, association MLME, WPA2 four-way on real silicon (polled, no IRQ) | polled RX; live DHCP-over-this-driver proven off-tree (HP), not in launchpad CI | model-limited | yes, real silicon | DEMONSTRATED (real HW) |
+| `virtio_rng` | entropy | virtqueue random fill | QEMU-only device | yes | paravirtual only | IMPLEMENTED |
+| `iwlwifi` | wifi | firmware image parse and DMA transfer staging, register bring-up | ALIVE / NVM / PHY-cal / secure-boot not implemented; blocked on a `.pnvm` blob; association host-tested only | partial | not proven | IMPLEMENTED, NOT PROVEN |
+
+Two cross-cutting honesty notes. First, the IOMMU is enforced under QEMU but has never been exercised on
+real hardware, so every DMA-capable driver above rests on the software bounds of the
+[DMA broker](../subsystems/hardware-broker/dma.md) plus the assumption of non-malicious device silicon,
+not on hardware isolation. Second, the block and audio drivers whose services expose only enumeration
+(`ahci`, `nvme` identify/SMART, `hda`) do have real data-path engines in-tree; what is unproven is the
+end-to-end result, not the presence of the code.
 
 ## 3. Server form
 
@@ -240,18 +281,26 @@ fifth path, [pio](../subsystems/hardware-broker/pio.md), minting a kernel-mediat
 against a port BAR. A driver holds exactly the subset of these its device needs and nothing more.
 
 The mask is where that least-privilege split is written down, and it decodes exactly to the grants a
-device requires (bits from `src/capabilities/types.rs`). The masks in the table above are not
-interchangeable; each is the smallest set for its bus:
+device requires (bits from `src/capabilities/types/bit.rs`; the enum is in `src/capabilities/types/defs.rs`).
+The masks are not interchangeable; each is the smallest set for its bus. Two bits beyond the broker
+quartet are worth calling out: `Debug` (`0x100`) is the serial-log grant most driver manifests now carry,
+and `Crypto` (`0x20`) is held only by the NICs whose MAC address is drawn through a Crypto-gated syscall
+(`e1000`, `rtl8821ce`):
 
 | Mask | Capabilities beyond CoreExec/IPC/Memory | Drivers |
 |------|-----------------------------------------|---------|
 | `0x19` | none | `usb_msc` |
-| `0x200019` | InputSource | `usb_hid`, `i2c_hid` |
-| `0x78019` | DeviceEnum, Driver, Mmio, Irq | `hda`, `i2c_pci` |
-| `0xf8019` | DeviceEnum, Driver, Mmio, Irq, Dma | `ahci`, `xhci`, `nvme`, `e1000`, `rtl8169`, `iwlwifi` |
+| `0x200019` | InputSource | `usb_hid` |
+| `0x200119` | InputSource, Debug | `i2c_hid` |
+| `0x78019` | DeviceEnum, Driver, Mmio, Irq | `i2c_pci` |
+| `0xf8019` | DeviceEnum, Driver, Mmio, Irq, Dma | `ahci`, `xhci`, `nvme`, `rtl8169`, `iwlwifi` |
+| `0xF8039` | DeviceEnum, Driver, Mmio, Irq, Dma, Crypto | `e1000` |
+| `0xF8119` | DeviceEnum, Driver, Mmio, Irq, Dma, Debug | `hda` |
+| `0xF8139` | DeviceEnum, Driver, Mmio, Irq, Dma, Crypto, Debug | `rtl8821ce` |
 | `0x1D8019` | DeviceEnum, Driver, Irq, Dma, Pio | `rtl8139` |
-| `0x1F8019` | DeviceEnum, Driver, Mmio, Irq, Dma, Pio | `virtio_rng`, `virtio_blk`, `virtio_net` |
-| `0x1F9019` | DeviceEnum, Driver, Mmio, Irq, Dma, Pio, GraphicsSurfaceCreate | `virtio_gpu` |
+| `0x1F8019` | DeviceEnum, Driver, Mmio, Irq, Dma, Pio | `virtio_rng` |
+| `0x1F8119` | DeviceEnum, Driver, Mmio, Irq, Dma, Pio, Debug | `virtio_blk`, `virtio_net` |
+| `0x1F9119` | DeviceEnum, Driver, Mmio, Irq, Dma, Pio, GraphicsSurfaceCreate, Debug | `virtio_gpu` |
 | `0x358019` | DeviceEnum, Driver, Irq, Pio, InputSource | `ps2_kbd` |
 
 Several properties are worth reading straight off that table. The HID drivers, `usb_hid` and `i2c_hid`,

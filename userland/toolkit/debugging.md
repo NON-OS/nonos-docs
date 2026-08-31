@@ -40,9 +40,9 @@ The service is spawned as its own capsule. A successful spawn logs a line of the
   [SPAWN] name=toolkit pid=0x... caps=0x19 entry=0x...
 ```
 
-`caps=0x19` confirms it was admitted with exactly `CoreExec | IPC | Memory` (`src/capabilities/types.rs:56`,
+`caps=0x19` confirms it was admitted with exactly `CoreExec | IPC | Memory` (`src/capabilities/types/defs.rs`,
 `:59`, `:60`) and, by the analysis on the [service](service.md) page, that its `COMPONENT_RENDER` will
-always answer `E_SURFACE` because it lacks `GraphicsSurfaceMap` (`src/capabilities/types.rs:69`).
+always answer `E_SURFACE` because it lacks `GraphicsSurfaceMap` (`src/capabilities/types/defs.rs`).
 
 ## Service wire signatures
 
@@ -81,7 +81,7 @@ jumps is a concurrent ticker, by design.
   userland/toolkit/src/server/dispatch.rs             per-op status routing
   userland/toolkit/src/component_dispatch/render/render.rs   render parse and E_SURFACE
   userland/toolkit/src/theme/store/state.rs           the global palette atoms
-  src/capabilities/types.rs                           the 0x19 bit decomposition and GraphicsSurfaceMap
+  src/capabilities/types/defs.rs                           the 0x19 bit decomposition and GraphicsSurfaceMap
 ```
 
 Every reference above is verified against those trees.

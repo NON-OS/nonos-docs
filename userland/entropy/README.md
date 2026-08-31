@@ -30,7 +30,7 @@ The service name on the wire is `entropy_pool` on port 4100; the reply endpoint 
 the kernel-owned inbox `endpoint.4294967299`, whose numeric form `0x1_0000_0003` is the constant
 `KERNEL_REPLY_ENDPOINT` the capsule targets (`src/protocol/types.rs:42`, `src/server/runner.rs:43`).
 
-The mask decomposes into three bits, checked against `src/capabilities/types.rs`:
+The mask decomposes into three bits, checked against `src/capabilities/types/defs.rs`:
 
 | Bit | Value | Grants |
 |-----|-------|--------|
@@ -111,7 +111,7 @@ the kernel hardware RNG so a missing capsule never starves a caller
   userland/capsule_entropy/src/protocol/               the NOEN frame, ops, limits, error codes
   userland/capsule_entropy/src/pool/                   the counters and the RDRAND fill
   userland/capsule_entropy/Capsule.mk                  slug, handle, ports, capability mask, mirror
-  src/capabilities/types.rs                            the capability bit values
+  src/capabilities/types/defs.rs                            the capability bit values
   src/security/entropy_capsule/spawn.rs                the verified kernel-side spawn
   src/userspace/init/spawn_plan/core.rs                spawn_entropy at boot
   src/userspace/init/capsule_boot/run.rs               the [ENTROPY] boot marker and error path

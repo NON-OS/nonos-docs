@@ -14,7 +14,7 @@ The kernel supports the two dominant firmware-description models, selected by ar
   aarch64, riscv64   flattened device tree (FDT)   (src/arch/fdt/)
 ```
 
-`src/arch/mod.rs:20` compiles the FDT module only for aarch64 and riscv64, and the ACPI module is part of
+`src/arch/mod.rs:23` compiles the FDT module only for aarch64 and riscv64, and the ACPI module is part of
 the x86_64 tree, so each build carries exactly the discovery mechanism its target uses. Both answer the
 same questions, the CPU inventory the [SMP](../subsystems/smp/README.md) bring-up needs and the interrupt
 topology the [interrupt](../subsystems/interrupts/README.md) layer needs, in the format the platform's

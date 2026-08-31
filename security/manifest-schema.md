@@ -142,44 +142,41 @@ are the [capability set](capabilities-and-tokens.md).
 ## Debugging a manifest rejection
 
 Every manifest failure is a `ManifestVerifyError`
-(`src/security/capsule_manifest/error.rs:45`), and unlike the certificate, the
-loader maps its variants to distinct `[RUNTIME-LOAD] FAILED reason=` strings
-(`from_vfs/load.rs:85`), so the reason string on its own separates most cases.
+(`src/security/capsule_manifest/error.rs:46`), reported through
+`SpawnError::ManifestRejected(ManifestVerifyError)`
+(`capsule_spawn/spec.rs:48`), so the variant is the whole diagnosis. The families
+below each map to a distinct variant.
 
-A structural rejection is a `Decode` wrapping a `ManifestDecodeError` and shows as
-`reason=manifest:decode`. The decoder refuses a manifest whose shape is wrong before
-any check reads its fields: `SchemaVersion` when the version is not the `3` this
-kernel accepts, `NamespaceLen` or `TargetTripleLen` when a length byte exceeds its
-fixed array, `EndpointCount` or `PublisherSignatureCount` when a vector passes
-`MAX_ENDPOINTS` or `MAX_PUBLISHER_SIGNATURES`, `EndpointKind(b)` when a byte is
-neither `Service` nor `Reply`, `DuplicateEndpoint` for a repeated declaration, and
-`SigLen { expected, got }` when a signature does not have its algorithm's length.
-These are the errors a truncated or edited manifest produces.
+A structural rejection is a `Decode` wrapping a `ManifestDecodeError`. The decoder
+refuses a manifest whose shape is wrong before any check reads its fields:
+`SchemaVersion` when the version is not the `3` this kernel accepts, `NamespaceLen`
+or `TargetTripleLen` when a length byte exceeds its fixed array, `EndpointCount` or
+`PublisherSignatureCount` when a vector passes `MAX_ENDPOINTS` or
+`MAX_PUBLISHER_SIGNATURES`, `EndpointKind(b)` when a byte is neither `Service` nor
+`Reply`, `DuplicateEndpoint` for a repeated declaration, and `SigLen { expected,
+got }` when a signature does not have its algorithm's length. These are the errors a
+truncated or edited manifest produces.
 
-The verification variants are the interesting ones and each maps to its own reason.
-A signature problem is `PublisherBadSig(alg)`, `reason=manifest:pub_sig`: the
-manifest bytes up to the signatures verified as the wrong shape or were tampered,
-since `signed_region::compute` recomputes the covered range and a change to any
-authenticated field breaks the check. `PublisherKeyRevoked` (`reason=manifest:pub_revoked`)
-and `PublisherPolicy` (`reason=manifest:pub_policy`) are the key being on an anchor
-list or missing from the certificate, not a bad signature. A capability problem is
-`CapsExceedCeiling` (`reason=manifest:caps_ceiling`), the manifest asking for a bit
-outside the certificate's ceiling, or `GrantOutsideManifest` (`reason=manifest:grant`),
-the spawn site granting a bit the manifest never declared. A binding problem is
-`NonosIdCertIdMismatch` (`reason=manifest:id_mismatch`), the manifest presented
-against a certificate it does not name, or `NamespaceOutsideCert`
-(`reason=manifest:namespace`). And the two that catch a mismatch with the running
-system are `PayloadHashMismatch` (`reason=manifest:payload_hash`), where
-`BLAKE3(elf)` did not equal the manifest's `payload_hash`, and
-`TargetTripleMismatch` (`reason=manifest:target`), and `EndpointDeclDrift`
-(`reason=manifest:endpoint`), where the spawn site tried to register a port the
-manifest did not declare.
+The verification variants are the interesting ones. A signature problem is
+`PublisherBadSig(alg)`: the manifest bytes up to the signatures verified as the
+wrong shape or were tampered, since `signed_region::compute` recomputes the covered
+range and a change to any authenticated field breaks the check. `PublisherKeyRevoked`
+and `PublisherPolicy` are the key being on an anchor list or missing from the
+certificate, not a bad signature. A capability problem is `CapsExceedCeiling`
+(`caps.rs:26`), the manifest asking for a bit outside the certificate's ceiling, or
+`GrantOutsideManifest` (`caps.rs:36`), the spawn site granting a bit the manifest
+never declared. A binding problem is `NonosIdCertIdMismatch`, the manifest presented
+against a certificate it does not name, or `NamespaceOutsideCert`. And the ones that
+catch a mismatch with the running system are `PayloadHashMismatch`, where
+`BLAKE3(elf)` did not equal the manifest's `payload_hash`, `TargetTripleMismatch`,
+and `EndpointDeclDrift`, where the spawn site tried to register a port the manifest
+did not declare.
 
 `PayloadHashMismatch` is the one to reach for first when a capsule was rebuilt: the
 ELF changed but the manifest still pins the old hash, so a signed manifest that once
 matched no longer binds these bytes. That is distinct from `PublisherBadSig`, which
 means the manifest structure itself did not authenticate; the two are easy to
-confuse and the reason string tells them apart.
+confuse and the variant tells them apart.
 
 ## Source map
 
@@ -192,7 +189,7 @@ confuse and the reason string tells them apart.
   src/security/capsule_manifest/decode/                 the bounded decoder
   src/security/capsule_manifest/verify/signed_region.rs the signed byte range
   src/security/capsule_manifest/error.rs                ManifestDecodeError, ManifestVerifyError
-  src/kernel_core/process_spawn/capsule_spawn/from_vfs/load.rs  the reason= mapping per variant
+  src/kernel_core/process_spawn/capsule_spawn/spec.rs           SpawnError::ManifestRejected(ManifestVerifyError)
 ```
 
 The pipeline that runs each check in order is on the

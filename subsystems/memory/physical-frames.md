@@ -53,7 +53,7 @@ allocator is seeded from the largest contiguous block of usable RAM the firmware
 reported. The low megabyte is always excluded by clamping the start up to
 `0x100000`, since that region holds legacy structures the kernel does not
 allocate over. If the memory map is missing or unusably small, `init_fallback`
-(`init/memory.rs:56`) tries three hard-coded ranges in turn, and a failure to
+(`src/kernel_core/init/memory.rs:96`) tries three hard-coded ranges in turn, and a failure to
 initialise at all is logged as `CRITICAL`. Only once the allocator is live does
 memory init bring up the DMA pool that depends on it.
 

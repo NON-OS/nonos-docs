@@ -27,7 +27,7 @@ The service name and both ports are also fixed in the shared proto so any client
 `POLICY_SERVICE_NAME = b"policy"`, `POLICY_SERVICE_PORT = 4108`, `POLICY_REPLY_PORT = 4109`
 (`userland/policy_proto/src/service.rs:17`).
 
-The mask `0x219` decomposes into four bits, checked against `src/capabilities/types.rs`:
+The mask `0x219` decomposes into four bits, checked against `src/capabilities/types/defs.rs`:
 
 | Bit | Value | Grants |
 |-----|-------|--------|
@@ -88,6 +88,6 @@ starts from the compiled-in defaults (`src/store/defaults/store.rs:21`).
 ## Source map
 
 Everything here is drawn from `userland/capsule_policy/` (the capsule source and its `Capsule.mk`),
-`userland/policy_proto/` (the shared wire format), `src/capabilities/types.rs` (the capability bits), and
+`userland/policy_proto/` (the shared wire format), `src/capabilities/types/defs.rs` (the capability bits), and
 the kernel-side mirror under `src/userspace/capsule_policy/` and `src/sys/policy/`. Every reference above
 is verified against those trees.

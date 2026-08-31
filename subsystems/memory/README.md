@@ -17,6 +17,7 @@ Read them roughly in this order. Each starts from the layer below it.
 | [page-allocator.md](page-allocator.md) | The tracked whole-range virtual allocator over the buddy allocator, zero-on-alloc and zero-on-free, the size and tracking bounds, and the live-usage statistics. |
 | [heap.md](heap.md) | The global allocator, the bootstrap-buffer to frame-backed transition, the mapping at the fixed heap base, and zero-on-alloc and zero-on-free. |
 | [faults.md](faults.md) | The page-fault dispatch, demand paging with its user-space-only and demand-budget guards, and copy-on-write. |
+| [mmap.md](mmap.md) | `MkMmap`/`MkMunmap`: private anonymous mapping with per-page frame allocation and zero, the per-process VA allocator, W^X enforced at the mapping gate, transactional rollback, and per-process versus system accounting. |
 | [hardening.md](hardening.md) | The W^X enforcement gate on the mapping path, guard pages, stack canaries, allocation tracking, and the violation tally. |
 | [usercopy.md](usercopy.md) | The user/kernel copy boundary: range policy, per-page presence and permission walk, and transfer through the direct map with interrupts disabled. |
 | [zeroization.md](zeroization.md) | RAM residency and the ZeroState guarantee: frame-free zeroing, heap zero-on-alloc and zero-on-free, secure-region erase, and the whole-system multi-pass wipe, stated as what the code does and does not claim. |

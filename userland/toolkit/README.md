@@ -30,7 +30,7 @@ because it links into the identity of whatever capsule pulls it in.
 | Reply endpoint | `reply:4611:endpoint.toolkit.reply` | `Capsule.mk:9` |
 | Capability mask | `0x19` | `Capsule.mk:11` |
 
-The mask decomposes into three bits, checked against `src/capabilities/types.rs`:
+The mask decomposes into three bits, checked against `src/capabilities/types/defs.rs`:
 
 | Bit | Value | Grants |
 |-----|-------|--------|
@@ -108,5 +108,5 @@ the wire signatures and what `caps=0x19` implies for the render op.
 ## Source map
 
 Everything here is drawn from `userland/toolkit/` (the crate source, `Cargo.toml`, and `Capsule.mk`),
-`src/capabilities/types.rs` (the capability bit values), and the six linking capsules under `userland/`
+`src/capabilities/types/defs.rs` (the capability bit values), and the six linking capsules under `userland/`
 that declare `nonos_toolkit`. Every reference above is verified against those trees.

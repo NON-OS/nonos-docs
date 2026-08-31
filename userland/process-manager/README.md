@@ -45,30 +45,32 @@ Everything the kernel and the service registry need to name and reach the capsul
 | Capsule slug | `process-manager` | `Capsule.mk:1` |
 | Service handle | `app.process_manager` | `Capsule.mk:2`, `src/userspace/capsule_process_manager/spawn.rs:31` |
 | Namespace | `systems.nonos.app.process_manager` | `Capsule.mk:7` |
-| Service endpoint | `service:4730:app.process_manager` | `Capsule.mk:8`, `spawn.rs:32` |
-| Reply endpoint | `reply:4731:endpoint.app.process_manager.reply` | `Capsule.mk:9`, `spawn.rs:33`, `spawn.rs:34` |
-| Capability mask | `0x1819` | `Capsule.mk:11` |
+| Service endpoint | `service:4736:app.process_manager` | `Capsule.mk:8`, `spawn.rs:32` |
+| Reply endpoint | `reply:4737:endpoint.app.process_manager.reply` | `Capsule.mk:9`, `spawn.rs:33`, `spawn.rs:34` |
+| Capability mask | `0x2001819` | `Capsule.mk:13` |
 | Binary name | `process_manager` | `Capsule.mk:5` |
 | Feature gate | `nonos-capsule-process-manager` | `Capsule.mk:6` |
 | Kernel mirror | `src/userspace/capsule_process_manager` | `Capsule.mk:12` |
 
-The mask `0x1819` decomposes into five bits, checked against `src/capabilities/types.rs`:
+The mask `0x2001819` decomposes into six bits, checked against `src/capabilities/types/defs.rs`:
 
 | Bit | Value | Grants |
 |---|---|---|
-| CoreExec | `0x0001` | run as a process (`types.rs:56`) |
-| IPC | `0x0008` | send and receive on its endpoints (`types.rs:59`) |
-| Memory | `0x0010` | map its own heap and stack (`types.rs:60`) |
-| GraphicsDisplayQuery | `0x0800` | ask the compositor for the display geometry (`types.rs:67`) |
-| GraphicsSurfaceCreate | `0x1000` | create the window surface it draws into (`types.rs:68`) |
+| CoreExec | `0x0000001` | run as a process |
+| IPC | `0x0000008` | send and receive on its endpoints |
+| Memory | `0x0000010` | map its own heap and stack |
+| GraphicsDisplayQuery | `0x0000800` | ask the compositor for the display geometry |
+| GraphicsSurfaceCreate | `0x0001000` | create the window surface it draws into |
+| ProcessControl | `0x2000000` | read the process table and signal processes |
 
-`0x0001 + 0x0008 + 0x0010 + 0x0800 + 0x1000 = 0x1819`. The kernel spawn path requests exactly those five
-capabilities and no others (`src/userspace/capsule_process_manager/spawn.rs:50`). The two graphics bits
-are the only difference between this capsule and the service pools: it is a GUI app, so it needs to query
-the display and create a surface to paint into. There is no `Network` bit (4), no `FileSystem` bit (64),
-no `Debug` bit (256), no `Admin` bit (512), and no hardware, driver, MMIO, IRQ, DMA, or PIO capability.
-The whole basis of its trust story is that it reads the process table through an introspection syscall and
-creates a surface, and it can do nothing else.
+`0x0000001 + 0x0000008 + 0x0000010 + 0x0000800 + 0x0001000 + 0x2000000 = 0x2001819`. The kernel spawn
+path requests exactly those six capabilities and no others
+(`src/userspace/capsule_process_manager/spawn.rs:50`). `ProcessControl` is what sets this capsule apart
+from an ordinary GUI app: it is the authority behind the introspection syscall that reads the process
+table and the control operations it exposes (`userland/capsule_process_manager/Capsule.mk:11`). There is
+no `Network` bit (4), no `FileSystem` bit (64), no `Debug` bit (256), no `Admin` bit (512), and no
+hardware, driver, MMIO, IRQ, DMA, or PIO capability. It reads the process table and paints a window, and
+it can do nothing else.
 
 Do not confuse this capability mask with the manifest's `input_kind_mask`. The latter is a separate,
 smaller value (`1 << 0`, key-down only) that the window subscription uses, and it is documented on the
@@ -125,7 +127,7 @@ The capsule is `no_std`/`no_main`. `_start` calls the skeleton's `run(ProcessMan
   userland/capsule_process_manager/src/pm/mod.rs    the module tree (app, event, manifest, paint, sample, state, format, theme)
   userland/capsule_process_manager/src/pm/app.rs    the App impl (manifest, event, paint, tick)
   userland/capsule_process_manager/Capsule.mk       slug, handle, ports, capability mask, kernel mirror
-  src/capabilities/types.rs                         the capability bit values behind 0x1819
+  src/capabilities/types/defs.rs                    the capability bit values behind 0x2001819
   src/userspace/capsule_process_manager/spawn.rs    the kernel-side embed and verified spawn
   src/userspace/init/spawn_plan/apps_tools.rs       the apps-and-tools fleet spawn entry
   src/userspace/init/capsule_boot/run.rs            the [APP-PROCESS-MANAGER] capsule spawned marker

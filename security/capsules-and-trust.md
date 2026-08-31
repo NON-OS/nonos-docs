@@ -79,8 +79,13 @@ makes exact.
 
 Preflight (`.../runner/preflight.rs:29`) runs two verifications in order. First
 the certificate is verified against the trust anchor. Then the manifest is
-verified against that certificate. Only after both pass does an attestation gate
-run and preflight return the installable capability set.
+verified against that certificate. Only after both pass does the attestation gate
+run and preflight return the installable capability set. The gate returns not a
+bare pass but a `Proved { measurement, authority }` recording what the capsule's
+proof was checked against and whether the shipped vendor policy or a locally
+enrolled developer root vouched for it; the [attestation](attestation.md) and
+[developer roots](developer-roots.md) pages cover it, including the publisher-tier
+carve-out that admits some capsules unattested.
 
 ## Stage one: the certificate against the anchor
 
@@ -224,48 +229,49 @@ model](../subsystems/process/README.md).
 
 ## Debugging a capsule that will not spawn
 
-A capsule that never becomes a process failed preflight, and the single line that
-tells you why is `[RUNTIME-LOAD] FAILED name=<name> reason=<reason>`
-(`from_vfs/load.rs:105`). The loader maps every `SpawnError` variant to a distinct
-reason string (`from_vfs/load.rs:83`), and the reason is the whole diagnosis. The
-three failure families that are easy to confuse each have their own reasons.
+A capsule that never becomes a process failed preflight, and the verdict is a
+`SpawnError` (`src/kernel_core/process_spawn/capsule_spawn/spec.rs:48`). For a
+capsule loaded from the store it is wrapped as `LoadError::Spawn(SpawnError)`
+(`from_vfs/error.rs`), which carries the exact spawn verdict rather than a reason
+string. The `SpawnError` variant is the whole diagnosis, and the four failure
+families that are easy to confuse each map to a distinct variant or inner error.
 
-A bad signature shows up as `reason=id_cert` when the certificate did not verify
-against the anchor, or `reason=manifest:pub_sig` when a publisher signature over
-the manifest did not verify. Both come from a signature check returning false: the
-certificate path returns `TrustAnchorBadSig` after trying every anchor key for the
-required algorithm (`nonos_id_cert/verify/dispatch.rs:44`), and the manifest path
-returns `PublisherBadSig`. Because production requires both Ed25519 and ML-DSA-65,
-a mismatch under either algorithm alone produces one of these, so a capsule signed
+A bad signature is `NonosIdCertRejected(TrustAnchorBadSig)` when the certificate
+did not verify against the anchor, or `ManifestRejected(PublisherBadSig)` when a
+publisher signature over the manifest did not verify. Both come from a signature
+check returning false: the certificate path returns `TrustAnchorBadSig` after
+trying every anchor key for the required algorithm
+(`nonos_id_cert/verify/dispatch.rs:44`), and the manifest path returns
+`PublisherBadSig`. Because production requires both Ed25519 and ML-DSA-65, a
+mismatch under either algorithm alone produces one of these, so a capsule signed
 with only one of the two never spawns in a production build.
 
-A missing or over-broad capability is a different family. `reason=manifest:caps_ceiling`
-is `CapsExceedCeiling`: the manifest asked for a bit outside the certificate's
-`allowed_caps_ceiling`, which is a request the publisher is not authorised to make
-at all. `reason=manifest:grant` is `GrantOutsideManifest`: the spawn site tried to
-grant a bit the manifest never declared. These are authority-shape rejections, not
-signature rejections, and no amount of re-signing fixes them; the manifest or the
-certificate ceiling has to change.
+A missing or over-broad capability is a different family, both inside
+`ManifestRejected(ManifestVerifyError)`. `CapsExceedCeiling` (`caps.rs:26`) is the
+manifest asking for a bit outside the certificate's `allowed_caps_ceiling`, a
+request the publisher is not authorised to make at all. `GrantOutsideManifest`
+(`caps.rs:36`) is the spawn site trying to grant a bit the manifest never declared.
+These are authority-shape rejections, not signature rejections, and no amount of
+re-signing fixes them; the manifest or the certificate ceiling has to change.
 
-A rollback or a stale identity is a third family and lands on `reason=id_cert`
-alongside the bad-signature case, because both are `IdCertVerifyError`. Here the
-distinguishing detail is which check fired inside `checks::run`
-(`nonos_id_cert/verify/checks.rs:22`), in order: `EpochStale` when the
-certificate's `trust_anchor_epoch` is behind the anchor's, `Revoked` or
-`NonosIdRevoked` when its serial or publisher id is on an anchor list, and
-`NotYetValid` or `Expired` when the wall-clock time is outside its validity
+A rollback or a stale identity is a third family, all inside
+`NonosIdCertRejected(IdCertVerifyError)`. The distinguishing detail is which check
+fired inside `checks::run` (`nonos_id_cert/verify/checks.rs:22`), in order:
+`EpochStale` when the certificate's `trust_anchor_epoch` is behind the anchor's,
+`Revoked` or `NonosIdRevoked` when its serial or publisher id is on an anchor list,
+and `NotYetValid` or `Expired` when the wall-clock time is outside its validity
 window. These run before the signature is even checked, so a rollback reject is
 cheap and does not mean the signature was wrong. The temporal checks apply only
-when the loader has a real clock: it reads the RTC and passes `None` for time if
-the clock reads a pre-2020 value (`from_vfs/load.rs:65`), so on a machine with no
-CMOS battery a capsule is not rejected as `Expired`, it is admitted on the epoch,
-revocation, and signature checks alone.
+when the loader has a real clock: the store loader derives the time through
+`validity_clock::validity_now_ms` and passes `None` before the clock is set
+(`from_vfs/load/spawn.rs:64`, `from_vfs/validity_clock.rs`), so on a machine with
+no trusted time a capsule is not rejected as `Expired`, it is admitted on the
+epoch, revocation, and signature checks alone.
 
-Attestation is the fourth family and is covered on its own page: `reason=attestation`
-is `SpawnError::AttestationRejected`, which in a strict build fires on a missing or
-failing zero-knowledge proof, distinct from every signature and capability reason
-above. Reading `reason=` first tells you which of the four you are looking at
-before you open any code.
+Attestation is the fourth family and is covered on its own page:
+`AttestationRejected` fires in a strict build on a missing or failing
+zero-knowledge proof, distinct from every signature and capability variant above.
+Reading the `SpawnError` variant tells you which of the four you are looking at.
 
 ## Source map
 
@@ -283,7 +289,9 @@ before you open any code.
   src/crypto/asymmetric/alg_id/verify.rs          per-algorithm signature verify
   src/kernel_core/process_spawn/capsule_spawn/runner/verified.rs   spawn_verified
   src/kernel_core/process_spawn/capsule_spawn/runner/preflight.rs  the two stages
-  src/kernel_core/process_spawn/capsule_spawn/from_vfs/load.rs      the [RUNTIME-LOAD] reason= mapping
+  src/kernel_core/process_spawn/capsule_spawn/spec.rs              SpawnError and its variants
+  src/kernel_core/process_spawn/capsule_spawn/from_vfs/load/spawn.rs   the store loader
+  src/kernel_core/process_spawn/capsule_spawn/from_vfs/error.rs    LoadError { Manifest, TrustAnchor, Spawn(SpawnError) }
 ```
 
 The certificate schema that stage one reads is on the

@@ -22,28 +22,29 @@ against the source, not the header.
 | Service handle | `app.text_editor` | `Capsule.mk:2` |
 | Service endpoint | `service:4726:app.text_editor` | `Capsule.mk:8` |
 | Reply endpoint | `reply:4727:endpoint.app.text_editor.reply` | `Capsule.mk:9` |
-| Capability mask | `0x1819` | `Capsule.mk:11` |
+| Capability mask | `0x1859` | `Capsule.mk:12` |
 | Window id | `0x5445_4458` | `src/editor/manifest.rs:27` |
 | Window size | `500x320`, Normal, key-down only | `src/editor/manifest.rs:19`, `manifest.rs:28`, `manifest.rs:33` |
 | Buffer capacity | `16384` bytes | `src/editor/state.rs:17` |
 | Default path | `/notes.txt` | `src/editor/state.rs:18` |
 
-The mask decomposes into five bits, whose values are checked against `src/capabilities/types.rs`:
+The mask decomposes into six bits, whose values are checked against `src/capabilities/types/defs.rs`:
 
-| Bit | Value | Grants | Source |
-|-----|-------|--------|--------|
-| CoreExec | `0x0001` | run as a process | `src/capabilities/types.rs:56` |
-| IPC | `0x0008` | send and receive on its endpoints | `src/capabilities/types.rs:59` |
-| Memory | `0x0010` | map its own heap and stack | `src/capabilities/types.rs:60` |
-| GraphicsDisplayQuery | `0x0800` | ask the compositor for the display geometry | `src/capabilities/types.rs:67` |
-| GraphicsSurfaceCreate | `0x1000` | create the window surface it draws into | `src/capabilities/types.rs:68` |
+| Bit | Value | Grants |
+|-----|-------|--------|
+| CoreExec | `0x0001` | run as a process |
+| IPC | `0x0008` | send and receive on its endpoints |
+| Memory | `0x0010` | map its own heap and stack |
+| FileSystem | `0x0040` | the filesystem-capability gate its vfs load and save calls are checked against |
+| GraphicsDisplayQuery | `0x0800` | ask the compositor for the display geometry |
+| GraphicsSurfaceCreate | `0x1000` | create the window surface it draws into |
 
-`0x0001 | 0x0008 | 0x0010 | 0x0800 | 0x1000 = 0x1819`. The spawn path requests exactly these five bits
-and no others (`src/userspace/capsule_text_editor/spawn.rs:50`). There is no Network bit, no FileSystem
-bit, and no hardware, driver, or DMA capability in the mask. The editor holds no filesystem, clipboard,
-network, driver, or crypto authority of its own. Every load, save, copy, and paste it performs is an
-outbound IPC request to a service that does hold that right, checked at that service's boundary.
-Compromising the editor yields the editor's mask and nothing more.
+`0x0001 | 0x0008 | 0x0010 | 0x0040 | 0x0800 | 0x1000 = 0x1859`. The spawn path requests exactly these six
+bits and no others (`src/userspace/capsule_text_editor/spawn.rs:50`). There is no Network bit, and no
+hardware, driver, or DMA capability in the mask. The editor holds `FileSystem` as the capability gate for
+its vfs load and save calls, but it owns no clipboard, network, driver, or crypto authority: the copy and
+paste and the actual file bytes still land at the boundary of a service that holds the data (the clipboard
+and vfs capsules), checked there. Compromising the editor yields this mask and nothing more.
 
 ## The code pillars
 
@@ -94,5 +95,5 @@ removes the last character, so there is no arbitrary insertion point to track (`
 
 Everything here is drawn from `userland/capsule_text_editor/` (the capsule source and its `Capsule.mk`),
 `userland/app_skeleton/src/` (the `App` runtime and the vfs and clipboard clients), the capability bits
-in `src/capabilities/types.rs`, and the kernel spawn mirror under `src/userspace/capsule_text_editor/`
+in `src/capabilities/types/defs.rs`, and the kernel spawn mirror under `src/userspace/capsule_text_editor/`
 and `src/userspace/init/`. Every reference above is verified against those trees.

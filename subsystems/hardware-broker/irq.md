@@ -9,7 +9,7 @@ companions across the three architectures. The code is under `src/hardware/broke
 ## The two bind modes
 
 On x86 a bind is either legacy INTx or MSI-X, and both start from the same claim and epoch check
-(`src/hardware/broker/irq/bind.rs:52`):
+(`src/hardware/broker/irq/bind/bind.rs:22`):
 
 ```
   bind(pid, req):
@@ -18,13 +18,18 @@ On x86 a bind is either legacy INTx or MSI-X, and both start from the same claim
       else:                      bind_intx(...)
 ```
 
-**INTx** (`bind.rs:68`) validates the request against the device's interrupt pin and line,
-allocates a broker vector slot, programs the IO-APIC to route the device's GSI to that vector on
-the current LAPIC, masks the line, and records a single `Intx` grant. A GSI that is already
-bound is refused with `AlreadyBound`, and if the IO-APIC program fails the just-allocated slot is
-freed before returning, so no error path leaks a vector.
+**INTx** (`irq/bind/intx.rs:25`) validates the request against the device's interrupt pin and
+line, then translates the driver's ISA IRQ number to a GSI through the MADT override
+(`ioapic::gsi_for_irq`, `intx.rs:39`, identity when no override exists) so that route, mask, ack,
+and unmask all operate on the same redirection entry. Before allocating a vector it refuses two
+cases: a GSI the kernel routes to itself is rejected with `ReservedGsi` (`intx.rs:43`), and a GSI
+already bound is rejected with `AlreadyBound` (`intx.rs:46`). It then allocates a broker vector
+slot, programs the IO-APIC to route the GSI to that vector on the running CPU's LAPIC
+(`local_id()`, `intx.rs:52`), masks the line, and records a single `Intx` grant. If the IO-APIC
+program fails the just-allocated slot is freed before returning (`intx.rs:55`), so no error path
+leaks a vector.
 
-**MSI-X** (`bind.rs:105`) is the modern path. The kernel walks the device's MSI-X capability,
+**MSI-X** (`irq/bind/msix.rs:30`) is the modern path. The kernel walks the device's MSI-X capability,
 validates the table and PBA BARs against the claimed device, allocates `vector_count` contiguous
 broker vectors, programs that many MSI-X table entries with the LAPIC redirect, enables MSI-X,
 and unmasks each entry, recording one grant per vector. The defining property is stated in the
@@ -105,13 +110,19 @@ Interrupt failures come in two shapes, diagnosed very differently.
 
 ```
   NotClaimed / StaleEpoch      the pid does not hold a current claim on the device
+  UnknownDevice                the device_id resolved a claim but no table record
   NotDeviceIrq                 the device has no interrupt pin/line to bind
+  ReservedGsi                  the resolved GSI is a line the kernel routes to itself
   AlreadyBound                 the GSI or device is already bound (by this or another pid)
   NoVector                     the broker vector pool is exhausted
   NotIntx / NoMsixCap          the flags asked for a mode the device does not have
   BadMsixBar / BadVectorCount  a malformed MSI-X request (bad table BAR, zero or over-large count)
-  MsixProgramFailed            the controller write itself failed
+  NoDeviceHandle               MSI-X asked for but the device has no kernel PCI handle
+  MsixProgramFailed            the MSI-X controller write itself failed
+  PlatformError                the INTx IO-APIC program failed (slot freed before return)
 ```
+
+The full set is `IrqBindError` in `irq/types.rs:77`.
 
 **The bind succeeds but the interrupt never fires.** This is the hard one, and it only appears on real
 hardware. The grant is valid, `poll` reports nothing, and the driver waits forever. It is not a broker
@@ -130,13 +141,17 @@ is not listening on.
 ## Source map
 
 ```
-  src/hardware/broker/irq/mod.rs        arch backend selection and the public surface
-  src/hardware/broker/irq/bind.rs       INTx and MSI-X bind (x86)
-  src/hardware/broker/irq/validate.rs   the pure MSI-X validators and error order
-  src/hardware/broker/irq/types.rs      the request/grant types and the IrqBindError variants
-  src/hardware/broker/irq/dispatch.rs   interrupt delivery to the waiting capsule
-  src/hardware/broker/irq/aarch64/      GICv3 backend
-  src/hardware/broker/irq/riscv64/      PLIC backend
+  src/hardware/broker/irq/mod.rs         arch backend selection and the public surface
+  src/hardware/broker/irq/bind/bind.rs   claim/epoch check, INTx-vs-MSI-X dispatch (x86)
+  src/hardware/broker/irq/bind/intx.rs   INTx bind: GSI translation, reserved/already-bound, route
+  src/hardware/broker/irq/bind/msix.rs   MSI-X bind: validate, contiguous vectors, program run
+  src/hardware/broker/irq/msix_ops/      the MsixOps indirection (real vs test table programming)
+  src/hardware/broker/irq/validate.rs    the pure INTx/MSI-X validators and error order
+  src/hardware/broker/irq/types.rs       the request/grant types and the IrqBindError variants
+  src/hardware/broker/irq/dispatch.rs    interrupt delivery to the waiting capsule
+  src/hardware/broker/irq/reserved.rs    the kernel-routed GSIs refused with ReservedGsi
+  src/hardware/broker/irq/aarch64/       GICv3 SPI backend
+  src/hardware/broker/irq/riscv64/       PLIC external-source backend
 ```
 
 Every reference above is verified against those trees. The kernel-side vector entry is on the

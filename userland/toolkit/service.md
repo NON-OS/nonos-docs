@@ -81,9 +81,9 @@ panel, a themed button, or a label by `ComponentKind::from_raw` (`src/component_
 The point is that `mk_surface_attach` is gated. In the kernel, `MkSurfaceAttach` requires
 `caps.can_surface_map()` (`src/syscall/contract/cap_table/mk.rs:75`), which is
 `grants(Capability::GraphicsSurfaceMap)` (`src/syscall/caps/checks/graphics.rs:29`), bit `8192`
-(`src/capabilities/types.rs:69`). The toolkit capsule is admitted with `CAPSULE_REQUIRED_CAPS = 0x19`
+(`src/capabilities/types/defs.rs`). The toolkit capsule is admitted with `CAPSULE_REQUIRED_CAPS = 0x19`
 (`userland/toolkit/Capsule.mk:11`), which is `CoreExec | IPC | Memory` (`1 | 8 | 16`,
-`src/capabilities/types.rs:56`, `:59`, `:60`) and holds no graphics bit. So the service, as configured,
+`src/capabilities/types/defs.rs`, `:59`, `:60`) and holds no graphics bit. So the service, as configured,
 cannot attach any surface: `mk_surface_attach` fails the capability check, `attached_surface` returns
 `None`, and `COMPONENT_RENDER` always answers `E_SURFACE`. The paint path is present in the code but
 unreachable from the service's own token. Capsules that actually draw do so through the [library](library.md),
@@ -95,7 +95,7 @@ in their own address space, using surfaces they own; they do not go through the 
 The service is a leaf that cannot paint. Every op is answered from the global theme atoms and the animation
 counter (`src/server/dispatch.rs:25`); it calls no other service. Its one drawing op, `COMPONENT_RENDER`,
 returns `E_SURFACE` under mask `0x19`, and it holds neither `GraphicsSurfaceCreate`
-(`src/capabilities/types.rs:68`) nor `GraphicsPresent` (`src/capabilities/types.rs:70`), so it can neither
+(`src/capabilities/types/defs.rs`) nor `GraphicsPresent` (`src/capabilities/types/defs.rs`), so it can neither
 create a surface nor present one. That bounds a compromise of the service to the cosmetic state it holds.
 
 The honest gap is caller authentication. The service does not check who is calling. Any capsule that can
@@ -111,6 +111,6 @@ Every claim above is traced to `userland/toolkit/src/main.rs` (the entry), `user
 (the receive loop and dispatch), `userland/toolkit/src/protocol/` (the NOTK header, ops, and error codes),
 and `userland/toolkit/src/component_dispatch/` (the render parse, surface attach, and paint), with the
 capability gate in `src/syscall/contract/cap_table/mk.rs`, `src/syscall/caps/checks/graphics.rs`, and
-`src/capabilities/types.rs`, the mask in `userland/toolkit/Capsule.mk`, and the theme and animation stores
+`src/capabilities/types/defs.rs`, the mask in `userland/toolkit/Capsule.mk`, and the theme and animation stores
 under `userland/toolkit/src/theme/` and `userland/toolkit/src/animation/`. Every reference above is
 verified against those trees.

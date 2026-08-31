@@ -11,11 +11,11 @@ installed mask, and entry (`src/kernel_core/process_spawn/capsule_spawn/runner/i
 `spawn_log.rs:22`):
 
 ```
-  [SPAWN] name=image_codec pid=0x... caps=0x1819 entry=0x...
+  [SPAWN] name=image_codec pid=0x... caps=0x3819 entry=0x...
 ```
 
 Then the boot helper prints `[IMAGE-CODEC] capsule spawned` (`src/userspace/init/capsule_boot/run.rs:29`,
-`src/sys/boot_log/output.rs:33`). The `caps=0x1819` field is the installed mask; if a build ever changed
+`src/sys/boot_log/output.rs:33`). The `caps=0x3819` field is the installed mask; if a build ever changed
 the requested or declared caps, that number is where it shows (the mask decomposition is on the
 [README](README.md), and how the install resolves it is on the [safety](safety.md) page). An absent pair
 means the capsule never started, usually a signature, manifest, or capability failure, and the error path

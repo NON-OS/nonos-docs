@@ -11,20 +11,23 @@ symbol scan, and QEMU boot harnesses.
 
 ## 1. Workflow map
 
+The build is split by concern into `mk/*.mk` (config, qemu, build, image, run, ci), included by the
+top-level `Makefile`; the target line numbers below are in those files, not in `Makefile`.
+
 | Workflow | Target | What it proves |
 |----------|--------|----------------|
-| Baseline build | `nonos-mk` | Builds the microkernel capsule baseline through `nonos-mk-capsules` and prints the next packaging, run, verify, and test targets (`Makefile:162`, `Makefile:164`, `Makefile:167`, `Makefile:168`, `Makefile:169`, `Makefile:170`). |
-| Toolchain bootstrap | `nonos-mk-toolchain` | Creates the toolchain stamp, installs the pinned Rust toolchain, adds UEFI target support, and installs `rust-src`, clippy, and rustfmt (`Makefile:174`, `Makefile:225`, `Makefile:228`, `Makefile:229`, `Makefile:230`). |
-| Userland libc | `nonos-mk-libc` | Builds `userland/libc` for `x86_64-nonos-user` with `-Zbuild-std=core` (`Makefile:282`, `Makefile:284`, `Makefile:286`, `Makefile:287`, `Makefile:290`). |
-| Capsule build and sign | `nonos-mk-<slug>`, `nonos-mk-<slug>-sign` | Builds the capsule ELF, signs the NØNOS-ID certificate, signs the manifest, and verifies the manifest against the trust policy (`nonos-mk/capsule.mk:149`, `nonos-mk/capsule.mk:151`, `nonos-mk/capsule.mk:180`, `nonos-mk/capsule.mk:201`, `nonos-mk/capsule.mk:217`, `nonos-mk/capsule.mk:222`). |
-| Configure a kernel | `make menuconfig`, `make from-config` | `menuconfig` walks the profiles and the security options with `tools/nonos-config` and writes `.nonos-config`; `from-config` builds exactly that profile and feature set. This is where a user assembles their own kernel. |
-| Full system image | `nonos-mk-zerostate` | The canonical production image: every capsule and driver, the transparent STARK spawn gate enforced (`microkernel-full-gui,nonos-stark-attest`), dual Ed25519 + ML-DSA-65 signing, the anti-rollback index bound into the signature, and the TPM measured-boot path. Formerly `nonos-mk-full-gui-prod`, kept as an alias. |
-| Desktop production image | `nonos-mk-desktop-gui-prod` | Requires signed artifacts for core services, drivers, network, desktop, first-party apps, attest, and power, then builds the `microkernel-desktop-gui` profile with the STARK gate. Every profile target routes through one `nonos_kernel_build` macro, so the build command exists in a single place. |
-| ESP packaging | `nonos-mk-esp` | Builds bootloader and attested kernel, copies them into the ESP, writes `boot.cfg`, writes `startup.nsh`, and reports the ESP directory (`Makefile:1208`, `Makefile:1211`, `Makefile:1213`, `Makefile:1214`, `Makefile:1215`, `Makefile:1216`, `Makefile:1217`). |
-| QEMU desktop run | `nonos-mk-run` | Builds desktop production image, packages ESP, creates block image and OVMF vars, boots QEMU with block, GPU, USB, RNG, serial, and no reboot. Network is disabled by default; `nonos-mk-run-net` enables explicit QEMU host forwarding. |
-| Static lane | `nonos-mk-verify-fast` | Runs static checks only through `nonos-mk-static` (`Makefile:1366`, `Makefile:1367`). |
-| Full verify lane | `nonos-mk-verify` | Runs static checks, production desktop trust verification, and microkernel symbol scan (`Makefile:1369`, `Makefile:1370`, `Makefile:1371`, `Makefile:1372`). |
-| Full test lane | `nonos-mk-test` | Runs full verify plus RAMFS, keyring, and desktop GUI boot harnesses (`Makefile:1374`, `Makefile:1375`). |
+| Baseline build | `nonos-mk` | Builds the microkernel capsule baseline through `nonos-mk-capsules` and prints the next packaging, run, verify, and test targets (`mk/10-qemu.mk:135`). |
+| Toolchain bootstrap | `nonos-mk-toolchain` | Creates the toolchain stamp (`mk/10-qemu.mk:146`); the stamp rule installs the pinned toolchain, adds the `x86_64-unknown-uefi` target, and installs `rust-src`, clippy, and rustfmt (`mk/20-build.mk:85`, add-uefi `:89`, rust-src `:91`). |
+| Userland libc | `nonos-mk-libc` | Builds `userland/libc` for `x86_64-nonos-user` with `-Zbuild-std=core` (`mk/20-build.mk:216`, recipe `mk/20-build.mk:208`). |
+| Capsule build and sign | `nonos-mk-<slug>`, `nonos-mk-<slug>-sign` | Builds the capsule ELF (`nonos-mk/capsule.mk:182`), asserts publisher keys (`:191`), signs the NØNOS-ID certificate (`:211`), signs the manifest (`:231`), and re-verifies the manifest against the certificate and trust policy (`:245`). |
+| Configure a kernel | `make menuconfig`, `make from-config` | `menuconfig` walks the profiles and the security options with `tools/nonos-config` and writes `.nonos-config` (`mk/20-build.mk:806`); `from-config` builds exactly that profile and feature set (`mk/20-build.mk:813`). This is where a user assembles their own kernel. |
+| Full system image | `nonos-mk-zerostate` | The canonical production image: every capsule and driver, the transparent STARK spawn gate enforced (`microkernel-full-gui,nonos-stark-attest`), dual Ed25519 + ML-DSA-65 signing, the anti-rollback index bound into the signature, and the TPM anti-rollback floor (`mk/20-build.mk:1014`). |
+| Desktop production image | `nonos-mk-desktop-gui-prod` | Requires signed artifacts for core services, drivers, network, desktop, first-party apps, attest, and power, then builds the `microkernel-desktop-gui` profile with the STARK gate (`mk/20-build.mk:984`). Every profile target routes through one `nonos_kernel_build` macro (`mk/20-build.mk:670`), so the build command exists in a single place. |
+| ESP packaging | `nonos-mk-esp` | Builds bootloader and attested kernel, copies them into the ESP, writes `boot.cfg`, writes `startup.nsh`, and reports the ESP directory (`mk/20-build.mk:1131`, kernel copy `:1148`, `boot.cfg` `:1149`, `startup.nsh` `:1150`). |
+| QEMU desktop run | `nonos-mk-run` | Builds the ZeroState production image, packages ESP, creates block image and OVMF vars, starts a software TPM, boots QEMU with block, GPU, USB, RNG, TPM, serial, and no reboot (`mk/40-run.mk:75`, qemu line `:81`). Network is NAT by default; `nonos-mk-run-net` enables explicit QEMU host forwarding. |
+| Static lane | `nonos-mk-verify-fast` | Runs static checks only through `nonos-mk-static` (`mk/40-run.mk:346`, `:303`). |
+| Full verify lane | `nonos-mk-verify` | Runs static checks, production desktop trust verification, and microkernel symbol scan (`mk/40-run.mk:349`; trust `mk/20-build.mk:375`; scan `mk/40-run.mk:318`). |
+| Full test lane | `nonos-mk-test` | Runs full verify plus RAMFS, keyring, and desktop GUI boot harnesses (`mk/40-run.mk:354`). |
 
 ```
 +----------------+
@@ -52,80 +55,49 @@ symbol scan, and QEMU boot harnesses.
 ## 2. Capsule artifact workflow
 
 Each `userland/<capsule>/Capsule.mk` declares identity and includes the shared
-capsule macro. The macro materializes the standard target set: build the ELF,
-sign cert and manifest, check publisher keys, and expose binary, cert, manifest,
-and artifact paths (`nonos-mk/capsule.mk:1`, `nonos-mk/capsule.mk:3`,
-`nonos-mk/capsule.mk:7`, `nonos-mk/capsule.mk:8`,
-`nonos-mk/capsule.mk:10`, `nonos-mk/capsule.mk:12`,
-`nonos-mk/capsule.mk:13`, `nonos-mk/capsule.mk:14`,
-`nonos-mk/capsule.mk:15`).
+capsule macro `nonos-mk/capsule.mk`, which requires the identity vars to be set
+(`nonos-mk/capsule.mk:29`) and materializes the standard target set documented in
+its header (`nonos-mk/capsule.mk:4`): build the ELF, sign cert and manifest,
+check publisher keys, and expose binary, cert, manifest, and artifact paths.
 
 Metadata is snapshotted at include time so later capsule includes cannot clobber
 earlier capsule values. The snapshot covers directory, binary name, target,
 binary path, cert path, manifest path, stale marker, publisher key paths, handle,
 domain, namespace, service endpoint, reply endpoint, required caps, optional
-caps, and cap ceiling (`nonos-mk/capsule.mk:88`, `nonos-mk/capsule.mk:91`,
-`nonos-mk/capsule.mk:94`, `nonos-mk/capsule.mk:95`,
-`nonos-mk/capsule.mk:96`, `nonos-mk/capsule.mk:98`,
-`nonos-mk/capsule.mk:102`, `nonos-mk/capsule.mk:105`,
-`nonos-mk/capsule.mk:106`, `nonos-mk/capsule.mk:107`,
-`nonos-mk/capsule.mk:108`, `nonos-mk/capsule.mk:109`,
-`nonos-mk/capsule.mk:110`).
+caps, and cap ceiling (`nonos-mk/capsule.mk:94`-`127`).
 
 The ELF rule depends on userland libc, the capsule Makefile, Cargo metadata,
 capsule sources, shared userland sources, and extra deps, then builds with the
 pinned toolchain and the `x86_64-nonos-user` target
-(`nonos-mk/capsule.mk:151`, `nonos-mk/capsule.mk:152`,
-`nonos-mk/capsule.mk:153`, `nonos-mk/capsule.mk:155`,
-`nonos-mk/capsule.mk:156`, `nonos-mk/capsule.mk:157`,
-`nonos-mk/capsule.mk:158`).
+(`nonos-mk/capsule.mk:182`, `-Zbuild-std` `:184`).
 
-The cert rule recomputes the NØNOS identity from handle, domain, and recovery,
-then signs with serial, namespace glob, caps ceiling, trust-anchor epoch,
-validity window, publisher public keys, trust-anchor seeds, metadata, and output
-path (`nonos-mk/capsule.mk:173`, `nonos-mk/capsule.mk:175`,
-`nonos-mk/capsule.mk:180`, `nonos-mk/capsule.mk:184`,
-`nonos-mk/capsule.mk:186`, `nonos-mk/capsule.mk:187`,
-`nonos-mk/capsule.mk:188`, `nonos-mk/capsule.mk:189`,
-`nonos-mk/capsule.mk:190`, `nonos-mk/capsule.mk:192`,
-`nonos-mk/capsule.mk:194`, `nonos-mk/capsule.mk:196`).
+The cert rule recomputes the NØNOS identity from handle, domain, and recovery
+(`derive-id`, `nonos-mk/capsule.mk:202`), then signs with serial, namespace glob,
+caps ceiling, trust-anchor epoch, validity window, publisher public keys,
+trust-anchor seeds, metadata, and output path (`sign-id-cert`,
+`nonos-mk/capsule.mk:211`).
 
 The manifest rule depends on the ELF, cert, capsule Makefile, and signing tool.
 It signs namespace, version, target, ELF path, required caps, optional caps,
-service endpoint, reply endpoint, publisher seeds, and output path, then verifies
-the manifest against cert and policy (`nonos-mk/capsule.mk:199`,
-`nonos-mk/capsule.mk:201`, `nonos-mk/capsule.mk:204`,
-`nonos-mk/capsule.mk:205`, `nonos-mk/capsule.mk:206`,
-`nonos-mk/capsule.mk:207`, `nonos-mk/capsule.mk:208`,
-`nonos-mk/capsule.mk:209`, `nonos-mk/capsule.mk:210`,
-`nonos-mk/capsule.mk:211`, `nonos-mk/capsule.mk:212`,
-`nonos-mk/capsule.mk:213`, `nonos-mk/capsule.mk:214`,
-`nonos-mk/capsule.mk:217`, `nonos-mk/capsule.mk:220`).
+service endpoint, reply endpoint, publisher seeds, and output path
+(`sign-manifest`, `nonos-mk/capsule.mk:231`), then verifies the manifest against
+cert and policy (`verify-manifest`, `nonos-mk/capsule.mk:245`).
 
 ## 3. Static workflow
 
-`nonos-mk-static` runs `nonos-ci/run-static-checks.sh`
-(`Makefile:1322`, `Makefile:1324`, `Makefile:1325`). The script is the local
-and CI static gate (`nonos-ci/run-static-checks.sh:1`,
-`nonos-ci/run-static-checks.sh:2`, `nonos-ci/run-static-checks.sh:3`).
+`nonos-mk-static` first runs the capability-parity and attestation-parameter
+guards (`nonos-mk-check-caps`, `mk/40-run.mk:299`) and then
+`nonos-ci/run-static-checks.sh` (`mk/40-run.mk:303`). The script is the local and
+CI static gate.
 
 The static script checks the active Cargo default profile, rejects an active
-legacy `nonos = [...]` profile, and runs the feature-profile checker
-(`nonos-ci/run-static-checks.sh:19`, `nonos-ci/run-static-checks.sh:20`,
-`nonos-ci/run-static-checks.sh:26`, `nonos-ci/run-static-checks.sh:33`,
-`nonos-ci/run-static-checks.sh:36`). It also gates architecture leaks,
-deprecated memory shims, deleted Linux-shaped syscall paths, kernel-resident
-service engines, fake userspace service directories, unexpected kernel driver
-trees, capsule README contract coverage, kernel service directory shape,
-surface/input syscall dispatch, wire shape agreement, submodule cleanliness, and
-final pass/fail exit (`nonos-ci/run-static-checks.sh:46`,
-`nonos-ci/run-static-checks.sh:55`, `nonos-ci/run-static-checks.sh:72`,
-`nonos-ci/run-static-checks.sh:78`, `nonos-ci/run-static-checks.sh:156`,
-`nonos-ci/run-static-checks.sh:168`, `nonos-ci/run-static-checks.sh:179`,
-`nonos-ci/run-static-checks.sh:192`, `nonos-ci/run-static-checks.sh:351`,
-`nonos-ci/run-static-checks.sh:363`, `nonos-ci/run-static-checks.sh:4728`,
-`nonos-ci/run-static-checks.sh:4752`, `nonos-ci/run-static-checks.sh:4777`,
-`nonos-ci/run-static-checks.sh:4801`, `nonos-ci/run-static-checks.sh:4807`).
+legacy `nonos = [...]` profile, and runs the feature-profile checker. It also
+gates architecture leaks, deprecated memory shims, deleted Linux-shaped syscall
+paths, kernel-resident service engines, fake userspace service directories,
+unexpected kernel driver trees, capsule README contract coverage, kernel service
+directory shape, surface/input syscall dispatch, wire shape agreement, submodule
+cleanliness, and a final pass/fail exit. The checks live in
+`nonos-ci/run-static-checks.sh`.
 
 This workflow does not boot the OS. It is necessary, but not sufficient, for a
 runtime change.
@@ -133,43 +105,34 @@ runtime change.
 ## 4. Trust and symbol workflow
 
 `nonos-mk-verify` first runs static checks, then calls `nonos-mk-verify-trust`,
-then calls `nonos-mk-scan` (`Makefile:1370`, `Makefile:1371`,
-`Makefile:1372`). Trust verification builds the desktop GUI production profile,
-runs host trust chain tests, runs on-disk artifact tests, and verifies the baked
-trust artifact SHA-256 ledger (`Makefile:310`, `Makefile:311`,
-`Makefile:312`, `Makefile:313`, `Makefile:314`, `Makefile:316`,
-`Makefile:317`, `Makefile:318`, `Makefile:320`, `Makefile:321`,
-`Makefile:322`).
+then calls `nonos-mk-scan` (`mk/40-run.mk:349`). Trust verification builds the
+desktop GUI production profile, runs host trust chain tests, runs on-disk
+artifact tests, and verifies the baked trust artifact SHA-256 ledger
+(`nonos-mk-verify-trust`, `mk/20-build.mk:375`).
 
 The symbol scan requires the microkernel binary, dumps symbols with `nm`, checks
 for forbidden legacy symbol fragments, runs the CI scan script, and reports pass
-when no legacy-tree symbols are found (`Makefile:1339`, `Makefile:1340`,
-`Makefile:1341`, `Makefile:1346`, `Makefile:1350`,
-`Makefile:1355`, `Makefile:1363`, `Makefile:1364`). Forbidden fragments include
-old filesystem, storage, desktop, graphics, shell, app service, agent service,
-and network service module path fragments (`Makefile:1327`,
-`Makefile:1329`, `Makefile:1334`, `Makefile:1335`,
-`Makefile:1336`, `Makefile:1337`).
+when no legacy-tree symbols are found (`nonos-mk-scan`, `mk/40-run.mk:318`).
+Forbidden fragments include old filesystem, storage, desktop, graphics, shell,
+app service, agent service, and network service module path fragments
+(`MICROKERNEL_FORBIDDEN_SYMBOLS`, `mk/40-run.mk:313`).
 
 ## 5. QEMU run workflow
 
-The normal interactive run target depends on desktop GUI production build, ESP
-packaging, a QEMU block image, and writable OVMF vars (`Makefile:1230`). The
-target boots QEMU with 2 GiB default memory, HVF when available through the
-recipe, Q35, FAT-backed ESP, OVMF code, writable OVMF vars, virtio block,
-virtio GPU, user-mode networking, XHCI keyboard and mouse, virtio RNG, serial,
-no VGA display, and no reboot (`Makefile:1235`, `Makefile:1236`,
-`Makefile:1237`, `Makefile:1238`, `Makefile:1239`, `Makefile:1240`,
-`Makefile:150`, `Makefile:152`, `Makefile:154`,
-`Makefile:155`, `Makefile:156`, `Makefile:157`, `Makefile:158`).
+The normal interactive run target depends on a software TPM start, the live
+production ZK proof, the QEMU block image and store, writable OVMF vars, the
+ZeroState kernel build, and ESP packaging (`mk/40-run.mk:75`). The target boots
+QEMU with 2 GiB default memory, HVF, Q35, FAT-backed ESP, OVMF code, writable
+OVMF vars, virtio block, virtio GPU, NAT networking, an xHCI controller (with
+PS/2 i8042 for input under hvf), virtio RNG, the swtpm CRB device, audio, a QMP
+control socket, serial, no VGA display, and no reboot (`mk/40-run.mk:81`, with
+the device variables defined in `mk/10-qemu.mk`).
 
-The serial run target uses the same desktop GUI production build and ESP, but
-runs with serial output and no display (`Makefile:1252`,
-`Makefile:1253`, `Makefile:1254`, `Makefile:1255`,
-`Makefile:1256`, `Makefile:1257`). The debug target builds the same desktop GUI
-production image and starts QEMU with GDB listen on port `1234`
-(`Makefile:1259`, `Makefile:1260`, `Makefile:1261`,
-`Makefile:1265`).
+The serial-log run target uses the desktop GUI production build and ESP but runs
+with serial output to a file and no display (`nonos-mk-run-serial-log`,
+`mk/40-run.mk:168`; the interactive `nonos-mk-run-serial` is `mk/40-run.mk:153`).
+The debug target builds the desktop GUI production image and starts QEMU with a
+GDB stub on port `1234` (`nonos-mk-debug`, `mk/40-run.mk:190`).
 
 ## 6. Runtime evidence workflow
 
@@ -196,7 +159,7 @@ The lanes above fail in a few characteristic ways, and the message tells you whi
 lane caught the problem.
 
 **The static lane fails on an arch leak.** `nonos-mk-static` runs the CI static
-script (`Makefile:1428`), which counts `cfg(target_arch)` and `crate::arch::x86_64::`
+script (`mk/40-run.mk:303`), which counts `cfg(target_arch)` and `crate::arch::x86_64::`
 uses outside `src/arch/` and fails if they grow. A build that fails here has
 generic code naming an architecture directly, the thing the
 [architecture boundary](../arch/boundary.md) exists to prevent. The fix is to
@@ -205,15 +168,15 @@ route through `Arch::` or the appropriate seam, not to raise the baseline.
 **The symbol scan fails on a forbidden symbol.** `nonos-mk-scan` dumps the
 microkernel image with `nm` and fails if it finds a legacy module-path fragment
 (old filesystem, storage, desktop, graphics, shell, or service-engine symbols),
-`Makefile:1442`. A failure means a kernel-resident implementation of something
+`mk/40-run.mk:318`. A failure means a kernel-resident implementation of something
 that should be a capsule leaked back into the image. The scan also fails outright
 if the microkernel binary does not exist, printing the build-first hint
-(`Makefile:1444`); that is an ordering problem, not a leak, so build the baseline
-first.
+(`mk/40-run.mk:320`); that is an ordering problem, not a leak, so build the
+baseline first.
 
 **Trust verification fails.** `nonos-mk-verify-trust` builds the desktop GUI
 production profile and then runs the host trust-chain tests, the on-disk artifact
-tests, and the baked-artifact SHA-256 ledger check (`Makefile:588`). A failure
+tests, and the baked-artifact SHA-256 ledger check (`mk/20-build.mk:375`). A failure
 here is a mismatch between what was signed and what the kernel would verify: a
 stale or unsigned capsule artifact, a manifest that no longer verifies against its
 certificate, or a baked trust file whose hash does not match the ledger. This is
@@ -223,14 +186,14 @@ surfaced by the verify lane rather than at capsule sign time.
 **A lane passed but the OS still misbehaves at runtime.** This is the point
 section 1 opens with: static checks are not runtime proof. `nonos-mk-verify` green
 means the static gates, trust, and symbol scan all passed, but it does not boot
-the OS. Only the QEMU harnesses in `nonos-mk-test` (`Makefile:1478`) and the
+the OS. Only the QEMU harnesses in `nonos-mk-test` (`mk/40-run.mk:354`) and the
 interactive run lanes exercise the running system. A change that compiles, signs,
 and scans clean can still fault at boot; the runtime-evidence workflow in section
 6 exists for exactly that gap.
 
 **The run lane never reaches the desktop.** `nonos-mk-run` depends on the
-production desktop build, ESP packaging, a block image, and writable OVMF vars
-(`Makefile:1282`). A boot that stalls before the desktop is usually a runtime
+software TPM, the ZeroState build, ESP packaging, a block image, and writable
+OVMF vars (`mk/40-run.mk:75`). A boot that stalls before the desktop is usually a runtime
 fault in a capsule or a driver that did not claim its device, not a build failure;
 the serial log (`QEMU_SERIAL_LOG`, default `target/qemu-serial.log`) is the first
 place to look, and the debug run lane with GDB on port 1234 is the second. A
@@ -241,14 +204,19 @@ i2c input drivers, `microkernel-full-gui` does.
 ## 9. Source map
 
 ```
-  Makefile
-    :588   nonos-mk-verify-trust    build desktop-gui-prod, then host + on-disk + ledger trust checks
-    :1282  nonos-mk-run             production build, ESP, block image, OVMF vars, then QEMU
-    :1427  nonos-mk-static          runs nonos-ci/run-static-checks.sh
-    :1442  nonos-mk-scan            nm symbol dump and forbidden-fragment scan
-    :1470  nonos-mk-verify-fast     static gates only
-    :1473  nonos-mk-verify          static + trust + scan
-    :1478  nonos-mk-test            verify + the required QEMU boot harnesses
+  mk/20-build.mk
+    :375   nonos-mk-verify-trust    build desktop-gui-prod, then host + on-disk + ledger trust checks
+    :984   nonos-mk-desktop-gui-prod  signed-artifact deps, then the microkernel-desktop-gui kernel
+    :1014  nonos-mk-zerostate       the full ZeroState image (microkernel-full-gui + nonos-stark-attest)
+    :1131  nonos-mk-esp             bootloader + attested kernel into the ESP
+  mk/40-run.mk
+    :75    nonos-mk-run             swtpm, ZeroState build, ESP, block image, OVMF vars, then QEMU
+    :303   nonos-mk-static          check-caps guards, then nonos-ci/run-static-checks.sh
+    :318   nonos-mk-scan            nm symbol dump and forbidden-fragment scan
+    :346   nonos-mk-verify-fast     static gates only
+    :349   nonos-mk-verify          static + trust + scan
+    :354   nonos-mk-test            verify + the required QEMU boot harnesses
+  mk/10-qemu.mk                     QEMU/OVMF/swtpm discovery and device variables
   nonos-ci/run-static-checks.sh     the arch-leak, shape, and contract static gates
   nonos-mk/capsule.mk               the per-capsule sign and verify rules (see signing.md)
 ```
@@ -256,6 +224,6 @@ i2c input drivers, `microkernel-full-gui` does.
 The capsule sign and verify rules these lanes depend on are on the
 [signing](signing.md) page, the target files and build ordering are on the
 [toolchain](toolchain.md) page, and the arch-leak gate enforces the boundary
-documented under [arch/](../arch/boundary.md). The anchors in this map are
-verified against the current `Makefile`; a few `file:line` citations in the older
-sections above predate small Makefile edits.
+documented under [arch/](../arch/boundary.md). The build is split into `mk/*.mk`
+(config, qemu, build, image, run, ci), included by the top-level `Makefile`; the
+anchors in this map are verified against those files.

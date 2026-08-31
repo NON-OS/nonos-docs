@@ -143,7 +143,7 @@ gets a handle to the controller.
   userland/capsule_driver_nvme/src/server/error.rs        reply_with_status and reply_decode_failed
   userland/capsule_driver_nvme/src/server/handlers/       one file per op, plus rw_parse and the smart_health packer
   userland/capsule_driver_nvme/Cargo.toml                 panic = "abort"
-  src/capabilities/types.rs                               the capability bits the mask decodes into
+  src/capabilities/types/bit.rs                             the capability bit values the mask decodes into
 ```
 
 Every reference above is verified against those trees.

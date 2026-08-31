@@ -9,7 +9,7 @@ mask see the [README](README.md).
 
 The first thing to confirm is that the capsule ran. On a successful boot the kernel prints
 `[WALLPAPER] capsule spawned` from the desktop-fleet spawn: the fleet calls `boot::capsule` with the tag
-`"WALLPAPER"` and the slug `"wallpaper"` (`src/userspace/init/spawn_plan/desktop_fleet.rs:109`), and the
+`"WALLPAPER"` and the slug `"wallpaper"` (`src/userspace/init/spawn_plan/desktop_fleet/mod.rs`), and the
 capsule boot path's `Ok` arm logs `boot_log::ok(prefix, "capsule spawned")`
 (`src/userspace/init/capsule_boot/run.rs:29`, `src/sys/boot_log/output.rs:33`). If that line is absent the
 capsule never started, and the `Err` arm logged an error line instead
@@ -75,7 +75,7 @@ under a different pid, is refused (`src/server/handlers/set_wallpaper.rs:26`,
 ## Source map
 
 ```
-  src/userspace/init/spawn_plan/desktop_fleet.rs    the [WALLPAPER] fleet spawn entry
+  src/userspace/init/spawn_plan/desktop_fleet/mod.rs    the [WALLPAPER] fleet spawn entry
   src/userspace/init/capsule_boot/run.rs            capsule spawned / error boot path
   src/sys/boot_log/output.rs                        the ok/error marker printer
   src/userspace/capsule_wallpaper/spawn.rs          requested caps=0x1819

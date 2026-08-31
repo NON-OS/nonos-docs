@@ -60,62 +60,67 @@ is zeroed.
 
 ## The ZeroState wipe
 
-The explicit whole-system erase is `secure_wipe_all_memory`
-(`src/security/wipe.rs:23`). It is a complete and correct erase routine, and it does
-considerably more than zero the heap:
+The explicit whole-system erase is now wired, and it fires on every clean exit.
+`terminate` (`src/security/zerostate/terminate.rs:35`) is described in its own source
+as "the only way out of a running system," and both the shutdown syscall
+(`src/syscall/dispatch/router/admin/shutdown.rs:26`) and the reboot syscall
+(`admin/reboot.rs:27`) reach the firmware only through it:
 
 ```
-  secure_wipe_all_memory():
-      revoke_all_consent()          drop every persistence consent
-      wipe_heap_region()            DoD 5220 multi-pass erase of the heap
-      wipe_process_memory()         zero every process's code region and VMAs
-      wipe_crypto_keys()            delete every key in the crypto vault
-      wipe_ipc_buffers()            reinitialise IPC, clearing its buffers
-      wipe_vfs_caches()             clear the filesystem caches
-      compiler_fence(SeqCst)
-      log "ZeroState secure memory wipe complete"
+  terminate(off):                                          # terminate.rs:35
+      broadcast_ipi(Ipi::Stop)      # 1. quiesce the other CPUs (best effort)
+      zerostate_shutdown_wipe()     # 2. wipe process memory, stacks, keys, heap
+      enter(off)                    # 3. hand to firmware; never returns
 ```
 
-It first revokes all persistence consent so nothing can be written out during or
-after the wipe, then erases the heap with the multi-pass routine below, then walks
-every process and volatile-zeros its code region and every virtual memory area,
-then deletes all crypto vault keys, reinitialises IPC to clear its buffers, and
-clears the VFS caches. The per-process and per-region sizes are bounds-checked
-before the wipe so a corrupt PCB cannot direct the wipe outside a sane range.
+The order is the whole point and the source says so (`terminate.rs:23`). The other
+CPUs are stopped first, because a core still scheduling would write memory behind the
+wipe and that write would survive into the next boot; quiescing first makes the wipe a
+snapshot rather than a race. The stop is best effort by design: on the shipping
+single-core boot there is nobody to stop, and on a controller that refuses the
+broadcast the honest choice is to wipe what this core can reach rather than stay up
+holding everything (`terminate.rs:31`).
 
-One thing has to be stated plainly, because the code is unambiguous about it: as
-the tree stands, `secure_wipe_all_memory` has no caller. A search of the whole
-repository finds only its definition; nothing in the kernel invokes it, not the
-shutdown path, not the panic handler, not a tamper response. The routine is
-therefore a capability, not an automatic guarantee. What enforces ephemerality in
-operation is the continuous zeroing above, which does run, on every free. The
-one-shot whole-system erase is built and correct but not wired, and making it fire
-on its own would mean calling it from the shutdown, panic, and tamper paths. This
-page records that gap rather than describing a wipe that does not currently
-trigger.
+`zerostate_shutdown_wipe` (`src/security/hardening/memory_sanitization/api.rs:59`) does
+the erase, and its own step ordering is load-bearing:
+
+```
+  zerostate_shutdown_wipe():                               # api.rs:59
+      raise SANITIZATION_LEVEL to Paranoid
+      for each process: sanitize_process_memory(pid)       # code region + every VMA
+      wipe_kernel_stacks()                                 # page-allocator stacks
+      fs::clear_caches()                                   # fs + cryptofs state
+      crypto::vault::zeroize_all_keys()                    # while the heap is readable
+      restore SANITIZATION_LEVEL
+      dod_5220_erase(heap_start, heap_size)                # LAST; covers the free list
+```
+
+It raises the sanitization level to `Paranoid` (`api.rs:63`), then walks every process
+and wipes its code region and every VMA through the owner's address space
+(`sanitize_process_memory`, `api.rs:37`, resolving the target asid and wiping through
+the directmap rather than dereferencing another AS's addresses directly). It then wipes
+the kernel stacks, which come from the page allocator and are reached by neither the
+heap erase nor the process wipe (`api.rs:73`); clears the filesystem and cryptofs
+caches (`api.rs:78`); and zeroes the crypto key vault while the heap is still readable
+(`api.rs:82`). The heap erase runs last (`api.rs:96`) because it covers the allocator's
+own free list and nothing may allocate after it; `terminate` calls into the firmware
+from there, which does not allocate. The heap extent comes from the allocator's own
+`extent()`, not a static layout constant, which the comment records as a fix for a bug
+where the wipe erased an unmapped range while every heap-resident secret stayed in DRAM
+(`api.rs:91`).
 
 ## The multi-pass erase
 
-The heap wipe uses `dod_5220_wipe` (`security/wipe.rs:44`), a multi-pass overwrite
-modelled on the DoD 5220.22-M pattern, with verification and a cache flush:
-
-```
-  dod_5220_wipe(data):
-      pass 1: write 0x00 to every byte (volatile)
-      pass 2: write 0xFF to every byte (volatile)
-      pass 3: write secure-random bytes
-      pass 4: write 0x00 to every byte (volatile)
-      verify_wipe(data)                     read back, warn and re-wipe if nonzero
-      flush_cache_lines(data)               clflush every line, then mfence  (x86_64)
-```
-
-Each pass is a volatile write so the compiler cannot elide it, separated by
-sequential-consistency fences. The random pass draws from the secure RNG. After the
-final zero pass it reads the region back to verify the wipe took, and on x86_64 it
-flushes every cache line with `clflush` and an `mfence`, so the zeros reach memory
-rather than sitting in cache. This is the strong erase; the continuous zeroing above
-is a single zero pass, which is what steady-state reclaim needs, and the DoD pattern
-is reserved for the whole-system ZeroState wipe.
+The heap erase uses `dod_5220_erase`
+(`src/security/hardening/memory_sanitization/erase.rs:62`), a multi-pass overwrite
+modelled on the DoD 5220.22-M pattern. The same module provides the steady-state
+`secure_zero` (`erase.rs:26`), the level-driven `sanitize` (`erase.rs:163`) that the
+free path calls, and the stronger `paranoid_erase` (`erase.rs:105`) and `gutmann_erase`
+(`erase.rs:127`) that `Paranoid` level selects. The DoD pattern writes multiple volatile
+passes so the compiler cannot elide them, ending on a zero pass. This is the strong
+erase; the continuous zeroing above is a single zero pass, which is what steady-state
+reclaim needs, and the multi-pass pattern is reserved for the whole-system ZeroState
+wipe at shutdown.
 
 ## What this does and does not claim
 
@@ -123,11 +128,13 @@ Stated precisely: freed memory is single-pass zeroed as it is reclaimed, so no
 allocation sees a previous one's data, and this runs on every free; a capsule's
 frames are zeroed as its address space is torn down on exit, so it leaves no
 readable residue; secure regions get a stronger erase on free; and the whole-system
-`secure_wipe_all_memory` is a multi-pass, verified, cache-flushed erase, but it is
-implemented and not wired to any trigger, so it is a capability that does not fire on
-its own today. The operational ephemerality guarantee rests on the continuous
-zeroing, which does run; the one-shot whole-system wipe is a gap to close by
-invoking it from the shutdown, panic, and tamper paths. What the software wipe addresses is data remanence in memory
+ZeroState wipe is a multi-pass erase of process memory, kernel stacks, caches, keys,
+and the heap that now fires on every clean exit, because both the shutdown and reboot
+syscalls reach the firmware only through `terminate`, which wipes before it powers off.
+The remaining honest gap is coverage, not wiring: the wipe runs on an orderly shutdown
+or reboot, but a hard power loss or a panic that does not route through `terminate`
+gets only whatever continuous zeroing already happened, and the CPU-stop that precedes
+the wipe is best effort. What the software wipe addresses is data remanence in memory
 the kernel can address, by overwriting it and flushing it out of cache. It does not
 claim to defeat physical attacks below that level, such as cold-boot DRAM remanence
 against removed memory, which is a hardware property outside the wipe's reach. The
@@ -149,15 +156,18 @@ Lean `Zeroization` module proves at the spec level, and it is a *running* mechan
 free, so a capsule's frames are scrubbed as its address space is torn down on exit, with no dedicated
 exit wipe needed.
 
-**The whole-system erase is strong but not wired.** `secure_wipe_all_memory` (`security/wipe.rs:23`)
-revokes persistence consent, multi-pass erases the heap, zeros every process's code and VMAs, deletes
-crypto keys, and clears IPC and VFS caches, with per-region sizes bounds-checked so a corrupt PCB cannot
-direct the wipe out of range. The multi-pass `dod_5220_wipe` (`wipe.rs:44`) writes 0x00, 0xFF, random,
-then 0x00, all volatile so the compiler cannot elide them, verifies the read-back, and on x86_64
-`clflush`es every line then `mfence`s so the zeros reach memory rather than sitting in cache. The honest
-statement the code forces: `secure_wipe_all_memory` has no caller anywhere in the tree, so it is a
-capability, not an automatic guarantee. Operational ephemerality rests on the continuous zeroing above,
-which does run; wiring the one-shot wipe means calling it from the shutdown, panic, and tamper paths.
+**The whole-system erase is strong and wired to every clean exit.** `terminate`
+(`src/security/zerostate/terminate.rs:35`) is the only exit from a running system, reached by both the
+shutdown (`admin/shutdown.rs:26`) and reboot (`admin/reboot.rs:27`) syscalls. It stops the other CPUs,
+runs `zerostate_shutdown_wipe` (`memory_sanitization/api.rs:59`), then hands off to firmware. The wipe
+raises the sanitization level to `Paranoid`, wipes every process's code and VMAs through the owner's
+address space, wipes the page-allocator kernel stacks, clears fs and cryptofs caches, zeroes the crypto
+vault while the heap is still readable, and multi-pass erases the heap last with `dod_5220_erase`
+(`erase.rs:62`) over the allocator's real `extent()` so it covers the free list. The honest boundary is
+now coverage rather than wiring: the wipe fires on an orderly shutdown or reboot, but a hard power loss
+or a panic that does not route through `terminate` falls back to whatever continuous zeroing had run, and
+the CPU-stop preceding the wipe is best effort (nobody to stop on a single-core boot, a refusable
+broadcast on a multi-core one).
 
 **The claim is bounded to memory the kernel can address.** The software wipe defeats data remanence in
 addressable memory by overwriting and flushing it. It does not claim to defeat physical attacks below
@@ -171,12 +181,11 @@ Zeroization is mostly invisible when it works, so debugging is about knowing whi
 one console signal means. The continuous zeroing is silent: `zero_frame` returns without writing if the
 frame is outside the direct map (`zero.rs`), which is the one way a free could *not* scrub, so a stale
 byte surviving a free points at a frame whose physical address fell outside `DIRECTMAP_SIZE` rather than
-at a missing zero pass. The one narrated path is the whole-system wipe, which logs
-`"ZeroState secure memory wipe complete"` (`wipe.rs`) after its compiler fence, so the absence of that
-line is how you confirm the wipe never ran, which today is always, because nothing calls it. Inside the
-multi-pass erase, `verify_wipe` reads the region back after the final zero pass and warns and re-wipes
-if it finds a nonzero byte, so a persistent verify warning would mean memory that will not hold zeros
-(failing hardware) rather than a logic bug in the pattern. When reasoning about a suspected leak, the
+at a missing zero pass. The whole-system wipe narrates its bounds: it logs
+`"[SANITIZE] ZeroState shutdown wipe initiated"` and, after the heap erase,
+`"[SANITIZE] ZeroState shutdown wipe complete"` (`api.rs:60`, `:85`), so a shutdown or reboot that shows
+the first line but not the second wedged inside the wipe (most likely in a per-process range or the vault
+walk), while neither line on a clean exit would mean `terminate` was bypassed. When reasoning about a suspected leak, the
 distinction that matters is which mechanism should have covered it: a reused *frame* is the allocator's
 `zero_frame`, a reused *heap block* is `HEAP_ZERO_ON_FREE`, a *demand page* is the fault handler's zero,
 and a *secure region* is `secure_zero_memory`. The whole-system DoD erase is only for a ZeroState event
@@ -196,7 +205,10 @@ abstract statement of the frame-free zeroing and the ZeroState wipe documented h
   src/memory/frame_alloc/manager/zero.rs       zero_frame, the direct-map zero pass
   src/memory/heap/manager/globals.rs           HEAP_ZERO_ON_ALLOC / HEAP_ZERO_ON_FREE
   src/memory/secure_memory/manager/dealloc.rs  secure_zero_memory on region free
-  src/security/wipe.rs                          secure_wipe_all_memory and dod_5220_wipe
+  src/security/zerostate/terminate.rs           terminate: stop CPUs, wipe, power off
+  src/syscall/dispatch/router/admin/{shutdown,reboot}.rs  the two callers of terminate
+  src/security/hardening/memory_sanitization/api.rs    zerostate_shutdown_wipe, sanitize_process_memory
+  src/security/hardening/memory_sanitization/erase.rs  dod_5220_erase, sanitize, secure_zero
 ```
 
 Every reference above is verified against those trees. The demand-page zero is on the

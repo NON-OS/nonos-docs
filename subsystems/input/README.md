@@ -20,7 +20,10 @@ the kernel owns the minimal shared mechanism, capsules own the policy.
 
 ## Sources
 
-The ring is `src/kernel_core/surface_registry/input_ring.rs` with its types in the same directory;
-the syscalls are `src/syscall/dispatch/router/input_ops.rs`; and the router capsule is
+The ring is `src/kernel_core/surface_registry/input_ring/` (split into `ring.rs`, `post.rs`,
+`drain.rs`, `seq.rs`, `arm_waiter.rs`, `clear_waiter.rs`) with its types in
+`src/kernel_core/surface_registry/types.rs`; the syscalls are
+`src/syscall/dispatch/router/input_ops/` (`handle.rs`, `do_post.rs`, `do_drain.rs`, `do_wait.rs`);
+and the router capsule is
 `src/userspace/capsule_input_router/`. Driver capsules that post live under `src/hardware/` and
 `src/userspace/`. Every page is verified against those trees with `file:line` references.

@@ -22,7 +22,7 @@ the operation set, `server/` is the loop and the handlers, and `state/` is the s
 | Reply endpoint | `reply:4415:endpoint.clipboard.reply` | `Capsule.mk:9` |
 | Capability mask | `0x19` | `Capsule.mk:13` |
 
-The mask decomposes into three bits, checked against `src/capabilities/types.rs:56`:
+The mask decomposes into three bits, checked against `src/capabilities/types/defs.rs`:
 
 | Bit | Value | Grants |
 |-----|-------|--------|
@@ -85,7 +85,7 @@ boot log; the [debugging](debugging.md) page covers what it means and why it is 
   userland/capsule_clipboard/Capsule.mk                    slug, endpoints 4414/4415, mask 0x19
   src/userspace/capsule_clipboard/spawn.rs                 kernel spawn spec, caps 0x19, ports 4414/4415
   src/kernel_core/process_spawn/capsule_spawn/runner/install/   endpoint registration + spawn log + trace
-  src/capabilities/types.rs                                CoreExec | IPC | Memory bit values
+  src/capabilities/types/defs.rs                                CoreExec | IPC | Memory bit values
   userland/app_skeleton/src/clients/clipboard/             the clipboard_copy / clipboard_paste helpers
 ```
 

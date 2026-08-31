@@ -32,7 +32,7 @@ the kernel mirror registers on port 4104 (`src/fs/vfs_capsule/spawn.rs:29`, `spa
 the fixed kernel reply endpoint `0x1_0000_0005` (decimal 4294967301,
 `src/protocol/types.rs:48`), which the capsule sends every response to.
 
-The mask `0x19` decomposes bit by bit against `src/capabilities/types.rs`:
+The mask `0x19` decomposes bit by bit against `src/capabilities/types/defs.rs`:
 
 | Bit | Value | Grants |
 |-----|-------|--------|
@@ -92,7 +92,7 @@ seeds it, and loops receiving one frame at a time forever (`src/server/runner.rs
   userland/capsule_vfs/src/server/        the recv/decode/dispatch/reply loop and the handlers
   userland/capsule_vfs/src/store/         the flat store and the fd table
   userland/capsule_vfs/Capsule.mk         slug, handle, ports, capability mask, kernel mirror
-  src/capabilities/types.rs               the capability bit values behind mask 0x19
+  src/capabilities/types/defs.rs               the capability bit values behind mask 0x19
   src/fs/vfs_capsule/                     the kernel-side mirror and verified spawn
   src/userspace/init/spawn_plan/core.rs   spawn_vfs -> boot::capsule("VFS", "vfs", ...)
   src/userspace/init/capsule_boot/run.rs  the [VFS] capsule spawned / error path

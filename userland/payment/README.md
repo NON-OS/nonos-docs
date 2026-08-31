@@ -37,7 +37,7 @@ target. The runner sends every reply to the constant `KERNEL_REPLY_ENDPOINT = 0x
 (`src/protocol/types.rs:22`, `src/server/runner.rs:40`), so a reply goes to that fixed endpoint rather
 than to the request sender's pid.
 
-The mask `0x19` decomposes bit by bit against `src/capabilities/types.rs`:
+The mask `0x19` decomposes bit by bit against `src/capabilities/types/defs.rs`:
 
 | Bit | Value | Grants | Source |
 |-----|-------|--------|--------|
@@ -98,7 +98,7 @@ outbox are entirely in RAM and do not survive a restart (`src/store/state.rs:23`
   userland/capsule_payment/src/server/         the recv/dispatch/send loop, the handlers, the marshalers
   userland/capsule_payment/src/store/          State: the per-payer nonce map and the bounded outbox
   userland/capsule_payment/Capsule.mk          slug, handle, ports, capability mask, declared mirror
-  src/capabilities/types.rs                    the capability bits the mask decomposes into
+  src/capabilities/types/defs.rs                    the capability bits the mask decomposes into
   src/userspace/init/spawn_plan/               checked and has no payment entry (capsule is not spawned)
   Makefile                                     includes the capsule at line 653
   userland/capsule_keyring/                    the signing authority the pay path calls

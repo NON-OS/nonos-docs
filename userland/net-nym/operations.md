@@ -1,7 +1,7 @@
 # The Nym Operations
 
 This page documents the `NYM1` wire protocol and the server that answers it: the request header, the
-receive loop, the authorization gate that separates control from data ops, the sixteen ops with their
+receive loop, the authorization gate that separates control from data ops, the nineteen ops with their
 payloads, and the errno set. It mirrors `src/protocol/` and `src/server/`. For the packet a data send
 builds, read the [packet](packet.md) page; for the tables the ops touch, read the [state](state.md) page.
 
@@ -58,7 +58,7 @@ gated ops each call `admin` first and reply `E_PERM` on a miss: `OP_SET_GATEWAY`
 `OP_SET_CREDENTIAL` is deliberately not gated: a credential is per-application and its trust comes from the
 Ed25519 signature, not from who submits it (`src/server/handlers/set_credential.rs:25`).
 
-## The sixteen ops
+## The nineteen ops
 
 The opcodes are constants in `src/protocol/ops.rs:17`. Each handler is one file under
 `src/server/handlers/`.
@@ -78,18 +78,29 @@ The opcodes are constants in `src/protocol/ops.rs:17`. Each handler is one file 
 | `OP_SEND_REPLY` | 11 | data | u32 surb + 32 tag + payload | none | Consume a SURB and send a reply on its session (`send_reply.rs:25`). |
 | `OP_SET_TIMING` | 12 | admin | u16 burst + u16 jitter | none | Set the cover burst count and delay jitter (`set_timing.rs:23`). |
 | `OP_SET_AUTHORITY` | 13 | admin | 32-byte pubkey | none | Set the trusted directory-signing key (`set_authority.rs:23`). |
-| `OP_SYNC_DIRECTORY` | 14 | admin | HTTP source or empty | none | Fetch and install a directory over `net.tcp` (`sync_directory.rs:27`). |
+| `OP_SYNC_DIRECTORY` | 14 | admin | stored source or empty | none | Fetch and install a signed directory over `net.tcp` (`sync_directory.rs:27`). |
 | `OP_TOPOLOGY_STATUS` | 15 | any | empty | 28-byte status | Report directory status, epoch, and validity window (`topology_status.rs:24`). |
 | `OP_TIMING_STATUS` | 16 | any | empty | 16-byte status | Report the cover-timing policy and next cover time (`timing_status.rs:24`). |
+| `OP_SET_DESTINATION` | 17 | data | u32 id + 32 dest identity + 32 encryption key + 32 gateway identity | none | Bind a session to a Nym destination so its traffic is sealed as full Sphinx; a second Sphinx session is refused `E_BUSY` (`set_destination.rs:15`). |
+| `OP_SET_IDENTITY` | 18 | admin | 32-byte Ed25519 seed + 32-byte public key | none | Install the client identity the gateway handshake signs with (`set_identity.rs:9`). |
+| `OP_GET_EXIT` | 19 | data | optional u32 index | 96 bytes: exit identity + encryption key + gateway | Hand back an exit the directory publishes so a client need not compile one in (`get_exit.rs:15`). |
+
+Ops 17 through 19 are the Sphinx destination path. `OP_SET_DESTINATION` is what flips a session from the
+legacy `NYMP` datagram format to the full Sphinx packet: once a destination is bound, `OP_SEND` on that
+session routes through `send_sphinx` rather than the credential-gated `packet::encode`
+(`src/server/handlers/send.rs:54`). The live mixnet path, its packet format, and its reply blocks are on the
+[mixnet subsystem](../../subsystems/networking/mixnet.md) page.
 
 ### The bring-up ops
 
 `OP_SET_AUTHORITY` installs a single 32-byte Ed25519 public key as the trusted directory signer; an all-zero
 or wrong-length body is rejected with `E_BAD_LEN`, and installing a new authority resets every session
 because the trust root changed underneath them (`set_authority.rs:27`). `OP_SET_TOPOLOGY` installs a signed
-node directory directly from the request body, and `OP_SYNC_DIRECTORY` fetches one over `net.tcp` from an
-HTTP source and installs it; both run the same verify-and-store path and both reset sessions on success
-(`set_topology.rs:28`, `sync_directory.rs:56`). `OP_SET_GATEWAY` parses an IPv4 address, a port, and a
+node directory directly from the request body, and `OP_SYNC_DIRECTORY` fetches a signed one over `net.tcp`
+from a stored source and installs it; both run the same verify-and-store path and both reset sessions on
+success (`set_topology.rs:28`, `sync_directory.rs:56`). Separately, the capsule's own idle-tick
+`directory_tick` fetches the live node list from the Nym validator API over TLS; that path and its retry
+hardening are on the [directory](directory.md) page. `OP_SET_GATEWAY` parses an IPv4 address, a port, and a
 transport mode (`0` raw TCP, `1` WebSocket, default WebSocket), connects to the gateway, and replaces the
 current gateway, closing the old one (`gateway.rs:53`). The directory and gateway machinery lives on the
 [directory](directory.md) and [transport](transport.md) pages.

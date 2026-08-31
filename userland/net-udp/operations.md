@@ -135,7 +135,7 @@ it never gets a handle to a NIC.
   userland/capsule_net_udp/src/server/handlers/       one file per op, plus the recv deliver/drain split
   userland/capsule_net_udp/src/state/table.rs         the pid-and-port ownership match
   userland/capsule_net_udp/Cargo.toml                 panic = "abort"
-  src/capabilities/types.rs                           the capability bits the mask decodes into
+  src/capabilities/types/defs.rs                           the capability bits the mask decodes into
 ```
 
 Every reference above is verified against those trees.

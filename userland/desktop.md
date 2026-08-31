@@ -13,8 +13,8 @@ failures much easier to isolate.
 ## 1. Boot shape
 
 The desktop fleet spawns GUI core first, then WM, wallpaper catalog, wallpaper,
-desktop shell, and desktop services (`src/userspace/init/spawn_plan/desktop_fleet.rs:17`).
-GUI core is only input_router and compositor (`src/userspace/init/spawn_plan/desktop_fleet.rs:26`).
+desktop shell, and desktop services (`src/userspace/init/spawn_plan/desktop_fleet/mod.rs`).
+GUI core is only input_router and compositor (`src/userspace/init/spawn_plan/desktop_fleet/mod.rs`).
 
 ```
   +-----------------+

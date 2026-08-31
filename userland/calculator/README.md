@@ -25,7 +25,7 @@ Everything the kernel and the service registry need to name and reach the calcul
 | Kernel feature | `nonos-capsule-calculator` | `Capsule.mk:6` |
 | Kernel mirror | `src/userspace/capsule_calculator` | `Capsule.mk:12` |
 
-The mask `0x1819` decomposes bit by bit against `src/capabilities/types.rs`:
+The mask `0x1819` decomposes bit by bit against `src/capabilities/types/defs.rs`:
 
 ```
   0x0001  CoreExec                bit()  1     types.rs:56
@@ -151,5 +151,5 @@ unwinding; the point of the checked arithmetic is that no reachable input reache
 ```
 
 Everything here is drawn from `userland/capsule_calculator/` (the capsule source and its `Capsule.mk`),
-`src/capabilities/types.rs` (the capability bits), and the kernel spawn mirror under
+`src/capabilities/types/defs.rs` (the capability bits), and the kernel spawn mirror under
 `src/userspace/capsule_calculator/`. Every reference above is verified against those trees.

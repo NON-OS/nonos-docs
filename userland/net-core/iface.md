@@ -41,19 +41,21 @@ one DHCP event (`src/iface/poll.rs:24`). The interface poll is where the [device
 
 ## The DHCPv4 client
 
-`dhcp::create` adds the DHCPv4 socket to the set at build time (`src/iface/dhcp.rs:24`). `dhcp::poll_event`
-drains one event per pump (`src/iface/dhcp.rs:28`):
+`dhcp::create` adds the DHCPv4 socket to the set at build time (`src/iface/dhcp/create.rs:20`).
+`dhcp::poll_event` drains one event per pump (`src/iface/dhcp/poll_event.rs:23`):
 
 - On `Configured`, it installs the leased address as the interface's IP, adds the router as the default IPv4
   route, records the lease (address, prefix, gateway, DNS, bound) in the shared state, installs a DNS socket
-  pointed at the leased DNS server, and emits two boot markers (`src/iface/dhcp.rs:32`).
+  pointed at the leased DNS server, and emits two boot markers (`src/iface/dhcp/handle_configured.rs:24`,
+  `src/iface/dhcp/install_dns_socket.rs:21`).
 - On `Deconfigured`, it clears the interface addresses, removes the default route, and clears the lease
-  (`src/iface/dhcp.rs:49`).
+  (`src/iface/dhcp/handle_deconfigured.rs:21`).
 
-The address marker is `[NET-CORE] lease <ip>/<prefix> gw <gw>` (`src/iface/dhcp.rs:65`); the self-check
-marker re-encodes the 18-byte lease body the [server](server.md)'s `dhcp_status` returns and prints
-`[NET-CORE] lease-status state=<n> ip=<ip>`, so the DHCP path and the query path are checked against the
-same encoder (`src/iface/dhcp.rs:102`). The DNS socket installed here is what the DNS handler queries; before
+The address marker is `[NET-CORE] lease <ip>/<prefix> gw <gw>` (`src/iface/dhcp/emit_lease_marker.rs:21`);
+the self-check marker re-encodes the 18-byte lease body the [server](server.md)'s `dhcp_status` returns and
+prints `[NET-CORE] lease-status state=<n> ip=<ip>`, so the DHCP path and the query path are checked against
+the same encoder (`src/iface/dhcp/emit_status_selfcheck.rs:22`). The DNS socket installed here is what the
+DNS handler queries; before
 a lease arrives there is no DNS socket and the handler returns `E_NO_LEASE` ([server](server.md)).
 
 ## The per-client socket tables
@@ -80,7 +82,7 @@ full table answers `E_NO_SOCKET` at connect or bind ([server](server.md)).
   userland/capsule_net_core/src/iface/mod.rs    the iface module surface
   userland/capsule_net_core/src/iface/build.rs  the random seed, Config, Interface, and initial sockets
   userland/capsule_net_core/src/iface/poll.rs   the single pump: interface poll then DHCP event
-  userland/capsule_net_core/src/iface/dhcp.rs   the DHCPv4 client, the DNS install, and the lease markers
+  userland/capsule_net_core/src/iface/dhcp/     the DHCPv4 client, the DNS install, and the lease markers
   userland/capsule_net_core/src/state.rs        NetState, the mutex, the accessors, and the Lease
   userland/capsule_net_core/src/handles.rs      the 32-slot per-pid TCP socket table
   userland/capsule_net_core/src/udp_ports.rs    the 16-slot per-pid UDP socket table keyed by local port

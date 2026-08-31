@@ -132,7 +132,7 @@ it never gets a handle to the controller.
   userland/capsule_driver_iwlwifi/src/server/handlers/       one file per op
   userland/capsule_driver_iwlwifi/src/firmware/alive.rs      the alive poll behind OP_ALIVE_WAIT
   userland/capsule_driver_iwlwifi/Cargo.toml                 panic = "abort"
-  src/capabilities/types.rs                                  the capability bits the mask decodes into
+  src/capabilities/types/bit.rs                                the capability bit values the mask decodes into
 ```
 
 Every reference above is verified against those trees.

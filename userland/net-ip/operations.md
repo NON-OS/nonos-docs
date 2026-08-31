@@ -159,7 +159,7 @@ never gets a handle to the NIC, which lives behind `net.l2`.
   userland/capsule_net_ip/src/server/handlers/       one file per op, plus the poll_packet subtree
   userland/capsule_net_ip/src/state/rx_queue.rs      the bounded receive queue behind the poll path
   userland/capsule_net_ip/Cargo.toml                 panic = "abort"
-  src/capabilities/types.rs                          the capability bits the mask decodes into
+  src/capabilities/types/defs.rs                          the capability bits the mask decodes into
 ```
 
 Every reference above is verified against those trees.

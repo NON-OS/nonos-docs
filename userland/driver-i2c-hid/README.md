@@ -28,26 +28,28 @@ Everything the kernel and the service registry need to name and reach the driver
 | Namespace | `systems.nonos.driver.i2c_hid0` | `Capsule.mk:11` |
 | Service endpoint | `service:4232:driver.i2c_hid0` | `Capsule.mk:12`, `spawn.rs:24` |
 | Reply endpoint | `reply:4233:endpoint.4294967319` | `Capsule.mk:13`, `spawn.rs:25` |
-| Capability mask | `0x200019` | `Capsule.mk:14` |
+| Capability mask | `0x200119` | `Capsule.mk:14` |
 | Binary name | `driver_i2c_hid` | `Capsule.mk:9` |
 | Kernel mirror | `src/userspace/capsule_driver_i2c_hid` | `Capsule.mk:15` |
 
-The mask `0x200019` decomposes bit by bit against `src/capabilities/types.rs`:
+The mask `0x200119` decomposes bit by bit against `src/capabilities/types/bit.rs` (the enum is in
+`src/capabilities/types/defs.rs`):
 
 | Bit | Value | Grants | Source |
 |---|---|---|---|
-| CoreExec | `0x000001` | run as a process | `types.rs:56` |
-| IPC | `0x000008` | send and receive on its endpoints | `types.rs:59` |
-| Memory | `0x000010` | map its own heap and stack | `types.rs:60` |
-| InputSource | `0x200000` | post events into the kernel input ring | `types.rs:77` |
+| CoreExec | `0x000001` | run as a process | `types/bit.rs:23` |
+| IPC | `0x000008` | send and receive on its endpoints | `types/bit.rs:26` |
+| Memory | `0x000010` | map its own heap and stack | `types/bit.rs:27` |
+| Debug | `0x000100` | serial-log line, no hardware right | `types/bit.rs:31` |
+| InputSource | `0x200000` | post events into the kernel input ring | `types/bit.rs:44` |
 
 ```
-  0x200019 = 0x000001 + 0x000008 + 0x000010 + 0x200000
-           = 1 + 8 + 16 + 2097152
+  0x200119 = 0x000001 + 0x000008 + 0x000010 + 0x000100 + 0x200000
+           = 1 + 8 + 16 + 256 + 2097152
 ```
 
-The kernel spawn path requests exactly IPC, Memory, and InputSource; CoreExec is the implicit execute bit
-every capsule carries (`spawn.rs:42`). `InputSource` is the one capability that separates this driver from
+The kernel spawn path requests IPC, Memory, InputSource, and the serial-log `Debug` bit
+(via `serial_debug_cap()`); CoreExec is the implicit execute bit every capsule carries (`spawn.rs:42`). `InputSource` is the one capability that separates this driver from
 an ordinary IPC capsule: it is the bit the kernel checks before it will accept an input-event post, since
 `MkInputEventPost` is gated on `can_input_source` (`src/syscall/contract/cap_table/mk.rs:78`). There is no
 `Driver`, `Mmio`, `Irq`, `Dma`, `Pio`, `DeviceEnum`, `Network`, `FileSystem`, or graphics bit in the mask.
@@ -132,7 +134,7 @@ it. Treat these pages as the reference for the driver as it is shipped here.
   userland/capsule_driver_i2c_hid/src/input/        the report path: poll, parse, publish, post
   userland/capsule_driver_i2c_hid/src/protocol/     the NHID server wire format, ops, errno, limits
   userland/capsule_driver_i2c_hid/src/server/       the recv/poll/dispatch loop and op handlers
-  src/capabilities/types.rs                         the capability bit values
+  src/capabilities/types/bit.rs                     the capability bit values
   src/syscall/contract/cap_table/mk.rs              the per-syscall capability gate
   src/userspace/capsule_driver_i2c_hid/spawn.rs     the kernel-side verified spawn and cap request
   src/userspace/init/spawn_plan/drivers_bus.rs      the bus-driver spawn entry

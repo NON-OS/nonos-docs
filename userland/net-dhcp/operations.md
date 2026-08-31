@@ -126,7 +126,7 @@ raw frame.
   userland/capsule_net_dhcp/src/server/handlers/       one file per lease op
   userland/capsule_net_dhcp/src/dora/acquire.rs        the reject-does-not-install rule
   userland/capsule_net_dhcp/Cargo.toml                 panic = "abort"
-  src/capabilities/types.rs                            the capability bits the mask decodes into
+  src/capabilities/types/defs.rs                            the capability bits the mask decodes into
 ```
 
 Every reference above is verified against those trees.

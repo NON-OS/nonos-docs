@@ -34,7 +34,7 @@ capsule (`spawn.rs:31`, `spawn.rs:33`); the reply inbox name `endpoint.net.dns.r
 manifest carries as the reply endpoint (`Capsule.mk:12`, `spawn.rs:32`). The wire protocol magic is `NDNS`
 = `0x4E44_4E53` (`src/protocol/header.rs:17`).
 
-The mask `0x0003d` decomposes bit by bit against `src/capabilities/types.rs`:
+The mask `0x0003d` decomposes bit by bit against `src/capabilities/types/defs.rs`:
 
 ```
   0x00001  CoreExec   bit()    1   types.rs:56
@@ -128,7 +128,7 @@ persist any lookup history. It is a resolver built on top of `net.udp`, not the 
   userland/capsule_net_dns/Capsule.mk          slug, handle, ports, capability mask, kernel mirror
   src/userspace/capsule_net_dns/               the kernel-side embed and verified spawn
   src/userspace/init/spawn_plan/network/spawn_dns.rs   the NET-DNS spawn entry
-  src/capabilities/types.rs                    the capability bit values behind the mask
+  src/capabilities/types/defs.rs                    the capability bit values behind the mask
 ```
 
 Every reference above is verified against those trees.

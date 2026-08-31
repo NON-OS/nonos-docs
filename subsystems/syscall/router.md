@@ -126,7 +126,7 @@ routing-table omission rather than a bad caller.
   src/syscall/dispatch/router/crypto.rs           the crypto family
   src/syscall/dispatch/router/admin/              the admin family
   src/syscall/dispatch/router/microkernel_ops.rs  the Mk* family entry and its matches predicate
-  src/syscall/dispatch/router/input_ops.rs        the input family (a handler that does usercopy)
+  src/syscall/dispatch/router/input_ops/handle.rs  the input family (a handler that does usercopy)
   src/syscall/dispatch/util.rs                    errno, require_capability, the usercopy error mapping
   src/syscall/dispatch/audit/stats.rs             SYSCALL_STATS and get_syscall_stats
   src/syscall/dispatch/audit/entry.rs             the 256-entry audit ring and get_audit_log

@@ -4,27 +4,35 @@ Before a capsule can touch a device, it must claim it, and a device can be claim
 one capsule at a time. The claim is the root authority every later grant is checked against:
 an MMIO mapping, a DMA buffer, an IRQ binding, or a port grant is only issued to the pid that
 holds the claim, and only while the claim's epoch is still current. This page documents the
-claim table and the epoch. The code is `src/hardware/broker/claim.rs`.
+claim table and the epoch. The code is under `src/hardware/broker/claim/`, split into
+`types.rs` (the `Claim` and `ClaimError` types), `state.rs` (the table and epoch counter),
+`claim.rs` (claim), `release.rs` (release), and `lookup.rs`.
 
 ## The claim
 
-A `Claim` (`src/hardware/broker/claim.rs:23`) binds a device to a holder and stamps it with an
-epoch:
+A `Claim` (`src/hardware/broker/claim/types.rs:18`) binds a device to a holder and stamps it
+with an epoch:
 
 ```
   struct Claim { pid: u32, device_id: u64, epoch: u64 }
 ```
 
-The claims live in one global `Mutex<Vec<Claim>>`, and `claim` (`claim.rs:48`) refuses a
-device that is already claimed:
+The claims live in one global `Mutex<Vec<Claim>>` (`claim/state.rs:24`), and `claim`
+(`claim/claim.rs:23`) refuses a device that is already claimed:
 
 ```
   claim(pid, device_id):
       if any claim has this device_id:  AlreadyClaimed
       epoch = next_epoch()
       push Claim { pid, device_id, epoch }
+      power_on_device(device_id)          # bring to D0 before the driver maps MMIO
       return epoch
 ```
+
+The `power_on_device` step (`claim/claim.rs:35`) runs outside the claims lock, after the claim
+is recorded: it touches PCI config space to bring the device to power state D0 and settles for a
+moment before any driver maps its BARs, so a device parked in a low-power state by firmware is
+awake before its capsule starts driving it.
 
 Exclusivity is the first property: `AlreadyClaimed` means one capsule cannot claim a device
 another already holds, so two drivers can never both be issued grants for the same hardware.
@@ -33,7 +41,7 @@ distinct ways a claim operation can be refused.
 
 ## The epoch
 
-The epoch is a monotonic counter (`claim.rs:39`) bumped on every successful claim. Its purpose
+The epoch is a monotonic counter (`claim/state.rs:25`, bumped by `next_epoch` at `state.rs:27`) advanced on every successful claim. Its purpose
 is to invalidate stale authority across a release-and-reclaim cycle. When a capsule claims a
 device it receives the epoch; every grant request it later makes carries that `claim_epoch`,
 and every grant path re-checks it:
@@ -52,9 +60,9 @@ verbatim at the head of the [MMIO](mmio.md), [DMA](dma.md), and [IRQ](irq.md) pa
 
 ## Release
 
-`release` (`claim.rs:60`) drops a claim, but only for the holder: a `pid` that is not the
-recorded holder gets `NotHolder`, and a device that is not claimed gets `NotClaimed`. Voluntary
-release is one path; the other is `release_all_for_pid` (`claim.rs:74`), which retains only the
+`release` (`claim/release.rs:22`) drops a claim, but only for the holder: a `pid` that is not the
+recorded holder gets `NotHolder` (`release.rs:26`), and a device that is not claimed gets `NotClaimed`. Voluntary
+release is one path; the other is `release_all_for_pid` (`claim/release.rs:36`), which retains only the
 claims not held by a given pid and is called from the process exit path so a dying capsule
 cannot leak a device claim. The [revocation](revocation.md) page covers how the claim drop is
 coordinated with dropping the grants that depended on it.
@@ -101,8 +109,11 @@ hold, or one nobody holds.
 ## Source map
 
 ```
-  src/hardware/broker/claim.rs   Claim, the epoch counter, claim / release / release_all_for_pid,
-                                 and the ClaimError variants
+  src/hardware/broker/claim/types.rs     Claim and the four ClaimError variants
+  src/hardware/broker/claim/state.rs     the Mutex<Vec<Claim>> table and the epoch counter
+  src/hardware/broker/claim/claim.rs     claim(): exclusivity check, epoch stamp, D0 power-on
+  src/hardware/broker/claim/release.rs   release / release_all_for_pid
+  src/hardware/broker/claim/lookup.rs    lookup by device_id (re-run by every grant path)
 ```
 
 Every reference above is verified against that file. The four grant classes that re-check this claim and

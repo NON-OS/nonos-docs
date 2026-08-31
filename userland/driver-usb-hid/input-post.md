@@ -106,8 +106,8 @@ here are device-space; the router maps them onto the display, as the
 
 `mk_input_event_post` lands in the kernel: `do_post` reads the `InputEvent` out of user memory and
 calls `post_input`, which pushes it onto the global MPSC input ring, bumps the sequence, and wakes the
-parked router (`src/syscall/dispatch/router/input_ops.rs:53`,
-`src/kernel_core/surface_registry/input_ring.rs:55`). The capability required is exactly `InputSource`
+parked router (`src/syscall/dispatch/router/input_ops/mod.rs`,
+`src/kernel_core/surface_registry/input_ring/mod.rs`). The capability required is exactly `InputSource`
 (or `Irq`/`Admin`), checked at `src/syscall/contract/cap_table/mk.rs:78`. From there the single
 `capsule_input_router` drains the ring and routes each event to the focused consumer, as documented in
 the [input path](../../subsystems/input/path.md). A full ring returns negative from the syscall and
@@ -132,7 +132,7 @@ that page covers.
   src/hid/post_wire.rs            send / send_abs, the mk_input_event_post call
   userland/libc/src/surface_registry/input_post.rs  the mk_input_event_post wrapper
   userland/libc/src/surface_registry/types.rs       InputEvent and the INPUT_KIND_* constants
-  src/kernel_core/surface_registry/input_ring.rs    the kernel input ring post_input targets
+  src/kernel_core/surface_registry/input_ring/mod.rs    the kernel input ring post_input targets
   src/syscall/contract/cap_table/mk.rs              the InputSource gate on MkInputEventPost
 ```
 

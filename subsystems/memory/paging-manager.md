@@ -85,7 +85,7 @@ them when switching CR3 and when scoping TLB shootdowns.
 
 ## Mapping a page
 
-The public entry point is `map_page` (`src/memory/paging/manager/api/mapping.rs:24`),
+The public entry point is `map_page` (`src/memory/paging/manager/api/mapping/map_page.rs:23`),
 and the first thing it does is disable interrupts around the manager lock:
 
 ```
@@ -109,7 +109,7 @@ is the same with a caller-chosen `PageSize`.
 
 Most callers do not build a raw permission set; they call a helper that encodes the
 correct permissions and cache mode for a kind of memory, and these helpers are
-where the system's memory policy is written down (`api/mapping.rs`).
+where the system's memory policy is written down (`api/mapping/`).
 
 ```
   map_kernel_page      READ | WRITE | GLOBAL
@@ -138,7 +138,7 @@ physical range belongs to a BAR the calling process claimed. The
 
 ## Unmapping and TLB shootdown
 
-`unmap_page` (`api/mapping.rs:62`) unmaps under the same interrupt discipline,
+`unmap_page` (`api/mapping/unmap_page.rs:22`) unmaps under the same interrupt discipline,
 returns the physical address that was mapped along with the permissions and size,
 and records the unmapping in the stats. `unmap_range` walks 4 KiB pages across a
 byte length rounded up and unmaps each, stopping at the first failure and returning
@@ -162,19 +162,19 @@ that rule is named; the [hardening](hardening.md) page covers the gate itself. B
 place mappings are made, and that place enforces it.
 
 **The device helpers are non-executable and correctly cached.** `map_device_memory`, `map_user_mmio`,
-and `map_user_dma` (`api/mapping.rs`) never set `EXECUTE`, so a device register window or a DMA buffer
+and `map_user_dma` (`api/mapping/`) never set `EXECUTE`, so a device register window or a DMA buffer
 is not a code page by construction. The MMIO helpers set `NO_CACHE` because device registers must not
 be cached; the DMA helper deliberately does not, because on x86_64 PCI devices snoop the cache and a
 coherent DMA buffer is write-back cacheable. Marking a snooped DMA buffer uncached would be a
 correctness bug, not extra safety, and the helper gets it right.
 
 **Partial mappings roll back.** `map_user_mmio` and `map_user_dma` unmap the pages they already
-installed if a later page in the range fails (`api/mapping.rs`), so a failed range mapping never
+installed if a later page in the range fails (`api/mapping/`), so a failed range mapping never
 leaves a partial window exposed to a capsule. The same discipline is why the install is the
 transaction boundary.
 
 **The interrupt discipline prevents self-deadlock.** Every map and unmap entry point runs the manager
-lock inside `without_interrupts` (`api/mapping.rs:24`). The manager is a `spin::Mutex`, and if a timer
+lock inside `without_interrupts` (`api/mapping/map_page.rs:23`). The manager is a `spin::Mutex`, and if a timer
 interrupt fired while the lock was held, the preemption path would call
 `switch_to_process_address_space`, which takes the same lock, and the CPU would deadlock on its own
 mutex. Disabling interrupts across the critical section closes that window and, on the unmap path, keeps
@@ -226,7 +226,8 @@ allocates comes from the [physical frame allocator](physical-frames.md).
   src/memory/paging/manager/core/types.rs        the PagingManager state
   src/memory/paging/types/permissions/flags.rs   PagePermissions and is_wx_violation
   src/memory/paging/types/address_space.rs       the AddressSpace record
-  src/memory/paging/manager/api/mapping.rs       map_page and the typed helpers
+  src/memory/paging/manager/api/mapping/         map_page.rs, unmap_page.rs, and the typed helpers
+  src/memory/paging/manager/api/mapping_in_asid.rs  map_page_in_asid, the W^X gate
   src/memory/paging/manager/shootdown.rs         the per-ASID TLB shootdown
   src/memory/paging/error/types.rs               the PagingError variants and their strings
 ```

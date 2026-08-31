@@ -236,7 +236,7 @@ These are the capsules that hold the sensitive bits, so their capability masks a
 first thing to check. `keyring`, `entropy`, `crypto`, and `ramfs` all carry the `Crypto` bit; the
 inventory records `keyring`, `entropy`, and `crypto` at `0x39` and `ramfs` at `0x38`,
 which is `Crypto` together with the `CoreExec`, `IPC`, and `Memory` bits they need to
-run and serve requests (`src/capabilities/types.rs:54`). None of them holds a device,
+run and serve requests (`src/capabilities/types/defs.rs:18`). None of them holds a device,
 admin, or input-source bit, so a compromised core service cannot reach hardware or
 reboot the machine; it can only answer the protocol it was built for. That is the isolation argument for splitting
 key material into its own capsule at all: the keyring owns wallet keys and NOX signing,

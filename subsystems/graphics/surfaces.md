@@ -67,7 +67,7 @@ Three properties draw the bound, and one is honestly outside the registry's reac
 **Registration is gated by its own capability.** `MkSurfaceRegister` is dispatched only after the
 cap table check passes: `mk.rs:72` routes register, share, and release through `can_surface_create`
 (`caps/checks/graphics.rs:25`), which requires the `GraphicsSurfaceCreate` grant (bit `4096`,
-`capabilities/types.rs:68`) on a valid token. A capsule with no graphics capability cannot mint a
+`capabilities/types/bit.rs:35`) on a valid token. A capsule with no graphics capability cannot mint a
 surface at all, and the create capability is distinct from the map and present ones, so the three
 stages of the surface lifecycle are separately grantable.
 
@@ -126,7 +126,7 @@ shell you can see registration reach or miss `ok` on the serial log.
   src/syscall/dispatch/router/surface_handlers.rs  do_register: byte_len cap and frame translation
   src/syscall/dispatch/router/surface_ops.rs  map_err: RegistryError to errno
   src/syscall/contract/cap_table/mk.rs        the per-op capability gate (register -> GraphicsSurfaceCreate)
-  src/capabilities/types.rs                   the graphics capability bits
+  src/capabilities/types/bit.rs               the graphics capability bit values
 ```
 
 Every reference above is verified against those trees. The cross-address-space frame mapping these

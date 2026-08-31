@@ -36,7 +36,7 @@ The reply inbox string `endpoint.4294967315` is the decimal spelling of `0x1_000
 record stores it as the `REPLY_INBOX` name paired with reply port `4225`
 (`src/userspace/capsule_driver_usb_msc/spawn.rs:33`, `spawn.rs:34`).
 
-The mask `0x19` decomposes bit by bit against `src/capabilities/types.rs`:
+The mask `0x19` decomposes bit by bit against `src/capabilities/types/bit.rs` (the enum is in `src/capabilities/types/defs.rs`):
 
 ```
   0x01  CoreExec   run as a process
@@ -131,7 +131,7 @@ broker in [claim.md](../../subsystems/hardware-broker/claim.md),
   userland/capsule_driver_usb_msc/Capsule.mk       slug, handle, ports, capability mask, feature
   src/userspace/capsule_driver_usb_msc/spawn.rs    the kernel-side verified spawn (0x19 caps)
   src/userspace/init/spawn_plan/drivers_usb.rs     the USB spawn plan (xhci, usb_hid, usb_msc)
-  src/capabilities/types.rs                        the capability bits the mask decomposes into
+  src/capabilities/types/bit.rs                    the capability bit values the mask decomposes into
 ```
 
 Every reference above is verified against those trees.

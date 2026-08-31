@@ -8,7 +8,7 @@ frame is, see [rendering.md](rendering.md); for the mask and the protocol, see t
 
 The first thing to confirm is that the capsule spawned. On a successful boot the kernel prints
 `[BOOT-SPLASH] capsule spawned` from the boot path: the tag is `BOOT-SPLASH`, the message is
-`capsule spawned` (`src/userspace/init/spawn_plan/desktop_fleet.rs:49`,
+`capsule spawned` (`src/userspace/init/spawn_plan/desktop_fleet/mod.rs`,
 `src/userspace/init/capsule_boot/run.rs:29`, `src/sys/boot_log/output.rs:33`). A signature, manifest, or
 capability failure prints an `[ERROR]` line instead (`src/userspace/init/capsule_boot/run.rs:32`,
 `src/sys/boot_log/output.rs:49`).

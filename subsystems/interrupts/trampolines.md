@@ -39,7 +39,7 @@ the other CPL=3-reachable exceptions listed on the [IDT](idt.md) page.
 
 Between the pushes and the call, each trampoline reserves a 16-byte-aligned scratch area and
 `fxsave`s the interrupted FPU and SSE state, restoring it with `fxrstor` after the handler
-returns (`page_fault_trampoline.rs:54`). This matters because the Rust handler chain, and in
+returns (`page_fault_trampoline.rs:58`). This matters because the Rust handler chain, and in
 particular the BLAKE3 hashing the kernel does on some paths, clobbers the volatile XMM
 registers; without the save, preempting a kernel-side SSE computation would corrupt it. The
 save is on the handler path, not the fast return, so it is paid only when a trap is actually
@@ -47,23 +47,26 @@ serviced.
 
 ## The timer trampoline and preemption
 
-The timer trampoline (`src/interrupts/isr/timer_trampoline.rs:65`) does everything the
-exception trampolines do and one thing more: it lays the 15 saved GPRs plus the CPU-pushed
+The timer trampoline is a naked asm entry, `timer_trampoline`
+(`src/interrupts/isr/timer_trampoline/trampoline.rs:18`), that does everything the exception
+trampolines do and one thing more: it lays the 15 saved GPRs plus the CPU-pushed
 `rip/cs/rflags/rsp/ss` on the stack in exactly the layout of the first 160 bytes of
-`UserContext`, then hands a pointer to that region to `timer_trap_handler`. When the trap came
-from ring 3, the handler snapshots that frame onto the current process's `saved_user_context`
-(`timer_trampoline.rs:151`):
+`UserContext` (the 15 pushes at `trampoline.rs:31`, `fxsave` at `trampoline.rs:58`), then
+hands a pointer to that region to the Rust body `timer_trap_handler`
+(`handler.rs:34`). When the trap came from ring 3, the handler snapshots that frame onto the
+current process's `saved_user_context` (`handler.rs:69`):
 
 ```
-  timer_trap_handler(ctx):
-      if (ctx.cs & 3) == 3:                       // preempted a capsule
-          pcb.saved_user_context = Some(snapshot of ctx)
-      set_interrupt_context()
-      stats::increment_timer()
-      timer::on_timer_interrupt()                 // the tick body, scheduler hook
-      process::exit::drain_pending_teardowns()
-      drain_pending_kernel_stacks()
-      send_eoi()
+  timer_trap_handler(ctx):                          # handler.rs:34
+      if (ctx.cs & 3) == 3:                          // preempted a capsule
+          pcb.saved_user_context = Some(snapshot of ctx)   # :69
+      set_interrupt_context()                        # :73
+      stats::increment_timer()                       # :74
+      send_eoi()                                     # :81  BEFORE the tick body, deliberately
+      timer::on_timer_interrupt()                    // :82  the tick, may preempt-switch away
+      if current_pid().is_some():                    # :90  never while a dying context is live
+          process::exit::drain_pending_teardowns()
+          drain_pending_kernel_stacks()
 ```
 
 That snapshot is what makes preemptive multitasking work: the [scheduler](../scheduler/preemption.md)
@@ -71,17 +74,22 @@ resume hook later `take`s the most recent snapshot and `iretq`s back into the ca
 `restore_user_context_iretq`, so a capsule interrupted mid-instruction resumes exactly where
 it was. The register push order is chosen so the on-stack layout is byte-for-byte the leading
 fields of `UserContext`; `rax` is pushed first and `r15` last, placing `r15` at offset zero.
-The alignment is arranged so that after the 15 pushes and the `call` return address, `rsp` is
-16-byte aligned at handler entry as the System V ABI requires.
 
 ## The end-of-interrupt
 
-The tick body ends by acknowledging the interrupt to whichever controller is live
-(`timer_trampoline.rs:198`): the LAPIC if it is enabled, otherwise the legacy PIC line. The
-same choose-the-live-controller EOI is at the tail of every IRQ handler; the
-[controllers](controllers.md) page covers the two paths. From ring 0 the CPU does not switch
-to `TSS.RSP0`, so the trampoline runs on whatever kernel stack was current and skips both
-swaps; the whole mechanism is a no-op overhead on a kernel-to-kernel tick.
+The EOI comes *before* the tick body, not after it, and the source is explicit about why
+(`handler.rs:75`): `on_timer_interrupt` can preempt-switch away inside this interrupt, and a
+deferred EOI would leave the timer vector in-service at the LAPIC, so no further ticks, sleep
+wakeups, or preemption would fire until the preempted context happened to resume. Sending the
+EOI at `handler.rs:81` is safe because the interrupt flag stays clear until the `iretq`, so the
+handler cannot re-enter; the next tick simply pends and fires after the return. `send_eoi`
+(`timer_trampoline/send_eoi.rs`) chooses the live controller, the LAPIC if enabled otherwise the
+legacy PIC line, the same choice at the tail of every IRQ handler ([controllers](controllers.md)).
+The two teardown drains run *after* the tick and only when a real process context is current
+(`handler.rs:90`): draining while the interrupted context is a dying one would free the very
+kernel stack the trap frame sits on, so the queues are retried on the next tick instead. From
+ring 0 the CPU does not switch to `TSS.RSP0`, so the trampoline runs on whatever kernel stack was
+current and skips both swaps; the whole mechanism is a no-op overhead on a kernel-to-kernel tick.
 
 ## Security analysis
 
@@ -99,7 +107,7 @@ frame and not a flag the handler could have set. The user-reachable exceptions a
 naked trampolines precisely so no compiler-generated prologue touches `gs` before the swap.
 
 **The interrupted FPU and SSE state is preserved.** Each trampoline `fxsave`s into a 16-byte-aligned
-scratch area before the call and `fxrstor`s after (`page_fault_trampoline.rs:54`). The concrete hazard is
+scratch area before the call and `fxrstor`s after (`page_fault_trampoline.rs:58`). The concrete hazard is
 that the Rust handler chain clobbers the volatile XMM registers (BLAKE3 hashing on some kernel paths uses
 SSE), so preempting a kernel-side SSE computation without the save would corrupt it. The save is on the
 serviced path, not the fast return, so a kernel-to-kernel tick pays nothing.
@@ -135,7 +143,7 @@ kernel-side float computation that silently produces wrong bytes when a trap int
 the hardest to catch because nothing crashes; it shows up as a nondeterministic hash or crypto mismatch
 under interrupt load, and the fix is in the trampoline, not the crypto. The timer trampoline adds one
 more thing to verify: because it lays the 15 GPRs plus the CPU frame in the exact leading layout of
-`UserContext` (`timer_trampoline.rs:65`), a wrong push order or a misaligned stack shows up as a capsule
+`UserContext` (`timer_trampoline/trampoline.rs:31`), a wrong push order or a misaligned stack shows up as a capsule
 that resumes at the wrong `rip` or with swapped registers after preemption, traced through the scheduler
 resume hook on the [preemption](../scheduler/preemption.md) page.
 
@@ -143,7 +151,7 @@ resume hook on the [preemption](../scheduler/preemption.md) page.
 
 ```
   src/interrupts/isr/page_fault_trampoline.rs   the swapgs + fxsave pattern, error-code frame
-  src/interrupts/isr/timer_trampoline.rs         the UserContext capture and preemption snapshot
+  src/interrupts/isr/timer_trampoline/           timer_trampoline (asm) + timer_trap_handler (UserContext capture, preemption snapshot)
   src/interrupts/isr/exception_trampoline.rs     the other CPL=3-reachable exception trampolines
   src/interrupts/isr/wrappers.rs                 the plain x86-interrupt wrappers for the rest
 ```

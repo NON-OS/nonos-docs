@@ -26,7 +26,7 @@ Everything the kernel and the service registry need to name and reach the compos
 | Service endpoint | `service:4310:compositor` | `Capsule.mk:12`, `spawn.rs:31` |
 | Reply endpoint | `reply:4311:endpoint.compositor.reply` | `Capsule.mk:13`, `spawn.rs:33` |
 | Manifest capability ceiling | `0x7919` | `Capsule.mk:14` |
-| Granted mask at spawn | `0x7819` | `src/userspace/capsule_compositor/spawn.rs:50` |
+| `requested_caps` at spawn | `0x7819` (bounds optional caps only; installed mask is the required `0x7919`) | `src/userspace/capsule_compositor/spawn.rs:50` |
 | Binary name | `compositor` | `Capsule.mk:9` |
 | Kernel mirror | `src/userspace/capsule_compositor` | `Capsule.mk:15` |
 
@@ -34,7 +34,7 @@ Everything the kernel and the service registry need to name and reach the compos
 
 Two masks are in play and they differ by one bit, so both are stated. The `Capsule.mk` field
 `CAPSULE_REQUIRED_CAPS := 0x7919` is what the build stamps into the signed manifest and uses as the
-capability ceiling (`Capsule.mk:14`). Decomposed against `src/capabilities/types.rs`:
+capability ceiling (`Capsule.mk:14`). Decomposed against `src/capabilities/types/defs.rs`:
 
 | Bit | Value | Grants | Source |
 |-----|-------|--------|--------|
@@ -49,13 +49,20 @@ capability ceiling (`Capsule.mk:14`). Decomposed against `src/capabilities/types
 
 `0x7919 = 1 + 8 + 16 + 256 + 2048 + 4096 + 8192 + 16384`.
 
-The kernel spawn path requests only seven of the eight, dropping `Debug`
-(`src/userspace/capsule_compositor/spawn.rs:50`): CoreExec, IPC, Memory, and the four graphics caps. That
-sum is `0x7819 = 1 + 8 + 16 + 2048 + 4096 + 8192 + 16384`, and `0x7819` is the effective granted mask. It
-is the value the kernel prints in the `[SPAWN]` marker (`spawn_log.rs:18`, `:22`) and the value the
-attestation inventory records for the compositor
-(`userland/capsule_attest/src/server/handlers/proof_capsule_list.rs:31` lists `(b"compositor", 0x7819)`).
-The `Debug` bit in the manifest ceiling is a headroom bit the running capsule never asks for.
+The spawn site passes a `requested_caps` of only seven of the eight, dropping `Debug`
+(`src/userspace/capsule_compositor/spawn.rs:50`): CoreExec, IPC, Memory, and the four graphics caps, which
+sums to `0x7819`. That drop has no effect, and it is worth being precise about why. `requested_caps` bounds
+only optional caps, and the compositor declares no optional caps (`CAPSULE_REQUIRED_CAPS := 0x7919`,
+`CAPSULE_OPTIONAL_CAPS` unset, so `0x0`). The installed set is `required | (optional & granted)`
+(`src/security/capsule_manifest/verify/caps_bits.rs:45`), which is `0x7919 | 0 = 0x7919`. The kernel
+installs that on the process and prints it in the `[SPAWN]` marker, because the marker's `caps` argument is
+the manifest-derived `install_caps`, never `requested_caps`
+(`src/kernel_core/process_spawn/capsule_spawn/runner/verified.rs:59`,
+`src/kernel_core/process_spawn/capsule_spawn/runner/install/install.rs:59`). So the compositor runs with
+`Debug` in its mask: `Debug` is a required cap here, not headroom. The attestation inventory still records
+`(b"compositor", 0x7819)`
+(`userland/capsule_attest/src/server/handlers/proof_capsule_list.rs:31`), which is stale relative to the
+installed `0x7919`; see the [attestation-data](../attest/attestation-data.md) drift note.
 
 What matters either way is `GraphicsPresent`, the sole right to present a frame, and `GraphicsSurfaceMap`,
 the right to map a client's surface so it can be composited. There is no `Network`, no `FileSystem`, and
@@ -112,7 +119,7 @@ dispatch live in [operations.md](operations.md); the tick and present live in
 ## Lifecycle
 
 1. The kernel spawns the compositor as part of the desktop fleet's display core, after the boot splash and
-   the input router (`src/userspace/init/spawn_plan/desktop_fleet.rs:38`, `:39`). The spawn verifies the
+   the input router (`src/userspace/init/spawn_plan/desktop_fleet/mod.rs`, `:39`). The spawn verifies the
    embedded ELF, id cert, manifest, and attestation, requests the seven caps, and logs
    `[COMPOSITOR] capsule spawned` (`src/userspace/capsule_compositor/spawn.rs:37`,
    `src/userspace/init/capsule_boot/run.rs:29`).
@@ -162,8 +169,8 @@ fixed-size ops.
   userland/compositor/src/gfx_client/            the virtio-gpu NVGP client
   userland/compositor/Capsule.mk                 slug, handle, ports, capability mask, kernel mirror
   src/userspace/capsule_compositor/              the kernel-side embed and verified spawn
-  src/userspace/init/spawn_plan/desktop_fleet.rs the desktop-fleet spawn entry
-  src/capabilities/types.rs                      the capability bit definitions
+  src/userspace/init/spawn_plan/desktop_fleet/mod.rs the desktop-fleet spawn entry
+  src/capabilities/types/defs.rs                      the capability bit definitions
 ```
 
 Every reference above is verified against those trees.

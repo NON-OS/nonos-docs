@@ -20,11 +20,11 @@ Everything the kernel and the service registry need to name and reach the codec 
 | Namespace | `systems.nonos.image_codec` | `Capsule.mk:7` |
 | Service endpoint | `service:4412:image_codec` | `Capsule.mk:8` |
 | Reply endpoint | `reply:4413:endpoint.image_codec.reply` | `Capsule.mk:9` |
-| Capability mask | `0x1819` | `Capsule.mk:11` |
+| Capability mask | `0x3819` | `Capsule.mk:11` |
 | Binary name | `image_codec` | `Capsule.mk:5` |
 | Kernel mirror | `src/userspace/capsule_image_codec` | `Capsule.mk:12` |
 
-The mask `0x1819` decomposes into five bits, checked against `src/capabilities/types.rs`:
+The mask `0x3819` decomposes into six bits, checked against `src/capabilities/types/defs.rs`:
 
 | Bit | Value | Grants |
 |-----|-------|--------|
@@ -33,19 +33,19 @@ The mask `0x1819` decomposes into five bits, checked against `src/capabilities/t
 | Memory | `0x0010` | map its own heap, stack, and the pixel region |
 | GraphicsDisplayQuery | `0x0800` | ask the compositor for display geometry |
 | GraphicsSurfaceCreate | `0x1000` | create the surface it publishes the decoded pixels into |
+| GraphicsSurfaceMap | `0x2000` | map the surface backing to write the decoded pixels |
 
 ```
-  0x1819 = 0x0001 + 0x0008 + 0x0010 + 0x0800 + 0x1000
-         = CoreExec + IPC + Memory + GraphicsDisplayQuery + GraphicsSurfaceCreate
+  0x3819 = 0x0001 + 0x0008 + 0x0010 + 0x0800 + 0x1000 + 0x2000
+         = CoreExec + IPC + Memory + GraphicsDisplayQuery + GraphicsSurfaceCreate + GraphicsSurfaceMap
 ```
 
-That is the whole mask and nothing else. There is no `Network` bit (`0x0004`), no `FileSystem` (`0x0040`),
-no `Crypto` (`0x0020`), no `Hardware` (`0x0080`), no `Debug` (`0x0100`), and no driver, MMIO, IRQ, DMA, or
-PIO capability. The codec also does not hold `GraphicsSurfaceMap` (`0x2000`) or `GraphicsPresent`
-(`0x4000`): it creates a surface and shares its handle, but it does not map arbitrary surfaces and it does
-not paint the screen. The comment on `Capsule.mk:10` lists `Debug`, but the actual value on `Capsule.mk:11`
-is `0x1819`, not `0x1919`; the comment is stale relative to the number. Compromising the codec yields the
-codec's mask and nothing more, which is the entire point of running the parser here. The
+There is no `Network` bit (`0x0004`), no `FileSystem` (`0x0040`), no `Crypto` (`0x0020`), no `Hardware`
+(`0x0080`), no `Debug` (`0x0100`), and no driver, MMIO, IRQ, DMA, or PIO capability. The codec holds
+`GraphicsSurfaceCreate` and `GraphicsSurfaceMap` because it creates the surface and maps its backing to
+write the decoded pixels into, but it does not hold `GraphicsPresent` (`0x4000`): it publishes a shared
+handle for another capsule to present and never paints the screen itself. Compromising the codec yields
+this mask and nothing more, which is the entire point of running the parser here. The
 [safety](safety.md) page works through what that containment buys.
 
 ## The pillars
@@ -79,7 +79,7 @@ cert, manifest, and attestation trailer to `spawn_verified`
 `spawn_verified` preflights the id cert and manifest, holds the requested capabilities against the manifest
 ceiling, installs the caps the manifest declares, and registers `image_codec` on port 4412 with a reply
 inbox on 4413 (`src/kernel_core/process_spawn/capsule_spawn/runner/verified.rs:26`). A successful spawn
-prints `[SPAWN] name=image_codec ... caps=0x1819 ...` and then `[IMAGE-CODEC] capsule spawned` on the boot
+prints `[SPAWN] name=image_codec ... caps=0x3819 ...` and then `[IMAGE-CODEC] capsule spawned` on the boot
 log; the [debugging](debugging.md) page covers what each marker means. The capsule's `_start` initializes
 its heap and enters the receive/dispatch/reply loop forever (`src/main.rs:28`).
 
@@ -92,6 +92,6 @@ contract to target when wiring one.
 ## Source map
 
 Everything here is drawn from `userland/capsule_image_codec/` (the capsule source and its `Capsule.mk`),
-`src/capabilities/types.rs` (the capability bits), the kernel spawn mirror under
+`src/capabilities/types/defs.rs` (the capability bits), the kernel spawn mirror under
 `src/userspace/capsule_image_codec/`, and the shared decoders at `userland/toolkit/src/image/`. Every
 reference above is verified against those trees.

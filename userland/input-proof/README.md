@@ -26,7 +26,7 @@ unaltered. It is the acceptance harness for that path, described in the source a
 | Capability mask | `0x1919` | `Capsule.mk:18` |
 | Kernel mirror | `src/userspace/capsule_input_proof` | `Capsule.mk:19` |
 
-The mask decomposes into six bits, checked against `src/capabilities/types.rs`:
+The mask decomposes into six bits, checked against `src/capabilities/types/defs.rs`:
 
 | Bit | Value | Grants | Source |
 |---|---|---|---|
@@ -116,6 +116,6 @@ the outcome is persisted, and the markers live only on the ephemeral debug surfa
 ## Source map
 
 Everything here is drawn from `userland/capsule_input_proof/` (the capsule source, its `Capsule.mk`, and its
-`Cargo.toml`), `src/capabilities/types.rs` (the capability bits), the kernel spawn mirror under
+`Cargo.toml`), `src/capabilities/types/defs.rs` (the capability bits), the kernel spawn mirror under
 `src/userspace/capsule_input_proof/`, the fleet spawn plan under `src/userspace/init/`, and the app skeleton
 under `userland/app_skeleton/`. Every reference above is verified against those trees.

@@ -15,16 +15,16 @@ two one-shot bench markers on the ring.
 On a successful spawn the kernel logs `[INPUT-ROUTER] capsule spawned`. The `Ok` arm of the capsule boot
 path calls `boot_log::ok("INPUT-ROUTER", "capsule spawned")`
 (`src/userspace/init/capsule_boot/run.rs:29`, `src/sys/boot_log/output.rs:33`), and the prefix comes from
-the fleet spawn entry (`src/userspace/init/spawn_plan/desktop_fleet.rs:78`). If that line is absent the
+the fleet spawn entry (`src/userspace/init/spawn_plan/desktop_fleet/mod.rs`). If that line is absent the
 router never started, and the `Err` arm logged an error line instead
 (`src/userspace/init/capsule_boot/run.rs:32`), which is the usual signature, manifest, or capability
 failure. The router is spawned first in the desktop fleet, before the compositor
-(`src/userspace/init/spawn_plan/desktop_fleet.rs:38`), so its line should be the first capsule line in the
+(`src/userspace/init/spawn_plan/desktop_fleet/mod.rs`), so its line should be the first capsule line in the
 GUI bring-up.
 
 The kernel also emits two one-shot bench markers on the ring itself: `input_post_first` on the first
 successful post by any driver, and `input_drain_first` on the router's first drain
-(`src/kernel_core/surface_registry/input_ring.rs:68`, `src/syscall/dispatch/router/input_ops.rs:79`). These
+(`src/kernel_core/surface_registry/input_ring/mod.rs`, `src/syscall/dispatch/router/input_ops/mod.rs`). These
 bracket the whole path and are the fastest way to localise a dead input problem, described under the first
 failure mode below.
 
@@ -110,9 +110,9 @@ the 16-slot `key_targets` table drops a record when full, and that key-up then f
 ```
   src/userspace/init/capsule_boot/run.rs             [INPUT-ROUTER] capsule spawned / error path
   src/sys/boot_log/output.rs                         boot_log::ok formatting
-  src/userspace/init/spawn_plan/desktop_fleet.rs     the fleet entry and the INPUT-ROUTER prefix
-  src/kernel_core/surface_registry/input_ring.rs     input_post_first marker
-  src/syscall/dispatch/router/input_ops.rs           input_drain_first marker
+  src/userspace/init/spawn_plan/desktop_fleet/mod.rs     the fleet entry and the INPUT-ROUTER prefix
+  src/kernel_core/surface_registry/input_ring/mod.rs     input_post_first marker
+  src/syscall/dispatch/router/input_ops/mod.rs           input_drain_first marker
   src/route/keyboard.rs                              subscription gate, focus fallback, key-up target
   src/route/pointer/topmost_target.rs                hit test, zero-owner drop
   src/route/pointer/route_to_window.rs               window-pointer subscription gate

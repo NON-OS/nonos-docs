@@ -22,7 +22,7 @@ page beside the two folders that carry the real work, plus a contributing and a 
 The service name and port are also fixed in the source: `SERVICE_NAME` is `wallpaper_catalog`
 (`src/bootstrap/service_name.rs:17`) and `SERVICE_PORT` is `4110` (`src/bootstrap/port.rs:17`).
 
-The mask decomposes into three bits, checked against `src/capabilities/types.rs`:
+The mask decomposes into three bits, checked against `src/capabilities/types/defs.rs`:
 
 | Bit | Value | Grants |
 |-----|-------|--------|
@@ -79,7 +79,7 @@ time `_start` runs. The [protocol](protocol.md) page covers the groups and the f
   userland/capsule_wallpaper_catalog/src/protocol/            header, ops, errnos, limits
   userland/capsule_wallpaper_catalog/src/catalog/             count/size/slug/bytes accessors and the groups
   userland/capsule_wallpaper_catalog/Capsule.mk               slug, endpoints, caps 0x19, asset deps
-  src/capabilities/types.rs                                   the capability bits
+  src/capabilities/types/defs.rs                                   the capability bits
   src/userspace/capsule_wallpaper_catalog/                    the kernel spawn mirror
 ```
 

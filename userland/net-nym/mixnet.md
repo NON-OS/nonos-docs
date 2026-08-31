@@ -8,13 +8,18 @@ inside is on the [packet](packet.md) page; the nodes it routes over come from th
 not a port of an external Sphinx library, and this page describes exactly what the code does rather than what
 a reference Sphinx does.
 
+This documents the **legacy `NYMP` route header** in `src/route/`, which is the credential-gated fallback
+path. The path the browser and the SOCKS5 exit actually take is the full Sphinx implementation in
+`src/sphinx/`, documented on the [mixnet subsystem](../../subsystems/networking/mixnet.md) page; a session
+switches to it when `OP_SET_DESTINATION` binds a Nym destination (`src/server/handlers/send.rs:54`).
+
 ## Where it fits
 
 `packet::encode` calls `route::build` to fill the header tail (`src/packet/encode.rs:62`), and `route::build`
 is a three-step pipeline (`src/route/header.rs:24`):
 
 1. Derive a 32-byte route seed from the session key, credential, session id, and flags (`route/seed.rs:22`).
-2. Ask the topology layer to select a five-hop route from that seed (`route/header.rs:31`, on the
+2. Ask the topology layer to select a four-hop route from that seed (`route/header.rs:31`, on the
    [directory](directory.md) page).
 3. Build the layered header over those hops (`route/sphinx/build.rs:23`).
 
@@ -33,28 +38,29 @@ is deterministic from the seed but unpredictable without the session key.
 
 ## The header layout
 
-The header is a 34-byte prefix followed by five equal hop blocks (`src/route/sphinx/build.rs:32`):
+The header is a 34-byte prefix followed by four hop blocks (`src/route/sphinx/build.rs:32`):
 
 ```
   offset  size   field                                types.rs / build.rs
   0       32     ephemeral X25519 public key          EPK_LEN:20, build.rs:35
   32      1      version = 1                          build.rs:36
-  33      1      hop count = ROUTE_HOPS (5)           build.rs:37
-  34      55     hop block 0                          PREFIX_LEN:21, HOP_BYTES:22
-  89      55     hop block 1
-  ...
-  254     55     hop block 4
+  33      1      hop count = ROUTE_HOPS (4)           build.rs:37
+  34      68     hop block 0                          PREFIX_LEN:21, HOP_BYTES:22
+  102     68     hop block 1
+  170     68     hop block 2
+  238     71     hop block 3 (+ 3 trailing bytes)
 ```
 
 `PREFIX_LEN` is 34 and `HOP_BYTES` is `(ROUTE_HEADER_LEN - PREFIX_LEN) / ROUTE_HOPS`, that is
-`(309 - 34) / 5 = 55` (`src/route/sphinx/types.rs:21`). `ROUTE_HOPS` is 5, fixed by the topology layer
-(`src/topology/types.rs:22`).
+`(309 - 34) / 4 = 68` by integer division (`src/route/sphinx/types.rs:21`); the three-byte remainder is
+unused tail. `ROUTE_HOPS` is 4, fixed by the topology layer (`src/topology/types.rs:27`). Each block carries
+its content in its first 55 bytes: a 32-byte MAC then the routing fields (`src/route/sphinx/hop.rs:15`).
 
 ## The ephemeral key and the per-hop secrets
 
 The builder draws one fresh 32-byte X25519 private key from `crypto_random`, computes its public key, and
 writes that public key into the first 32 bytes of the header (`src/route/sphinx/build.rs:30`). This single
-ephemeral key is the sender's contribution to every hop's shared secret. For each of the five hops,
+ephemeral key is the sender's contribution to every hop's shared secret. For each of the four hops,
 `blocks::write` computes the X25519 shared secret between the ephemeral private key and that node's published
 `packet_key`, then derives the hop key from it (`src/route/sphinx/blocks.rs:34`):
 

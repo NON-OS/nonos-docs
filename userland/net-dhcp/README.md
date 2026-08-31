@@ -32,7 +32,7 @@ The service port `4440` and the reply port `4441` are the numbers the kernel bin
 capsule (`spawn.rs:37`, `spawn.rs:39`); the reply inbox name `endpoint.net.dhcp.client.reply` is the string
 the spawn record carries as the reply inbox (`spawn.rs:38`).
 
-The mask `0x0003d` decomposes bit by bit against `src/capabilities/types.rs`:
+The mask `0x0003d` decomposes bit by bit against `src/capabilities/types/defs.rs`:
 
 ```
   0x00001  CoreExec   bit()    1   types.rs:56
@@ -128,7 +128,7 @@ lease. The capsule owns the DHCP client state machine, the active lease, and the
   userland/capsule_net_dhcp/Capsule.mk         slug, handle, ports, capability mask, kernel mirror
   src/userspace/capsule_net_dhcp/              the kernel-side embed and verified spawn
   src/userspace/init/spawn_plan/network/spawn_dhcp.rs   the NET-DHCP spawn entry
-  src/capabilities/types.rs                    the capability bit values behind the mask
+  src/capabilities/types/defs.rs                    the capability bit values behind the mask
 ```
 
 Every reference above is verified against those trees.

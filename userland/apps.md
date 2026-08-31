@@ -272,14 +272,21 @@ only input router, compositor, and input probe in that desktop phase
 ## 7. Security analysis
 
 An application capsule is the least-trusted thing in the running system, and its
-capability mask reflects that. The eight skeleton apps carry `0x1819`, which is
-`CoreExec`, `IPC`, `Memory`, `GraphicsDisplayQuery`, and `GraphicsSurfaceCreate`
-(`userland/capsule_about/Capsule.mk:11` and the matching lines in the inventory).
-That is exactly enough to run, talk to the desktop services over IPC, query the
+capability mask reflects that. The pure display-only apps (about, calculator,
+hello, and the other skeleton apps) carry `0x1819`, which is `CoreExec`, `IPC`,
+`Memory`, `GraphicsDisplayQuery`, and `GraphicsSurfaceCreate`
+(`userland/capsule_about/Capsule.mk:12` and the matching rows in the inventory).
+Apps that move real data widen the mask exactly where their job requires it and
+nowhere else: `file_manager` and `text_editor` add `FileSystem` (`0x1859`),
+`terminal` adds `Network`, `Crypto`, and `FileSystem` (`0x187d`), `wallet` and
+`browser` add `Network` and `Crypto` (`0x183d`), `process_manager` adds
+`ProcessControl` (`0x2001819`), and `settings` adds `Network` and `DeviceEnum`
+(`0x981d`). For the display-only apps, `0x1819`
+is exactly enough to run, talk to the desktop services over IPC, query the
 display, register its own surface, and nothing more. An app holds no `Driver`,
 `Mmio`, `Irq`, `Dma`, `InputSource`, or `Admin` bit, so every device, interrupt, and
 admin syscall in the ABI returns `EPERM` for it at the gate
-(`src/capabilities/types.rs:54`). An app that tried to post its own input events or
+(`src/capabilities/types/defs.rs:18`). An app that tried to post its own input events or
 reboot the machine would be refused by the kernel, not by the desktop. The input proof
 capsule carries one extra bit, `0x1919` adds `Debug`, because it is a proof harness that
 emits debug markers; the ordinary apps do not.

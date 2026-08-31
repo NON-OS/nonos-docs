@@ -96,19 +96,21 @@ a bug.
 
 **A line is bound but silent.** This is the hard one and it only shows on real hardware. The broker
 `MkIrqBind` succeeded, the grant is valid, but the interrupt never reaches the handler. The usual cause
-is the IO-APIC destination. INTx bind reads `dest_apic_id = apic::id()`
-(`src/hardware/broker/irq/bind.rs:80`) and hands it to `program_route_external`
-(`src/arch/x86_64/interrupt/ioapic/ops_route.rs:94`), which builds `Rte::fixed(vector, dest_apic_id)` and
-writes the destination into the top byte of the redirection entry's high dword
-(`ops_route.rs:51`). The subtlety is that `apic::id()` returns the running CPU's real LAPIC id read from
-`LAPIC_ID >> 24` (`ops_core.rs:22`), which is *not always 0*:
-on real hardware the boot CPU's APIC id can be non-zero, so any code that hardcoded destination 0 would
-route the line to a core that never services it and the interrupt would vanish with no error. The
-diagnosis is to compare the destination field actually written into the redirection entry against the
-APIC id of the CPU running the driver's wait loop; if they differ, the line is being delivered to a core
-that is not listening. `ioapic_set_irq` does print `"[APIC] ERROR: GSI outside primary IOAPIC range"` when
-the GSI falls outside the IO-APIC's pin range, which catches a bad GSI, but a wrong-but-in-range
-destination is silent by nature. This is the controller-side view of the "claimed the device and bound
+is the IO-APIC destination. INTx bind reads `dest_apic_id = arch::interrupt_controller::local_id()`
+(`src/hardware/broker/irq/bind/intx.rs:52`, MSI-X copy at `bind/msix.rs:53`) and hands it to
+`program_route_external`
+(`src/arch/x86_64/interrupt/ioapic/ops_route/program_route_external.rs:32`), which builds
+`Rte::fixed(vector, dest_apic_id)` (`program_route_external.rs:37`) and writes the destination into the
+redirection entry. The subtlety is that `local_id()` is the running CPU's real LAPIC id (the cached value
+`apic::id()` returns at `ops_core.rs:22`, read from `LAPIC_ID >> 24` in `read_id_internal` at
+`ops_core.rs:30`), which is *not always 0*: on real hardware the boot CPU's APIC id can be non-zero, so
+any code that hardcoded destination 0 would route the line to a core that never services it and the
+interrupt would vanish with no error. The diagnosis is to compare the destination field actually written
+into the redirection entry against the APIC id of the CPU running the driver's wait loop; if they differ,
+the line is being delivered to a core that is not listening. The other IO-APIC driver, `ioapic_set_irq`
+(`src/sys/apic/ioapic/set_irq.rs:32`), does print `"[APIC] ERROR: GSI outside primary IOAPIC range"`
+(`set_irq.rs:42`) when the GSI falls outside the IO-APIC's pin range, which catches a bad GSI, but a
+wrong-but-in-range destination is silent by nature. This is the controller-side view of the "claimed the device and bound
 the IRQ but no events arrive" failure documented from the grant side on the
 [broker IRQ](../hardware-broker/irq.md) page.
 
@@ -119,7 +121,7 @@ the IRQ but no events arrive" failure documented from the grant side on the
   src/interrupts/pic/mask.rs           per-line and global masking
   src/interrupts/pic/eoi.rs            the PIC end-of-interrupt
   src/interrupts/apic/                 the façade over sys::apic (init, eoi, is_enabled)
-  src/arch/x86_64/interrupt/ioapic/ops_route.rs  program_route_external, the redirection-entry destination
+  src/arch/x86_64/interrupt/ioapic/ops_route/program_route_external.rs  program_route_external, the redirection-entry destination
   src/arch/x86_64/interrupt/apic/ops_core.rs     apic::id(), the running LAPIC id
 ```
 

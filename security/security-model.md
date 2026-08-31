@@ -69,7 +69,7 @@ trust](capsules-and-trust.md) page.
 ## Enforcement: bounding what runs
 
 Once a capsule is a process, its authority is a **[capability mask](capabilities-and-tokens.md)**, a set
-of the twenty-two capability bits, and the kernel checks it on every syscall. Authority is additive and
+of the thirty-one capability bits, and the kernel checks it on every syscall. Authority is additive and
 least-privilege by construction: a capsule holds exactly what its manifest was granted and nothing else.
 The decode is not decoration, it is the boundary. A filesystem capsule holds no hardware capability at
 all; the keyring holds the crypto right but not the network or driver rights; an input driver holds the
@@ -135,6 +135,34 @@ Verus refinement over the real capability bit-operations; the crypto primitives 
 FIPS, RFC, and NIST vectors with tamper rejection; and the parsers are fuzz-proven never to panic or
 break their invariants over millions of hostile inputs.
 
+## Status of each mechanism
+
+Precise tags, read from the code rather than from intent. IMPLEMENTED means the code
+exists; ENFORCED means a failure actually blocks the operation (fail-closed); TESTED
+means an in-tree negative or vector test exercises it; PROVEN means a machine-checked
+proof covers it. Where a claim is only structural, it says so.
+
+| Mechanism | Primary source | Status |
+|-----------|----------------|--------|
+| Certificate against anchor (epoch, revocation, window, dual signature) | `nonos_id_cert/verify/` | IMPLEMENTED, ENFORCED |
+| Manifest against certificate (binding, namespace, ceiling, grant, payload hash) | `capsule_manifest/verify/` | IMPLEMENTED, ENFORCED |
+| Dual signature Ed25519 + ML-DSA-65 | `crypto/asymmetric/`, `crypto/pqc/ml_dsa_65/` | IMPLEMENTED, ENFORCED; primitives TESTED vs vectors |
+| Capsule attestation gate, strict build | `capsule_attest/`, `runner/attest_gate.rs` | IMPLEMENTED, ENFORCED (fail-closed unless `nonos-zk-rollout`) |
+| STARK / FRI / Poseidon verifier | `nonos-stark/` | IMPLEMENTED; soundness INHERITED, not PROVEN in-tree; adversarial fuzzing on the zk verifiers only |
+| Developer-root enrolment + trusted-path consent | `security/dev_roots/` | IMPLEMENTED, ENFORCED; NOT TESTED in-tree |
+| Kernel self-attestation gating the boot jump | `security/kernel_attest.rs`, bootloader `kernel_verify/` | IMPLEMENTED, ENFORCED under `stark-kernel-attest` |
+| Capability token MAC (two-pass keyed BLAKE3, constant-time) | `capabilities/token/` | IMPLEMENTED, ENFORCED |
+| Syscall capability check (ordered resolver) | `syscall/contract/resolver/` | IMPLEMENTED, ENFORCED |
+| Delegation attenuate-only + expiry + domain-separated MAC | `capabilities/delegation/` | IMPLEMENTED, ENFORCED |
+| Revocation at four scopes | `token/revocation.rs`, `process/caps.rs`, anchor | IMPLEMENTED, ENFORCED |
+| Capability-algebra soundness, isolation, page invariants, zeroization, attestation logic | `verification/` (Lean/Verus) | PROVEN (per the [verification page](../architecture/verification.md)) |
+| IOMMU / device-DMA containment | `arch/x86_64/iommu/` | NOT ENGAGED by default (`nonos-arch-iommu` feature) |
+
+The one boundary that reads as a guarantee but is not: the STARK verifier is a faithful
+implementation of sound components, not a formally verified circuit, and its in-tree
+negative testing is on the discrete-log attestation verifiers, not on the STARK itself.
+See the [STARK page](../subsystems/proof-system/stark.md) for the exact scope.
+
 ## The honest boundaries
 
 The guarantees stop in specific, stated places:
@@ -156,7 +184,9 @@ The guarantees stop in specific, stated places:
 ## Where to read next
 
 - [Capsules and trust](capsules-and-trust.md): the exact verified-spawn pipeline, field by field.
-- [Capabilities and tokens](capabilities-and-tokens.md): the twenty-two bits and the syscall table.
+- [Capabilities and tokens](capabilities-and-tokens.md): the thirty-one bits and the syscall table.
+- [Developer roots](developer-roots.md): how locally built software runs, and how a machine records
+  vendor versus developer authority on every attestation.
 - [The hardware broker](../subsystems/hardware-broker/README.md): how a ring-3 driver reaches hardware.
 - [Verification](../architecture/verification.md): exactly what of this is proven, and what is not.
 - [The mission](../architecture/mission.md): why this model exists and the custody use case it serves.

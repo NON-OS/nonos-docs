@@ -65,8 +65,9 @@ The per-slug make targets are generated from the `NONOS_CAPSULE_RULES` template
 
 The manifest and attestation are built from `CAPSULE_REQUIRED_CAPS`, which the template passes as both
 `--required-caps` and `--capability-mask` (`nonos-mk/capsule.mk:230`, `capsule.mk:254`). That is the value
-declared `0x19` in `Capsule.mk:17`; note the arithmetic-slip caveat on the [README](README.md) identity
-table, since the runtime spawn requests only `0x18`.
+declared `0x39` in `Capsule.mk:17` (CoreExec, IPC, Memory, Crypto); note the required-versus-requested
+caveat on the [README](README.md) identity table, since the runtime spawn passes `requested_caps = 0x38`
+and the manifest's required `0x39` is what gets installed.
 
 For a running kernel that includes the market:
 

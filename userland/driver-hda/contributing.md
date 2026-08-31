@@ -60,7 +60,7 @@ device programming that this capsule deliberately does not carry today. The conc
 they would have to land:
 
 - **A `Dma` capability.** The mask is `0x78019` and holds no `Dma` bit (`Capsule.mk:17`,
-  `src/capabilities/types.rs:75`). Any DMA-backed structure requires that bit added to the manifest and
+  `src/capabilities/types/bit.rs:42`). Any DMA-backed structure requires that bit added to the manifest and
   granted at spawn, plus the broker DMA path. Until then there is no device-visible buffer at all.
 - **CORB/RIRB verb transport.** The current codec path is the single-verb immediate-command interface
   (`src/controller/immediate.rs:23`). Real codec configuration needs the Command Output Ring Buffer and
@@ -135,7 +135,7 @@ rules, the top-level `Makefile` targets, and the driver-fleet spawn entry.
   nonos-mk/capsule.mk                                    the nonos-mk-driver-hda[-sign|-verify] templates
   Makefile                                               the -prod image target
   src/userspace/init/spawn_plan/drivers_storage.rs       the driver-fleet spawn entry
-  src/capabilities/types.rs                              the Dma bit a playback path would need
+  src/capabilities/types/bit.rs                          the Dma bit a playback path would need
 ```
 
 Every reference above is verified against those trees.

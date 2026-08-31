@@ -42,7 +42,7 @@ there is no kernel spawn mirror for it. To make it a live, spawnable window you 
   namespace, kernel mirror, and `CAPSULE_REQUIRED_CAPS`. Model it on `userland/capsule_snake/Capsule.mk`.
   The mask should be the graphics-and-IPC envelope described on the [hub](README.md): CoreExec, IPC,
   Memory, GraphicsDisplayQuery, GraphicsSurfaceCreate, and nothing from the driver, MMIO, IRQ, DMA,
-  network, or filesystem range, per the capability bits in `src/capabilities/types.rs`.
+  network, or filesystem range, per the capability bits in `src/capabilities/types/defs.rs`.
 - a kernel spawn mirror under `src/userspace/`, and an entry in the fleet spawn plan behind the new cargo
   feature, the same shape snake uses (`src/userspace/init/spawn_plan/apps.rs`).
 
@@ -61,5 +61,5 @@ at the top of every file (`src/app.rs:1`).
 
 Everything here is drawn from `userland/capsule_gui_proof/` (the two source files, its `README.md`, and
 its `Cargo.toml`), the app skeleton under `userland/app_skeleton/`, the snake capsule under
-`userland/capsule_snake/` used as the live-capsule model, and `src/capabilities/types.rs`. Every reference
+`userland/capsule_snake/` used as the live-capsule model, and `src/capabilities/types/defs.rs`. Every reference
 above is verified against those trees.

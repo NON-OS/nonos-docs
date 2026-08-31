@@ -103,9 +103,9 @@ The orchestrator splits those phases into small entry points. Drivers are
 grouped as virtio, bus, input, NIC, USB, and storage
 (`src/userspace/init/spawn_plan/orchestrator.rs:29`). Network startup calls L2,
 IP, UDP, DHCP, TCP, DNS, Nym, and sockets in that order
-(`src/userspace/init/spawn_plan/network.rs:17`). Desktop startup calls
+(`src/userspace/init/spawn_plan/network/mod.rs`). Desktop startup calls
 input_router and compositor as GUI core, then WM, wallpaper catalog, wallpaper,
-desktop shell, and desktop services (`src/userspace/init/spawn_plan/desktop_fleet.rs:17`).
+desktop shell, and desktop services (`src/userspace/init/spawn_plan/desktop_fleet/mod.rs`).
 
 ```
 +--------------------------+
@@ -143,8 +143,8 @@ desktop shell, and desktop services (`src/userspace/init/spawn_plan/desktop_flee
 | Core after RAMFS | `src/userspace/init/spawn_plan/core.rs:22` |
 | Driver groups | `src/userspace/init/spawn_plan/orchestrator.rs:29` |
 | VFS | `src/userspace/init/entry.rs:32` |
-| Network stack | `src/userspace/init/spawn_plan/network.rs:17` |
-| Desktop stack | `src/userspace/init/spawn_plan/desktop_fleet.rs:17` |
+| Network stack | `src/userspace/init/spawn_plan/network/mod.rs` |
+| Desktop stack | `src/userspace/init/spawn_plan/desktop_fleet/mod.rs` |
 | Market | `src/userspace/init/spawn_plan/core.rs:35` |
 | App fleet | `src/userspace/init/spawn_plan/apps.rs:17` |
 
@@ -207,7 +207,22 @@ ceiling on top of that, rejecting a manifest whose caps exceed the certificate's
 grant with `CapsExceedCeiling` (`src/security/capsule_manifest/error.rs:50`). So a
 capsule cannot widen its own authority by asking for more at the spawn site, and it
 cannot ship a manifest that asks for more than its publisher was licensed to grant.
-The twenty-two capability bits (`src/capabilities/types.rs:81`) are the vocabulary;
+
+The manifest itself is schema version 3: it carries the publisher cert id, the
+app namespace, the target triple, a BLAKE3 `payload_hash` over the ELF, a
+`required_caps` mask and an `optional_caps` mask, the declared IPC endpoints, and
+a hybrid Ed25519 + ML-DSA-65 publisher signature set
+(`abi/capsule_manifest.schema.json`, `src/security/capsule_manifest/schema/manifest.rs:38`).
+The two masks make the grant rule precise. The verifier first refuses any grant
+that reaches for bits the manifest never declared
+(`grant_within_manifest`, `src/security/capsule_manifest/verify/caps_bits.rs:34`),
+then computes the installed set as `required | (optional & granted)`
+(`install_caps`, `src/security/capsule_manifest/verify/caps_bits.rs:45`). Required
+caps are never attenuated by the spawn-site grant; the grant only decides which of
+the optional caps come along. That is why the certificate ceiling, checked by
+`within_ceiling` before any signature is verified, is the upper bound that matters
+(`src/security/capsule_manifest/verify/caps.rs:25`).
+The thirty-one capability bits (`src/capabilities/types/defs.rs:18`) are the vocabulary;
 the manifest is the binding contract for which of them a given capsule holds.
 
 Isolation between capsules is the address-space boundary plus the named-endpoint
@@ -254,7 +269,7 @@ seen at runtime traces back to the manifest that phase installed.
   src/kernel_core/process_spawn/capsule_spawn/runner/verified.rs   install_caps from the manifest
   src/kernel_core/process_spawn/capsule_spawn/runner/install/install.rs  the install steps
   src/security/capsule_manifest/error.rs             the manifest rejection reasons
-  src/capabilities/types.rs                          the 22 capability bits
+  src/capabilities/types/defs.rs                     the 31 capability bits
 ```
 
 The syscall boundary each capsule compiles against is on

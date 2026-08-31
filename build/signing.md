@@ -8,40 +8,41 @@ kernel-side verification. Read [Toolchain](toolchain.md) first.
 
 ## 1. Trust layout
 
-The root Makefile defines trust material under `nonos-data/trust`, with trust
-anchor public keys in `keys`, the sealed policy in `policy`, and private seeds
-under `.keys` (`Makefile:257`). The sealed policy output is
-`nonos-data/trust/policy/nonos_trust_anchor.policy.bin`
-(`Makefile:271`). The host signing binary is
-`nonos-sign/target/release/capsule-sign` (`Makefile:280`).
+The build defines trust material under `nonos-data/trust`, with trust anchor
+public keys in `keys`, the sealed policy in `policy`, and private seeds under
+`.keys` (`mk/20-build.mk:187`, `NONOS_TRUST_DIR` at `mk/00-config.mk:110`). The
+sealed policy output is `nonos-data/trust/policy/nonos_trust_anchor.policy.bin`
+(`NONOS_TRUST_ANCHOR_POLICY_BIN`, `mk/20-build.mk:195`). The host signing binary
+is `nonos-sign/target/release/capsule-sign` (`CAPSULE_SIGN_BIN`,
+`mk/00-config.mk:124`).
 
 The trust policy rule depends on Ed25519 and ML-DSA-65 trust anchor public keys
 and runs `capsule-sign mk-trust-policy` with epoch, both public keys, validity
-window, and output path (`Makefile:333`).
+window, and output path (`mk/20-build.mk:398`).
 
 ## 2. Capsule metadata
 
 The shared capsule macro requires every capsule to set slug, binary name,
 directory, handle, domain, namespace, service endpoint, reply endpoint, and
 required caps before including `nonos-mk/capsule.mk`
-(`nonos-mk/capsule.mk:28`). Optional caps default to `0x0`, caps ceiling
+(`nonos-mk/capsule.mk:29`). Optional caps default to `0x0`, caps ceiling
 defaults to required caps, target defaults to `x86_64-nonos-user`, version
 defaults to `0.1.0`, and build std defaults to `core,alloc`
-(`nonos-mk/capsule.mk:70`).
+(the `?=` defaults block precedes the snapshot at `nonos-mk/capsule.mk:94`).
 
 The macro writes each capsule binary path under its own target directory, the
 NØNOS-ID certificate to `nonos-data/trust/capsules/<bin>.nonos_id_cert.bin`,
 and the manifest to `nonos-data/trust/capsules/<bin>.manifest.bin`
-(`nonos-mk/capsule.mk:91`).
+(`nonos-mk/capsule.mk:97`).
 
 ## 3. Certificate rule
 
 For each capsule, the macro derives `nonos_id` from handle, domain, and
-recovery value using `capsule-sign derive-id` (`nonos-mk/capsule.mk:175`). The
+recovery value using `capsule-sign derive-id` (`nonos-mk/capsule.mk:202`). The
 certificate rule signs with serial, nonos id, namespace glob, caps ceiling,
 trust anchor epoch, validity window, Ed25519 publisher key, ML-DSA-65 publisher
 key, Ed25519 trust anchor seed, ML-DSA-65 trust anchor seed, metadata, and
-output path (`nonos-mk/capsule.mk:180`).
+output path (`sign-id-cert`, `nonos-mk/capsule.mk:211`).
 
 ## 4. Manifest rule
 
@@ -49,9 +50,9 @@ The manifest rule depends on the capsule ELF, certificate, Capsule.mk, and
 signing tool. It runs `capsule-sign sign-manifest` with certificate, namespace,
 version, target, ELF path, required caps, optional caps, service endpoint, reply
 endpoint, Ed25519 publisher seed, ML-DSA-65 publisher seed, and output path
-(`nonos-mk/capsule.mk:201`). The same rule verifies the manifest against the
+(`nonos-mk/capsule.mk:231`). The same rule verifies the manifest against the
 certificate and trust policy before it is considered built
-(`nonos-mk/capsule.mk:217`).
+(`verify-manifest`, `nonos-mk/capsule.mk:245`).
 
 ```
   +-------------------+
@@ -132,7 +133,7 @@ evidence the kernel re-checks. Three properties are worth stating plainly.
 **The build verifies what it signs, on the same machine that signed it.** The
 manifest rule does not stop at signing. After `sign-manifest` it runs
 `verify-manifest` against the certificate and the sealed trust policy
-(`nonos-mk/capsule.mk:237`), so a capsule that signs but does not verify fails the
+(`nonos-mk/capsule.mk:245`), so a capsule that signs but does not verify fails the
 build rather than shipping. This closes the gap where a signing bug produces an
 artifact that only fails much later, at spawn, on a real boot.
 
@@ -146,7 +147,7 @@ admit a forged capsule.
 
 **Private seeds never enter the kernel or the committed tree.** The trust anchor
 private seeds and the per-capsule publisher seeds live under `.keys`
-(`Makefile:488`), separate from the committed public keys, and only the public
+(`mk/20-build.mk:191`), separate from the committed public keys, and only the public
 material is embedded into the kernel with `include_bytes`. The kernel verifies
 against the baked trust anchor policy; it never holds a signing key. This is what
 lets the trust anchor be a genuine root: possession of the kernel image does not
@@ -154,7 +155,7 @@ grant the ability to mint a capsule the kernel will trust.
 
 The `nonos_id` binding is a fourth, quieter property. Each certificate's identity
 is recomputed from handle, domain, and recovery on every sign
-(`nonos-mk/capsule.mk:194`), so renaming a certificate file cannot silently
+(`nonos-mk/capsule.mk:202`), so renaming a certificate file cannot silently
 rebind it to a different identity; the identity is derived, not stored and
 trusted.
 
@@ -165,14 +166,14 @@ build-verifies-what-it-signs discipline catching a mismatch.
 
 **Missing publisher key.** Before any capsule signs, `nonos-mk-check-<slug>-keys`
 asserts the Ed25519 and ML-DSA-65 seeds and public files exist
-(`nonos-mk/capsule.mk:184`). A missing file fails with an explicit
-`::error::missing <path>` and the exact `capsule-sign keygen` command to create
-it. The certificate and manifest rules take this check as an order-only
-prerequisite (`nonos-mk/capsule.mk:222`), so signing never runs against absent
-keys.
+(`nonos-mk/capsule.mk:191`). A missing file fails with an explicit
+`::error::missing <path>` (`nonos-mk/capsule.mk:195`) and the exact
+`capsule-sign keygen` command to create it. The certificate and manifest rules
+take this check as an order-only prerequisite, so signing never runs against
+absent keys.
 
 **Manifest verification fails after signing.** The manifest rule's own
-`verify-manifest` step (`nonos-mk/capsule.mk:237`) checks the freshly signed
+`verify-manifest` step (`nonos-mk/capsule.mk:245`) checks the freshly signed
 manifest against the certificate and trust policy. A failure here usually means a
 mismatch the build should not ship: a `payload_hash` that no longer matches the
 ELF (the manifest depends on the ELF so a rebuild forces a re-sign, but a
@@ -193,14 +194,13 @@ embeds them.
 
 ```
   nonos-mk/capsule.mk               the per-capsule cert/manifest sign and verify rules
-    :184  check-<slug>-keys         asserts publisher seeds and pubs exist
-    :204  sign-id-cert              signs the NØNOS-ID certificate
-    :224  sign-manifest             signs the manifest against the cert
-    :237  verify-manifest           re-verifies the signed manifest vs cert and policy
-  Makefile
-    :122  NONOS_TRUST_DIR           the committed trust root nonos-data/trust
-    :488  key layout                .keys/ holds private seeds, trust/keys/ the pubs
-    :603  mk-trust-policy           seals the trust anchor policy
+    :191  check-<slug>-keys         asserts publisher seeds and pubs exist
+    :211  sign-id-cert              signs the NØNOS-ID certificate
+    :231  sign-manifest             signs the manifest against the cert
+    :245  verify-manifest           re-verifies the signed manifest vs cert and policy
+  mk/00-config.mk:110               NONOS_TRUST_DIR, the committed trust root nonos-data/trust
+  mk/20-build.mk:187                key layout: .keys/ holds private seeds, trust/keys/ the pubs
+  mk/20-build.mk:398                the trust-anchor policy rule (mk-trust-policy)
   src/security/capsule_manifest/    the manifest schema and kernel-side verify
   src/security/nonos_id_cert/       the certificate schema
   src/kernel_core/process_spawn/capsule_spawn/runner/preflight.rs   spawn-time verification
@@ -209,6 +209,6 @@ embeds them.
 The build-ordering and signing-key requirements are on the [toolchain](toolchain.md)
 page, the verify lanes that re-check trust are on the [workflows](workflows.md)
 page, and the runtime spawn gate these artifacts feed is in the
-[architecture overview](../architecture/overview.md). Some line numbers in the
-prose above predate small Makefile edits; the anchors in this map are verified
-against the current `nonos-mk/capsule.mk` and `Makefile`.
+[architecture overview](../architecture/overview.md). The build is split into
+`mk/*.mk` included by the top-level `Makefile`; the anchors in this map are
+verified against the current `nonos-mk/capsule.mk` and those files.

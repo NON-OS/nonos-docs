@@ -92,7 +92,7 @@ For a kernel image that includes this driver, `make nonos-mk-driver-i2c-hid-prod
 - One unit per file. New handlers, parsers, and wire units are one per file under the folder that owns
   them, and `mod.rs` is used only for re-exports, matching the existing tree.
 - The AGPL header sits at the top of every source file. The `src/input/*` files carry the full header
-  byte for byte (for example `src/input/poll.rs:1`); a few older files under `src/hid/`, `src/protocol/`,
+  byte for byte (for example `src/input/poll/poll.rs`); a few older files under `src/hid/`, `src/protocol/`,
   `src/server/`, and `src/i2c_client/` predate the header sweep and open with code instead (for example
   `src/hid/descriptor.rs:1` and `src/protocol/header.rs:1`). Any new file must include the header, and
   touching an old one is a good chance to add it.

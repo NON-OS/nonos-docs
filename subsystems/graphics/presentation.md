@@ -60,7 +60,7 @@ own surface. Three properties bound it, plus the display pool ceiling that keeps
 from draining RAM.
 
 **Present and vsync are separately gated.** `MkSurfacePresent` routes through `can_present`
-(`mk.rs:76`), requiring `GraphicsPresent` (bit `16384`, `capabilities/types.rs:70`), and
+(`mk.rs:76`), requiring `GraphicsPresent` (bit `16384`, `capabilities/types/bit.rs:37`), and
 `MkDisplayVsyncWait` routes through `can_display_query` (`mk.rs:77`), requiring
 `GraphicsDisplayQuery` (bit `2048`). A capsule can be allowed to pace itself to vblank without being
 allowed to present, and the compositor, which is the one capsule that actually commits pixels, is the

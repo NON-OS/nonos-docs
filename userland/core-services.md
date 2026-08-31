@@ -20,11 +20,11 @@ the boot order. Every value below is read from that capsule's `Capsule.mk` and i
 | [crypto](crypto/README.md) | `service:4102:crypto_pool` | `0x39` | The stateless crypto compute pool with per-op payload limits and request-buffer wipe. |
 | [policy](policy/README.md) | `service:4108:policy` | `0x219` | The typed config store; reads open, writes gated to the settings and setup-wizard apps. |
 | [attest](attest/README.md) | `service:4444:attest` | `0x19` | System info and stated invariants. Honestly: text claims and a boot label, not cryptographic proofs. |
-| [installer](installer/README.md) | `service:4112:installer` | `0x19` | Loads capsules through the kernel's verified-load syscall; trust is the kernel's. |
-| [payment](payment/README.md) | `service:4110:payment` | `0x19` | Assembles NOX receipts and gets them signed by the keyring; per-payer nonces and a drain queue. |
-| [market](market/README.md) | `service:4106:market.index` | `0x19` | Serves the signed app index; real Ed25519 verifier (reject-all stub under `offline-verify`). |
+| [installer](installer/README.md) | `service:4112:installer` | `0x800059` | Loads capsules through the kernel's verified-load syscall; trust is the kernel's. Holds `SpawnBroker` and `FileSystem`. |
+| [payment](payment/README.md) | `service:4114:payment` | `0x19` | Assembles NOX receipts and gets them signed by the keyring; per-payer nonces and a drain queue. |
+| [market](market/README.md) | `service:4106:market.index` | `0x39` | Serves the signed app index; real Ed25519 verifier (reject-all stub under `offline-verify`). Holds `Crypto`. |
 | [power](power/README.md) | `service:4448:power` | `0x219` | Reboot and shutdown through the kernel admin syscalls. |
-| [process-manager](process-manager/README.md) | `service:4730:app.process_manager` | `0x1819` | A GUI viewer of running services and CPU usage via `mk_proc_stat`. |
+| [process-manager](process-manager/README.md) | `service:4736:app.process_manager` | `0x2001819` | A GUI viewer of running services and CPU usage via `mk_proc_stat`; holds `ProcessControl`. |
 
 Each endpoint string is the literal `CAPSULE_SERVICE_ENDPOINT` from that capsule's `Capsule.mk`
 (`service:<port>:<name>`), and each mask is its `CAPSULE_REQUIRED_CAPS`. The reply endpoints
@@ -100,7 +100,7 @@ naming is aspirational; what it returns is human-authored invariant text and a b
 cryptographic proof. Its `Capsule.mk` deliberately withholds the Debug capability so it cannot emit serial
 markers, which is the point of a no-logs attester (`userland/capsule_attest/Capsule.mk:11`).
 
-[installer](installer/README.md) (`installer` on port 4112, mask `0x19`) is the install authority. Its operations
+[installer](installer/README.md) (`installer` on port 4112, mask `0x800059`) is the install authority. Its operations
 (`userland/capsule_installer/src/protocol/types.rs:17`) are `OP_HEALTHCHECK` (1), `OP_INSTALL` (2),
 `OP_LOAD_FROM_STORE` (3), `OP_LOAD_BY_NAME` (4). It holds no key material: it loads capsules through the
 kernel's verified-load syscall `mk_capsule_load` (`userland/capsule_installer/src/server/selfinstall.rs:20`),
@@ -108,14 +108,14 @@ so all verification trust sits in the kernel, not the installer. Its only build 
 `nonos-autorun-install`, an off-by-default headless self-verification path
 (`userland/capsule_installer/Cargo.toml:23`); it has no `offline-verify` feature.
 
-[payment](payment/README.md) (`payment` on port 4110, mask `0x19`) issues NOX install receipts. Its operations
+[payment](payment/README.md) (`payment` on port 4114, mask `0x19`) issues NOX install receipts. Its operations
 (`userland/capsule_payment/src/protocol/types.rs:17`) are `OP_HEALTHCHECK` (1), `OP_PAY` (2),
 `OP_DRAIN_RECEIPTS` (3), `OP_LIST_TOKENS` (4). It holds no keys: it assembles the receipt fields, including a
 per-payer nonce (`userland/capsule_payment/src/server/sign_call.rs:40`), and calls the keyring over IPC to
 sign (`userland/capsule_payment/src/server/consts.rs:20`). Issued receipts sit in a drain queue that the
 installer pulls with `OP_DRAIN_RECEIPTS` (`userland/capsule_payment/src/server/handlers/drain.rs:23`).
 
-[market](market/README.md) (`market.index` on port 4106, mask `0x19`) serves the signed app index. Its operations
+[market](market/README.md) (`market.index` on port 4106, mask `0x39`) serves the signed app index. Its operations
 (`userland/capsule_market/src/protocol/ops.rs:17`) are `OP_LOAD_INDEX` (1), `OP_LIST_APPS` (2), `OP_GET_APP`
 (3), `OP_GET_RELEASE` (4), `OP_INSTALL_READY` (5), `OP_HEALTHCHECK` (6). The production verifier calls the
 kernel-routed `crypto_ed25519_verify` on the index signature
@@ -129,7 +129,7 @@ development reject-all stub (`userland/capsule_market/src/verify/mod.rs:18`,
 gates them and Debug is deliberately absent so a power-off never leaks to serial
 (`userland/capsule_power/Capsule.mk:10`).
 
-[process-manager](process-manager/README.md) (`app.process_manager` on port 4730, mask `0x1819`) is a GUI viewer,
+[process-manager](process-manager/README.md) (`app.process_manager` on port 4736, mask `0x2001819`) is a GUI viewer,
 not a service other capsules call. It samples the process table through the read-only `mk_proc_stat` syscall
 (`userland/capsule_process_manager/src/pm/sample.rs:17`) and paints the running services and their CPU
 history. It holds no authority over the processes it observes; the two graphics bits in its mask are for the

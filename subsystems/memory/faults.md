@@ -127,21 +127,27 @@ which is the per-fault half of the [zeroization](zeroization.md) posture. The fr
 zeroed on free, so this is defence in depth rather than the only scrub.
 
 **The demand budget is a denial-of-service bound.** Each backed page is charged against the faulting
-process through `demand_cap::charge` (`faults/demand_cap.rs`), which caps a single process at
-`MAX_DEMAND_PAGES` (262144 pages, one gigabyte). A process over budget is refused with
-`UnhandledPageFault` and killed by the exception path, so a runaway capsule cannot fault-in pages
-until it drains physical memory. The honest boundary: the counter table holds `MAX_TRACKED` (128)
-processes, and when it saturates with live faulters the charge allows rather than wrongly denies, so
-the per-process cap always holds but the aggregate is only bounded to the tracked set. Pid 0 (no
-current process) is charged as always-allowed, which is the kernel's own faults, not a capsule's.
+process through `demand_cap::charge` (`faults/demand_cap.rs:49`), which caps a single process at
+`MAX_DEMAND_PAGES` (4096 pages, 16 MiB) (`demand_cap.rs:27`). Stacks, heap, and code are mapped eagerly,
+so a healthy capsule demand-faults essentially nothing; a process over budget is refused with
+`UnhandledPageFault` and killed by the exception path, so a runaway capsule cannot fault-in pages until
+it drains physical memory. The saturation path is metered, not open: the counter table holds
+`MAX_TRACKED` (128) processes, and when it fills with live faulters an untracked process is charged
+against a shared `overflow` budget bounded by the same `MAX_DEMAND_PAGES` and then refused
+(`demand_cap.rs:83`), so there is no unmetered path around the cap. The overflow resets when a tracked
+slot frees, since the pressure that forced it is gone (`demand_cap.rs:75`). Pid 0 (no current process)
+is charged as always-allowed (`demand_cap.rs:50`), which is the kernel's own faults, not a capsule's.
 
 ## Debugging page faults
 
-A handled demand or copy-on-write fault is silent on purpose: `page_fault.rs:46` explains that
-dumping every one to the serial console makes demand paging pathologically slow and stalls the
-system while a large allocation is faulted in page by page. So the only faults that narrate are the
-ones the handler refused, and the exception path (`src/interrupts/handlers/exceptions/page_fault.rs`)
-prints them in a fixed shape:
+Every page fault narrates: the exception path
+(`src/interrupts/handlers/exceptions/page_fault.rs:31`) calls `dump_trap` unconditionally at
+`page_fault.rs:35`, before it even tries to handle the fault at `page_fault.rs:44`, so a handled
+demand or copy-on-write fault prints a `[TRAP PF]` line just like an unhandled one. What distinguishes
+a handled fault is that nothing follows the line: no `Segmentation fault`, no `KERNEL PANIC`. This is
+tolerable only because demand faults are rare by design (eager mapping, see the demand budget above); a
+flood of `[TRAP PF]` lines is itself the signal that a capsule is faulting when it should not. The fixed
+shape is:
 
 ```
   PF <trap dump>                                   dump_trap: the frame, error code, and CR2
@@ -154,8 +160,12 @@ prints them in a fixed shape:
 ```
 
 The `[DEMAND-CAP] per-process page budget hit, killing pid=<hex>` line comes from
-`demand_cap.rs` and is printed exactly once as a process crosses its budget, so a capsule that dies
-right after a burst of allocation is a budget kill, not a mapping bug. The three "Attempted to ..."
+`demand_cap.rs:63` and is printed exactly once as a process crosses its 16 MiB budget, so a capsule that
+dies right after a burst of allocation is a budget kill, not a mapping bug. The companion
+`[DEMAND-CAP] tracking table saturated, overflow budget spent, killing pid=<hex>` line
+(`demand_cap.rs:89`) is the rarer case: the 128-slot counter table was full of live faulters and the
+shared overflow budget was spent, so this pid was refused through the saturation path rather than its own
+per-process counter. The three "Attempted to ..."
 lines are chosen off the error-code bits (`is_instruction_fetch`, `is_write`), so a kernel panic
 tells you which access the kernel made: an execute line on a kernel panic is a W^X or NX violation
 inside the kernel, a write line is a write to a read-only kernel mapping. A user "Segmentation fault"

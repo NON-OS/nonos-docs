@@ -27,27 +27,27 @@ Everything the kernel and the service registry need to name and reach the driver
 
 The service name stays `driver.ps2_kbd0` for callers written before the mouse existed, even though the
 endpoint now serves both keyboard and mouse. The mask `0x358019` decomposes bit by bit against
-`src/capabilities/types.rs`, and the `Capsule.mk` comment spells the same sum out
+`src/capabilities/types/bit.rs`, and the `Capsule.mk` comment spells the same sum out
 (`Capsule.mk:15`):
 
 | Bit | Value | Capability | Grants | Source |
 |-----|-------|------------|--------|--------|
-| `0x000001` | 1 | CoreExec | run as a process | `types.rs:56` |
-| `0x000008` | 8 | IPC | send and receive on its endpoints | `types.rs:59` |
-| `0x000010` | 16 | Memory | map its own heap and stack | `types.rs:60` |
-| `0x008000` | 32768 | DeviceEnum | list the platform records | `types.rs:71` |
-| `0x010000` | 65536 | Driver | claim and release a device | `types.rs:72` |
-| `0x040000` | 262144 | Irq | bind and acknowledge IRQ1 and IRQ12 | `types.rs:74` |
-| `0x100000` | 1048576 | Pio | mint the i8042 port-IO grant | `types.rs:76` |
-| `0x200000` | 2097152 | InputSource | post decoded events into the kernel input ring | `types.rs:77` |
+| `0x000001` | 1 | CoreExec | run as a process | `types/bit.rs:23` |
+| `0x000008` | 8 | IPC | send and receive on its endpoints | `types/bit.rs:26` |
+| `0x000010` | 16 | Memory | map its own heap and stack | `types/bit.rs:27` |
+| `0x008000` | 32768 | DeviceEnum | list the platform records | `types/bit.rs:38` |
+| `0x010000` | 65536 | Driver | claim and release a device | `types/bit.rs:39` |
+| `0x040000` | 262144 | Irq | bind and acknowledge IRQ1 and IRQ12 | `types/bit.rs:41` |
+| `0x100000` | 1048576 | Pio | mint the i8042 port-IO grant | `types/bit.rs:43` |
+| `0x200000` | 2097152 | InputSource | post decoded events into the kernel input ring | `types/bit.rs:44` |
 
 ```
   0x358019 = 1 + 8 + 16 + 32768 + 65536 + 262144 + 1048576 + 2097152
 ```
 
 The kernel spawn path requests exactly those eight capabilities and no others
-(`src/hardware/ps2_kbd_capsule/spawn.rs:51`). There is no `Mmio` bit (`0x20000`, `types.rs:73`) and no
-`Dma` bit (`0x80000`, `types.rs:75`), so the capsule cannot map a device BAR into its address space or
+(`src/hardware/ps2_kbd_capsule/spawn.rs:51`). There is no `Mmio` bit (`0x20000`, `types/bit.rs:40`) and no
+`Dma` bit (`0x80000`, `types/bit.rs:42`), so the capsule cannot map a device BAR into its address space or
 receive a DMA buffer; its only hardware reach is the i8042 port window through kernel-mediated `in`/`out`.
 There is no FileSystem, Network, Admin, or Debug authority in the mask, which is the basis of the
 security analysis on the [bring-up](bring-up.md) page. `Pio` is the distinguishing bit: this is the only
@@ -116,7 +116,7 @@ mapped (`src/hardware/ps2_kbd_capsule/spawn.rs:39`). On a successful bring-up it
   userland/capsule_driver_ps2_input/src/protocol/ the NKBD header, ops, limits, encode/decode, endpoint
   userland/capsule_driver_ps2_input/src/server/   the recv/dispatch loop, the pump, and the handlers
   userland/capsule_driver_ps2_input/Capsule.mk    slug, handle, ports, capability mask, kernel mirror
-  src/capabilities/types.rs                       the capability bit values
+  src/capabilities/types/bit.rs                   the capability bit values
   src/hardware/ps2_kbd_capsule/                   the kernel-side embed and verified spawn
 ```
 

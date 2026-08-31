@@ -3,7 +3,7 @@
 # The Nym Capsule
 
 `net_nym` is the anonymity-overlay capsule: a signed ring-3 capsule that wraps an application datagram in a
-layered Sphinx packet, routes it through a five-hop mixnet, and carries the outermost packet to an entry
+layered Sphinx packet, routes it through a four-hop path (three mix layers and an exit gateway), and carries the outermost packet to an entry
 gateway over a WebSocket the capsule speaks itself. It runs no code in the kernel and touches no device. It
 sits above `net.tcp`, which it uses purely as a byte pipe to a gateway, and it exposes a small
 session-oriented op set to the applications that want a mixed path. Everything a mixnet client does that is
@@ -18,7 +18,7 @@ for the AEAD, X25519, and hash primitives it calls, read the [crypto capsule](..
 
 ## Reading the source README first
 
-The capsule ships a `README.md` (`userland/capsule_net_nym/README.md`) that now tracks the code: eighteen
+The capsule ships a `README.md` (`userland/capsule_net_nym/README.md`) that now tracks the code: nineteen
 ops, a `0x0013d` mask, endpoint `4470`, the Sphinx packet sizes, the gateway stages, and what the serial log
 prints when one of them fails. It described a beta scaffold for a long time and was rewritten once the
 mixnet path started working, so an older checkout will disagree with it. Where any document and the code
@@ -53,7 +53,7 @@ The reply endpoint has two parts the manifest and the spawn record agree on: the
 reply back to the sender by pid with `mk_ipc_reply` rather than to a fixed inbox (`src/server/respond.rs:31`),
 so the reply endpoint is the registry-side name for its return path, not an address the capsule hardcodes.
 
-The mask `0x0013d` decomposes bit by bit against `src/capabilities/types.rs`:
+The mask `0x0013d` decomposes bit by bit against `src/capabilities/types/defs.rs`:
 
 ```
   0x00001  CoreExec   bit()    1   types.rs:56
@@ -93,7 +93,7 @@ against a table of per-owner sessions, replay windows, credentials, and SURBs (t
       | NYM1 op IPC                                       | NTCP byte IPC
       v                                                   |
   server/  ->  packet/ encode  ->  route/sphinx build  ->  gateway_client/ (ws or raw)
-  dispatch    NYMP + AEAD + tag   5-hop layered header    handshake, frame, send
+  dispatch    NYMP + AEAD + tag   4-hop layered header    handshake, frame, send
       \             |                    |                        |
        \            v                    v                        v
         `--  state/ : sessions, replay, credential, surb, timing, topology store  --'
@@ -104,10 +104,10 @@ against a table of per-owner sessions, replay windows, credentials, and SURBs (t
 
 | Page | Mirrors | What it covers |
 |------|---------|----------------|
-| [operations.md](operations.md) | `src/protocol/`, `src/server/` | The `NYM1` wire format, the receive loop, the admin authorization gate, the sixteen ops with per-op payloads, and the errno set. |
+| [operations.md](operations.md) | `src/protocol/`, `src/server/` | The `NYM1` wire format, the receive loop, the admin authorization gate, the nineteen ops with per-op payloads, and the errno set. |
 | [packet.md](packet.md) | `src/packet/`, `src/crypto/` | The `NYMP` wire packet: fixed sizing, the ChaCha20-Poly1305 payload, the padded-plaintext frame, the BLAKE3 replay tag, and the crypto syscall wrappers. |
 | [mixnet.md](mixnet.md) | `src/route/` | The Sphinx route header: the ephemeral X25519 key, the per-hop shared secret and key schedule, the per-hop MAC block, and the reverse HKDF onion masking. |
-| [directory.md](directory.md) | `src/topology/`, `src/directory_sync/` | The signed `NYMD` node directory: the Ed25519 authority check, the validity window and epoch, node parsing, the layered five-hop route selection, and the HTTP fetch. |
+| [directory.md](directory.md) | `src/topology/`, `src/directory_sync/` | The signed `NYMD` node directory: the Ed25519 authority check, the validity window and epoch, node parsing, the layered four-hop route selection, and the TLS fetch with its gateway/exit retry hardening. |
 | [transport.md](transport.md) | `src/gateway_client/`, `src/tcp_client/`, `src/setup.rs` | The gateway link: the `NTCP` client to `net.tcp`, the RFC 6455 WebSocket handshake and framing, and the raw-TCP alternative. |
 | [state.md](state.md) | `src/state/` | The per-owner tables: the session and its receive queue, the replay window, the trusted-authority and credential stores, the SURB store, and the cover-timing policy. |
 | [contributing.md](contributing.md) | the whole tree | Where each concern lives, how to add an op, the build and sign steps, and the code standards. |
@@ -155,7 +155,7 @@ fallback.
   userland/capsule_net_nym/Cargo.toml          panic = "abort" and the binary name
   src/userspace/capsule_net_nym/               the kernel-side embed and verified spawn
   src/userspace/init/spawn_plan/network/spawn_nym.rs  the NET-NYM spawn entry and boot marker
-  src/capabilities/types.rs                    the capability bit values behind the mask
+  src/capabilities/types/defs.rs                    the capability bit values behind the mask
 ```
 
 Every reference above is verified against those trees.

@@ -61,18 +61,18 @@ vfs=5, virtio_rng=6, and the kernel mirror names the same slot (`src/protocol/en
 
 ### Mask decomposition
 
-The mask `0x1F8019` decomposes bit by bit against `src/capabilities/types.rs`:
+The mask `0x1F8019` decomposes bit by bit against `src/capabilities/types/bit.rs` (line -> value; the enum is in `src/capabilities/types/defs.rs`):
 
 ```
-  0x000001  CoreExec     56 -> 1         run as a process
-  0x000008  IPC          59 -> 8         send and receive on its endpoints
-  0x000010  Memory       60 -> 16        map its own heap and stack
-  0x008000  DeviceEnum   71 -> 32768     enumerate the broker device table
-  0x010000  Driver       72 -> 65536     claim and release a device
-  0x020000  Mmio         73 -> 131072    map the claimed device's register BAR
-  0x040000  Irq          74 -> 262144    bind the device interrupt to a slot
-  0x080000  Dma          75 -> 524288    allocate device-visible DMA memory
-  0x100000  Pio          76 -> 1048576   mint a port-IO window for the register BAR
+  0x000001  CoreExec     23 -> 1         run as a process
+  0x000008  IPC          26 -> 8         send and receive on its endpoints
+  0x000010  Memory       27 -> 16        map its own heap and stack
+  0x008000  DeviceEnum   38 -> 32768     enumerate the broker device table
+  0x010000  Driver       39 -> 65536     claim and release a device
+  0x020000  Mmio         40 -> 131072    map the claimed device's register BAR
+  0x040000  Irq          41 -> 262144    bind the device interrupt to a slot
+  0x080000  Dma          42 -> 524288    allocate device-visible DMA memory
+  0x100000  Pio          43 -> 1048576   mint a port-IO window for the register BAR
   --------
   0x1F8019  = 1 + 8 + 16 + 32768 + 65536 + 131072 + 262144 + 524288 + 1048576
 ```
@@ -135,7 +135,7 @@ page covers what each early-exit code and broker-phase stall means.
   userland/capsule_driver_virtio_rng/src/constants/   device ids, register offsets, queue layout, status
   userland/capsule_driver_virtio_rng/Capsule.mk       slug, handle, ports, capability mask, mirror
   src/hardware/virtio_rng_capsule/                    the verified kernel-side spawn, mirror, and client
-  src/capabilities/types.rs                           the capability bit values
+  src/capabilities/types/bit.rs                       the capability bit values
 ```
 
 Every reference above is verified against those trees.

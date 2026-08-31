@@ -25,31 +25,31 @@ Everything the kernel and the service registry need to name and reach the wallet
 | Namespace | `systems.nonos.app.nonos_wallet` | `Capsule.mk:7` |
 | Service endpoint | `service:4734:app.nonos_wallet` | `Capsule.mk:8`, `spawn.rs:30` |
 | Reply endpoint | `reply:4735:endpoint.app.nonos_wallet.reply` | `Capsule.mk:9`, `spawn.rs:31`, `spawn.rs:32` |
-| Capability mask | `0x1839` | `Capsule.mk:10` |
+| Capability mask | `0x183d` | `Capsule.mk:11` |
 | Binary name | `wallet_nonos` | `Capsule.mk:5` |
 | Kernel mirror | `src/userspace/capsule_wallet_nonos` | `Capsule.mk:11` |
 
-The mask `0x1839` decomposes bit by bit against `src/capabilities/types.rs`, and the kernel spawn path
-requests exactly these six capabilities and no others (`spawn.rs:48`):
+The mask `0x183d` decomposes bit by bit against `src/capabilities/types/defs.rs`, and the kernel spawn path
+requests exactly these seven capabilities and no others (`spawn.rs:48`):
 
-| Bit | Value | Grants | Source |
-|---|---|---|---|
-| CoreExec | `0x0001` | run as a process | `types.rs:56` |
-| IPC | `0x0008` | send and receive on its endpoints | `types.rs:59` |
-| Memory | `0x0010` | map its own heap and stack | `types.rs:60` |
-| Crypto | `0x0020` | use the kernel Keccak and AEAD primitives | `types.rs:61` |
-| GraphicsDisplayQuery | `0x0800` | ask the compositor for the display geometry | `types.rs:67` |
-| GraphicsSurfaceCreate | `0x1000` | create the window surface it draws into | `types.rs:68` |
+| Bit | Value | Grants |
+|---|---|---|
+| CoreExec | `0x0001` | run as a process |
+| Network | `0x0004` | reach the network stack to broadcast and query transactions |
+| IPC | `0x0008` | send and receive on its endpoints |
+| Memory | `0x0010` | map its own heap and stack |
+| Crypto | `0x0020` | use the kernel Keccak and AEAD primitives |
+| GraphicsDisplayQuery | `0x0800` | ask the compositor for the display geometry |
+| GraphicsSurfaceCreate | `0x1000` | create the window surface it draws into |
 
 ```
-  0x1839 = 0x0001 + 0x0008 + 0x0010 + 0x0020 + 0x0800 + 0x1000
+  0x183d = 0x0001 + 0x0004 + 0x0008 + 0x0010 + 0x0020 + 0x0800 + 0x1000
 ```
 
-There is no Network bit (`0x0004`) and no FileSystem bit (`0x0040`) in the mask. That is the basis of the
-security story: the wallet can execute, ask the display for its size, create a surface, speak IPC, and use
-the kernel crypto primitives (the transaction hash and the TLS record layer), but it cannot open a socket
-or touch a device on its own. Every RPC packet it appears to send is really an IPC request to the
-`net.sockets` service that holds the real transport authority, and every signature is an IPC request to
+There is no FileSystem bit (`0x0040`) in the mask, and no driver, MMIO, or DMA capability. The wallet holds
+`Network` because it drives its own RPC over the network stack, and `Crypto` for the transaction hash and
+the TLS record layer, but it cannot touch a device on its own: the socket transport is still an IPC request
+to the `net.sockets` service that holds the transport authority, and every signature is an IPC request to
 the keyring that holds the key. The Crypto bit is present because the wallet hashes transactions and seals
 TLS records, not because it holds any key.
 
@@ -99,7 +99,7 @@ manifest ceiling, and only then is its ELF mapped. On a successful boot the kern
 ## Source map
 
 Everything here is drawn from `userland/capsule_wallet_nonos/` (the capsule source and its `Capsule.mk`),
-`src/capabilities/types.rs` (the capability bits the mask decomposes against), and the kernel spawn mirror
+`src/capabilities/types/defs.rs` (the capability bits the mask decomposes against), and the kernel spawn mirror
 under `src/userspace/capsule_wallet_nonos/`.
 
 ```
@@ -113,7 +113,7 @@ under `src/userspace/capsule_wallet_nonos/`.
   userland/capsule_wallet_nonos/src/wallet/tls13/      the from-scratch TLS 1.3 client
   userland/capsule_wallet_nonos/src/wallet/paint/      the renderer
   userland/capsule_wallet_nonos/Capsule.mk             slug, handle, ports, capability mask, kernel mirror
-  src/capabilities/types.rs                            the capability bit definitions
+  src/capabilities/types/defs.rs                            the capability bit definitions
   src/userspace/capsule_wallet_nonos/spawn.rs          the kernel-side embed and verified spawn
 ```
 

@@ -66,7 +66,7 @@ in use, but the fixed-vector guarantee it enforces is load bearing. Three proper
 **The exceptions are never allocatable.** `init` reserves vectors 0 through 31 before any dynamic
 allocation can run (`init.rs`), and both `allocate_vector` and `free_vector` refuse to cross
 `RESERVED_VECTORS_END` (32): the allocator scans upward from 32 (`allocator.rs:23`) and `free_vector`
-returns `"cannot free reserved vector"` for anything below it (`allocator.rs:35`). So no runtime
+returns `"cannot free reserved vector"` for anything below it (`allocator.rs:36`). So no runtime
 requester can ever be handed a CPU exception vector or free one out from under the fixed handlers, which
 means a dynamic allocation can never shadow the page-fault or double-fault gate.
 
@@ -79,7 +79,7 @@ and must not be dispensed even though they sit inside the otherwise-claimable le
 
 **Failure is explicit, not silent.** `allocate_vector` returns `None` when the pool is exhausted rather
 than wrapping around, and `free_vector` returns `"vector not allocated"` for a double free
-(`allocator.rs:42`), so a bug in a caller surfaces as a handled error rather than as a reused vector. The
+(`allocator.rs:43`), so a bug in a caller surfaces as a handled error rather than as a reused vector. The
 honest boundary is that this registry is the kernel's own bookkeeping, not a capability check: it tracks
 which vectors are taken, but the authority to route a device's line to a vector lives in the
 [broker IRQ](../hardware-broker/irq.md) bind path, which is what ties a vector to a claimed device. A

@@ -37,7 +37,7 @@ it declares in code and the binary it builds.
 
 Because there is no `Capsule.mk`, there is no capability mask to decompose. For comparison, a normal GUI
 capsule such as [snake](../snake/README.md) declares `0x1819`, five bits checked against
-`src/capabilities/types.rs`: CoreExec `0x0001` (`types.rs:56`), IPC `0x0008` (`types.rs:59`), Memory
+`src/capabilities/types/defs.rs`: CoreExec `0x0001` (`types.rs:56`), IPC `0x0008` (`types.rs:59`), Memory
 `0x0010` (`types.rs:60`), GraphicsDisplayQuery `0x0800` (`types.rs:67`), and GraphicsSurfaceCreate
 `0x1000` (`types.rs:68`). That is the envelope this capsule would need to be spawned as a window, and no
 more: its own README forbids it from owning hardware, so a live `Capsule.mk` would carry those graphics
@@ -93,6 +93,6 @@ it today. Wiring it into the fleet is a `Capsule.mk` and a kernel mirror away, a
 ## Source map
 
 Everything here is drawn from `userland/capsule_gui_proof/` (the capsule source, its `README.md`, and its
-`Cargo.toml`), the app skeleton under `userland/app_skeleton/`, and `src/capabilities/types.rs` (the
+`Cargo.toml`), the app skeleton under `userland/app_skeleton/`, and `src/capabilities/types/defs.rs` (the
 capability bits used for the comparison mask). The absence of a `Capsule.mk` and of a kernel spawn mirror
 under `src/userspace/` is itself verified. Every reference above is verified against those trees.

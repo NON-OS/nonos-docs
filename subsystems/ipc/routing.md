@@ -66,7 +66,7 @@ full queue, so the sender learns the outcome.
 Capsules reach this routing through the send family under `src/syscall/microkernel/ipc/`,
 which adds the user-boundary handling on top:
 
-- `sys_ipc_send` (`ipc/send.rs:47`) bounds the length against `MAX_MESSAGE_SIZE` before
+- `sys_ipc_send` (`ipc/send.rs:49`) bounds the length against `MAX_MESSAGE_SIZE` before
   allocating, validates and copies the payload out of user space with the
   [usercopy](../memory/usercopy.md) checks, resolves the endpoint to a target name, verifies
   the caller satisfies the endpoint's capability, and routes. A reply to a service's own
@@ -81,6 +81,49 @@ touching it, and both surface the strict-enqueue failure modes as errnos. The ke
 the payload into a kernel buffer before it enters the message, so the sender cannot mutate a
 message the kernel has accepted.
 
+## The reply redirect and correlation
+
+The subtle case is a server answering a request a client made with `mk_ipc_call`. A server
+replies by sending to its own fixed reply endpoint, and `send_with_correlation` classifies
+that send in `redirect_reply` (`send.rs:140`) into one of three destinations rather than
+routing it as addressed:
+
+```
+  redirect_reply(sender_pid, target):                      # send.rs:140
+      if target == sender's own reply_inbox:
+          if pending_reply::pop(sender_pid) is Some(caller): Redirect::ToCaller
+          else:                                             Redirect::ToReplyInbox
+      else:                                                 Redirect::AsAddressed
+```
+
+`Redirect::ToCaller` (`send.rs:74`) is a reply owed to a capsule caller: the bytes go
+straight into that caller's private reply inbox, the exact inbox its blocked `mk_ipc_call`
+is draining, and the caller's pid is woken because a reply inbox has no owner the router
+would wake on its own. `Redirect::ToReplyInbox` (`send.rs:107`) is a reply owed to a
+kernel-mediated round trip (crypto pool, entropy, vfs, the block device): the kernel is the
+one draining this inbox, so the bytes stay there. `Redirect::AsAddressed` (`send.rs:116`) is
+every ordinary send, routed to its named target with its own correlation.
+
+This three-way split is the fix for the reply-drop regression that killed crypto, nym, and
+net: routing a reply back through the service resolver re-resolved the reply inbox to the
+caller's own `proc.<pid>` inbox (the caller had adopted the endpoint), where the caller's
+serve loop ate its own reply and the call timed out. Enqueuing directly into the private
+reply inbox is what delivers the answer to the right place.
+
+Correlation is what makes the redirect safe against forgery. `mk_ipc_call` mints a per-call
+token that is monotonic and never zero (`call/sys_ipc_call.rs:36`), registers it in the
+server's pending-reply table keyed by the caller's inbox (`sys_ipc_call.rs:72`), and stamps
+it on the request. Both reply paths, the redirect above and the direct `mk_ipc_reply`
+(`reply.rs:87`), read that same token back and stamp it on the reply. The blocked caller
+runs `recv_reply_correlated` (`recv.rs:66`), which drains its inbox and delivers only the
+message whose correlation equals the token it waits on, discarding everything else. A hostile
+capsule can `mk_ipc_send` into another capsule's reply inbox, but `sys_ipc_send` hardcodes
+correlation 0 (`send.rs:50`), which can never match a nonzero token, so a forged reply is
+dropped rather than delivered. The server pairs a reply to its caller by the request's token,
+recorded on every dequeue (`pending_reply::record_served`, `recv.rs:137`), not by queue
+position, because kernel-side senders push no pending entry yet still occupy the inbox and
+would otherwise shift the FIFO onto the wrong caller.
+
 ## Security analysis
 
 Routing is where the reachability boundary is actually drawn: a capsule names a service or a pid, and
@@ -90,7 +133,7 @@ plus one honest limit.
 
 **A name, never an address.** A caller reaches another capsule only by naming a registered endpoint;
 there is no path where a capsule supplies a raw inbox name or an address. `resolve_send_target`
-(`send.rs:90`) turns the numeric `endpoint` argument into a registry lookup, and
+(`send.rs:151`) turns the numeric `endpoint` argument into a registry lookup, and
 `kernel_route_ipc_corr` (`kernel_ipc.rs:69`) then derives the destination inbox itself: a capsule
 service routes to `proc.<endpoint.pid>`, the owner's canonical inbox, and a kernel reply endpoint routes
 to its own named inbox. The destination string is computed from the endpoint record, not taken from the
@@ -102,7 +145,7 @@ caller is permitted to call.
 `kernel_check_ipc_permission` / the inline check in `kernel_route_ipc_corr` (`kernel_ipc.rs:45`,
 `kernel_ipc.rs:64`): an unknown target is `ENOENT`, and a caller that does not hold the endpoint's
 `caps_required` is `EACCES`, before any enqueue. The send syscall re-checks the same requirement through
-`caller_satisfies_endpoint` (`send_caps.rs:24`), which treats `caps_required == 0` as open to any sender
+`caller_satisfies_endpoint` (`send_caps.rs:35`), which treats `caps_required == 0` as open to any sender
 and otherwise requires the caller's permission bits to cover the mask. The kernel does not deliver first
 and check later. Registering a name is separately gated from calling one: `sys_service_register`
 (`register.rs:34`) demands the caller hold the register-service or admin right for an ordinary name
@@ -115,9 +158,9 @@ called it from the kernel's attestation rather than a forgeable field. A capsule
 appear to come from another capsule.
 
 **The payload is copied out of the sender before it enters the message.** Both send syscalls bound the
-length against `MAX_MESSAGE_SIZE` up front (`send.rs:55`), validate the user buffer with the
-[usercopy](../memory/usercopy.md) checks (`send.rs:58`), and copy it into a kernel buffer
-(`send.rs:62`) before building the message. There is no unchecked user pointer crossing the boundary,
+length against `MAX_MESSAGE_SIZE` up front (`send.rs:57`), validate the user buffer with the
+[usercopy](../memory/usercopy.md) checks (`send.rs:60`), and copy it into a kernel buffer
+(`send.rs:64`) before building the message. There is no unchecked user pointer crossing the boundary,
 and once the kernel has accepted the message the sender cannot mutate it, because the kernel holds its
 own copy.
 
@@ -131,15 +174,15 @@ a well-formed but hostile request is that capsule's own input-validation problem
 
 Every routing outcome is one of a small errno set, and the value tells you which stage refused the call.
 A send that returns `EINVAL` (`-22`) was rejected before routing even ran, for a zero or oversize length
-at the syscall's own bound (`send.rs:55`); `EFAULT` (`-14`) means the user buffer failed the usercopy
-validate or copy (`send.rs:58`). Past those, the route's own returns are the interesting ones:
+at the syscall's own bound (`send.rs:57`); `EFAULT` (`-14`) means the user buffer failed the usercopy
+validate or copy (`send.rs:60`). Past those, the route's own returns are the interesting ones:
 `ENOENT` (`-2`) means `lookup_service` found no endpoint for the target, so the name is wrong or the
 service never registered; `EACCES` (`-13`) means the endpoint exists but the caller lacks its
 `caps_required`, which is an authorisation problem, not a wiring one; `ESRCH` (`-3`) means the
 destination inbox is missing or its owner is dead (the strict-enqueue `MissingInbox`/`DeadOwner` folded
 together at `kernel_ipc.rs:90`); and `EAGAIN` (`-11`) means the destination queue is full. The
 `sys_ipc_send` path also returns `EPERM` (`-1`) when `caller_satisfies_endpoint` refuses the caps
-(`send.rs:67`), which is the send-syscall mirror of the route's `EACCES`, so both a `-1` and a `-13`
+(`send.rs:76`), which is the send-syscall mirror of the route's `EACCES`, so both a `-1` and a `-13`
 point at the same missing capability depending on which check caught it first.
 
 Registration failures are a separate set: `sys_service_register` returns `EINVAL` for a bad name length
@@ -150,11 +193,11 @@ call: a registration that never took shows up as one of these at the register sy
 is a send that returned `0` (routed fine) followed by a receiver that never gets the reply. For that
 case the traces are the tool: the route prints `[ROUTE] from= target= dest= wake=` for the traced
 destination pids (`kernel_ipc.rs:29`) with `wake=1` when it woke a sleeping receiver, and the send path
-prints `[IPC-SEND] ...` (`send.rs:36`). A hung `mk_ipc_call` (`call/sys_ipc_call.rs:31`) that sent
+prints `[IPC-SEND] ...` (`send.rs:35`). A hung `mk_ipc_call` (`call/sys_ipc_call.rs:47`) that sent
 successfully but timed out on the reply is diagnosed by whether the route to the *server* showed
 `wake=1`: if the server was woken but no reply came back, the stall is in the server, and if the reply
 send was refused, the caller's own reply inbox never filled and the call times out at its
-5000 ms default (`call/sys_ipc_call.rs:56`).
+5000 ms default (`call/sys_ipc_call.rs:87`).
 
 ## Source map
 
@@ -164,7 +207,10 @@ send was refused, the caller's own reply inbox never filled and the call times o
   src/syscall/microkernel/ipc/send_to_pid.rs  sys_ipc_send_to_pid
   src/syscall/microkernel/ipc/send_caps.rs    caller_satisfies_endpoint, the send-side caps check
   src/syscall/microkernel/ipc/register.rs     sys_service_register and its errno set
-  src/syscall/microkernel/ipc/call/sys_ipc_call.rs  the call/reply/timeout wrapper
+  src/syscall/microkernel/ipc/call/sys_ipc_call.rs  the call/reply/timeout wrapper, per-call token
+  src/syscall/microkernel/ipc/recv.rs         recv_reply_correlated, the correlation filter
+  src/syscall/microkernel/ipc/reply.rs        sys_ipc_reply, the direct reply path
+  src/syscall/microkernel/ipc/pending_reply/  the server pending-reply table, keyed by token
   src/services/registry.rs                    register_endpoint, lookup_service, lookup_port, MAX_SERVICES
   src/services/registry/auth/                 caller_can_register and the register-right check
 ```

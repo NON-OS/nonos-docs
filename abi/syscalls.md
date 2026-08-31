@@ -67,16 +67,49 @@ not, independent of the capability bit.
 
 ---
 
-## Process and time
+## Process, threads, and lifecycle
 
 | Tag | Call | Cap | Semantics |
 |-----|------|-----|-----------|
-| MSPN | MkSpawn | IPC | Spawn a process. Used by the supervisor and by capsules permitted to launch children. |
-| MEXT | MkExit | valid token | Terminate the calling capsule. Does not return. |
+| MSPN | MkSpawn | IPC | Spawn a process from a named capsule. `(name_ptr, name_len)`. Used by the supervisor and by capsules permitted to launch children. |
+| MSPI | MkSpawnInstance | SpawnWindow | Open another window instance of an already-embedded, attested app capsule (terminal, browser). Held only by the desktop shell. |
+| MTRN | MkToolRun | IPC | Run a baked, attested command-line tool by name, parented to the caller so the caller drives its stdio. `(name_ptr, name_len, argv, argc)`. |
+| MEXT | MkExit | valid token | Terminate the calling capsule with an exit code. Does not return. |
+| MKIL | MkKill | IPC | Terminate a process. A capsule may kill its own children with `IPC`; killing an unrelated pid additionally requires `ProcessControl`. |
+| MWAT | MkWait | IPC | Block until a child exits, writing its status through a caller pointer. |
 | MPAL | MkPidAlive | valid token | Report whether a given pid is still alive. |
+| MGPD | MkGetPid | valid token | Return the caller's own pid. |
+| MKAR | MkArgs | valid token | Copy the caller's argument buffer into `(buf, len)`. |
+| MTSP | MkThreadSpawn | IPC | Spawn a thread in the caller's address space. `(entry, arg)`. |
+| MSTB | MkSetTls | valid token | Set the caller's thread-local (fs) base. Mutates nothing outside the caller's own PCB, so a valid token is the whole requirement. |
 | MYLD | MkYield | valid token | Voluntarily yield the CPU to the scheduler. |
-| MTMS | MkTimeMillis | valid token | Unix-epoch milliseconds, derived from the RTC boot time plus elapsed TSC. Monotonic, returned as an `i64`. |
+| MFTW | MkFutexWait | valid token | Sleep on a userspace futex word until woken or the timeout elapses. `(uaddr, expected, timeout_ms)`. |
+| MFTK | MkFutexWake | valid token | Wake up to `count` waiters on a futex word. `(uaddr, count)`. |
+| MPST | MkProcStat | valid token | Read process statistics for a pid into a caller struct. |
+
+`MkKill` and `MkSpawnInstance` are the two lifecycle calls with a second, narrower
+gate: killing a process the caller does not parent needs `ProcessControl`, and
+spawning a fresh app-window instance needs `SpawnWindow`. Both bits are held by a
+single trusted capsule (the process manager and the desktop shell respectively) so
+a compromised application cannot terminate or spawn unrelated capsules.
+
+## Standard IO
+
+| Tag | Call | Cap | Semantics |
+|-----|------|-----|-----------|
+| MSOW | MkStdoutWrite | IPC | Mirror bytes into the caller's own `proc.<pid>` inbox as program stdout. Gated on `IPC` (not `Debug`) so a capsule without debug still has a stdout. |
+| MSRD | MkStdinRead | IPC | Read from the caller's stdin. `(buf, len)`. |
+| MOUT | MkProcOutput | IPC | Read a child's captured stdout. `(pid, buf, len)`. |
+| MPIN | MkProcInput | IPC | Write to a child's stdin. `(pid, buf, len)`. |
+
+## Time
+
+| Tag | Call | Cap | Semantics |
+|-----|------|-----|-----------|
+| MTMS | MkTimeMillis | valid token | Unix-epoch milliseconds, derived from the RTC boot time plus elapsed time. Returned as an `i64`. |
+| MMON | MkTimeMonotonic | valid token | Monotonic time since boot. Never goes backward. |
 | MTRT | MkTimeRtc | valid token | Broken-down wall-clock time read from the RTC, written to a caller-supplied struct. |
+| MTAD | MkTimeAdjust | TimeSet | Adjust the wall clock. Requires the dedicated `TimeSet` capability, not `Admin`. |
 | MBAT | MkBatteryStatus | valid token | Battery state, where the platform reports one. |
 
 `MkTimeMillis` returns a signed value; clients that store it must use `i64`, not
@@ -86,8 +119,21 @@ not, independent of the capability bit.
 
 | Tag | Call | Cap | Semantics |
 |-----|------|-----|-----------|
-| MMAP | MkMmap | Memory | Map a region into the calling capsule's address space. |
-| MUMP | MkMunmap | Memory | Unmap a previously mapped region. |
+| MMAP | MkMmap | Memory | Map a region into the calling capsule's address space. `(hint, len, prot, flags)`. |
+| MUMP | MkMunmap | Memory | Unmap a previously mapped region. `(addr, len)`. |
+
+`MkMmap` requires the `Memory` (allocate) capability and `MkMunmap` the deallocate
+side of it; the two are checked independently in the cap-table.
+
+## Capsule loading and attestation
+
+| Tag | Call | Cap | Semantics |
+|-----|------|-----|-----------|
+| MCLD | MkCapsuleLoad | CoreExec + IPC + Memory | Verify a signed capsule image and load it. Requires all three bits together, not any one of them. |
+| MCVF | MkCapsuleVerify | CoreExec + IPC + Memory | Verify a capsule signature without loading it. Same three-bit requirement. |
+| MAST | MkAttestStatus | valid token | Read the unsigned attestation status into a caller buffer. |
+| MSWR | MkStoreWrite | StoreWrite | Write to the persistent store. Requires the dedicated `StoreWrite` bit. |
+| MDBG | MkDebug | Debug | Debug syscall. Requires the `Debug` capability, which almost no capsule holds. |
 
 ## Capabilities
 
@@ -128,7 +174,7 @@ page](../subsystems/ipc/README.md) for the routing and blocking detail.
 | MIRU | MkIrqUnbind | Irq | Release an interrupt grant. |
 | MIRP | MkIrqPoll | Irq | Read `{ seq, overflow }` for an IRQ grant. `seq` advances once per delivered interrupt. |
 | MIRA | MkIrqAck | Irq | Acknowledge interrupts up to the last seen `seq` and unmask the line. |
-| MIRW | MkIrqWait | Irq | Reserved. The number exists; there is no handler yet. Drivers poll today. |
+| MIRW | MkIrqWait | Irq | Single-shot blocking wait on an IRQ grant. `(grant_id, last_seq, timeout_ms, out_ptr)`; `grant_id == 0` waits on every grant the caller owns. Returns when the combined seq moves past `last_seq`, the timeout lapses, or any other wake lands. Spurious returns are part of the contract; callers re-issue. |
 | MDMM | MkDmaMap | Dma | Pin a buffer and return a DMA address for a claimed device. |
 | MDMU | MkDmaUnmap | Dma | Release a DMA mapping. |
 | MPCR | MkPciConfigRead | Driver | Read a claimed device's PCI configuration space. |
@@ -141,10 +187,15 @@ line until the first `MkIrqAck`. The full flow is on [the broker
 page](../subsystems/hardware-broker/README.md) and [the interrupt
 page](../subsystems/interrupts/README.md).
 
-`MkIrqWait` is documented as reserved on purpose. The number is allocated and the
-`nonos_libc` binding exists, but there is no kernel handler, so drivers use the
-poll-and-ack loop. This is called out so nobody wires a driver against a wait
-that silently never fires.
+`MkIrqWait` is now a working blocking primitive (`src/syscall/microkernel/irq/wait.rs:41`),
+routed through the numeric dispatcher (`src/syscall/microkernel/dispatch/irq.rs:29`). It arms
+the grant, sleeps on a wake token that an interrupt landing after the arm cannot slip past,
+and disarms on return, writing the current seq to `out_ptr` for the caller to pass back as
+the next `last_seq`. A `timeout_ms` of zero selects a 100 ms default poll interval rather
+than blocking forever. Because any wake (including an unrelated IPC delivery to the same pid)
+can return it early, a driver still treats the returned seq as authoritative and re-issues
+the wait; the poll-and-ack path (`MkIrqPoll` + `MkIrqAck`) remains valid and is what a driver
+uses when it does not want to block.
 
 ## Port IO (x86_64 only)
 
@@ -190,7 +241,9 @@ is on [the input page](../subsystems/input/README.md).
 ## Cryptography
 
 The kernel exposes its crypto primitives as syscalls so capsules do not carry
-their own implementations. Each maps to a primitive in `src/crypto`.
+their own implementations. Each maps to a primitive in `src/crypto`. Every call
+in this family requires the `Crypto` capability, checked in one arm of the
+cap-table (`src/syscall/contract/cap_table/crypto.rs:20`).
 
 | Tag | Call | Semantics |
 |-----|------|-----------|
@@ -198,7 +251,11 @@ their own implementations. Each maps to a primitive in `src/crypto`.
 | CHSH | CryptoHash | Hash a buffer (SHA family). |
 | CENC | CryptoEncrypt | Symmetric encryption. |
 | CDEC | CryptoDecrypt | Symmetric decryption. |
+| CEAD | CryptoEncryptAad | Symmetric encryption with additional authenticated data. |
+| CDAD | CryptoDecryptAad | Symmetric decryption with additional authenticated data. |
 | CEDV | CryptoEd25519Verify | Verify an Ed25519 signature. |
+| CEDS | CryptoEd25519Sign | Produce an Ed25519 signature. |
+| CEDP | CryptoEd25519Pubkey | Derive an Ed25519 public key. |
 | CXPK | CryptoX25519Public | Derive an X25519 public key. |
 | CXSH | CryptoX25519Shared | Compute an X25519 shared secret. |
 | CHMC | CryptoHmacSha256 | HMAC-SHA256. |
@@ -234,16 +291,19 @@ of the caller's intent; it is a property of the number, fixed in
 `src/syscall/contract/cap_table/mk.rs`, and the caller's token either holds the
 bit or it does not.
 
-The bits themselves are a small closed set. There are twenty-two capabilities
-(`src/capabilities/types.rs:81`), each one a single bit in a `u64`
-(`src/capabilities/types.rs:54`), and a capsule's token carries only the bits its
-verified manifest asked for. That is what makes the table a least-privilege
+The bits themselves are a closed set. The `Capability` enum defines 31 variants
+(`src/capabilities/types/defs.rs:18`), and a capsule's token carries only the ones
+its verified manifest asked for. That is what makes the table a least-privilege
 surface rather than a menu: a capsule that declared only `IPC` and `Memory` can
 send messages and map its own memory, and every device, surface, admin, and
-input-source call in this document returns `EPERM` for it at the gate. The four
+input-source call in this document returns `EPERM` for it at the gate. The five
 broker-authority bits (`Driver`, `Mmio`, `Irq`, `Dma`, and `Pio` on x86_64) are
 split deliberately so that holding one does not imply the others; a driver that
 needs to map a BAR but never takes an interrupt carries `Mmio` and not `Irq`.
+`DeviceEnum` is enumerate-only and does not imply any of the five. Several later
+bits were split out of `Admin` and `Crypto` for the same reason: `TimeSet`,
+`StoreWrite`, `EnrolDevRoot`, `Keyring`, and `Entropy` each name a single
+authority that nothing should acquire as a side effect of a broader one.
 
 Two calls are more dangerous than their neighbors and are worth naming.
 `MkCapGrant` delegates a subset of the caller's own bits to another capsule, and
@@ -270,12 +330,19 @@ on `MkIrqPoll`, check both that the manifest declared `Irq` and that the poll
 names the grant id the bind returned, not a different one.
 
 `ENOSYS` (-38) is a different failure and easy to confuse with a denial: it means
-the number had no handler, not that the caller was refused. `MkIrqWait` is the
-call to watch for here. The number is allocated (`MIRW` at
-`src/syscall/numbers/defs.rs:80`) and the `nonos_libc` binding exists, but there
-is no kernel handler, so a driver wired against a wait rather than the poll-and-ack
-loop gets `ENOSYS` and never makes progress. The rest of the negative returns are
-in [the error page](errors.md); the ones a capsule sees most at this boundary are
+the tag in `RAX` did not decode to a registered `SyscallNumber` at all, so
+`from_u64` returned `None` at the boundary before any contract or handler ran. The
+authoritative reachable set is the registry (`src/syscall/abi/registry/`), which is
+what `lookup_id` walks; a tag that is not in it can never reach a handler regardless
+of what the numeric dispatcher contains. Three handlers illustrate the gap in the
+other direction: `SYS_ATTEST_DOC` (`MADC`), `SYS_DEV_ROOT_REQUEST` (`MDRQ`), and
+`SYS_DEV_ROOT_CONFIRM` (`MDRC`) are wired in the numeric router
+(`src/syscall/microkernel/dispatch/process.rs:74`) and have working handlers, but
+they have no `SyscallNumber` variant, no registry entry, and no cap-table row, so
+`from_u64` rejects their tags with `ENOSYS` at the boundary and the handlers are
+unreachable as shipped. The `EnrolDevRoot` capability exists for them but currently
+gates nothing callable. The rest of the negative returns are in
+[the error page](errors.md); the ones a capsule sees most at this boundary are
 `EPERM` at the gate, `EFAULT` on a bad user pointer, and `ENOENT` from a service
 lookup that did not resolve.
 
@@ -288,9 +355,12 @@ kernel, and it is why the tags were chosen to be legible rather than dense.
 
 ```
   src/syscall/numbers/defs.rs        every SyscallNumber and its four-char tag
+  src/syscall/abi/registry/          the authoritative reachable set lookup_id walks
   src/syscall/contract/cap_table/mk.rs  the capability each number requires
   src/syscall/contract/dispatch.rs   the gate: resolve the cap, deny with EPERM
-  src/capabilities/types.rs          the 22 Capability bits and their u64 values
+  src/capabilities/types/defs.rs     the 31 Capability variants
+  src/syscall/microkernel/numbers.rs the numeric SYS_* tags the Mk router matches
+  src/syscall/microkernel/dispatch/  the Mk numeric sub-routers (ipc, process, irq, ...)
   src/syscall/abi/tag.rs             the tag4 packing behind each number
 ```
 

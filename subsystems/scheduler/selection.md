@@ -10,7 +10,7 @@ running when nothing else is ready. The code is under `src/process/scheduler/`.
 ## The run queue
 
 Runnable processes are held in a first-in-first-out queue of pids
-(`src/process/scheduler/dispatch/run_queue.rs:25`):
+(`src/process/scheduler/dispatch/run_queue.rs:32`):
 
 ```
   static PID_RUN_QUEUE: Mutex<VecDeque<u32>>
@@ -30,16 +30,26 @@ exits.
 
 ## The priority bands
 
-`select_next_process` (`src/process/scheduler/selection/select.rs:26`) takes a snapshot
-of the runnable pids and walks the five bands in order:
+`select_next_process` (`src/process/scheduler/selection/select.rs:31`) is a claim
+wrapper around the band walk. The walk itself is the private `pick` (`select.rs:66`),
+which takes a snapshot of the runnable pids and returns a candidate with its band index;
+`select_next_process` then claims that candidate before returning it:
 
 ```
-  select_next_process():
+  select_next_process():                                   # select.rs:31
+      for up to CLAIM_ATTEMPTS (8) tries:
+          (pid, band) = pick(), else None
+          if claim(pid):                                   # Ready -> Running under the state lock
+              advance this band's last and the overall last
+              return pid
+      None
+
+  pick():                                                  # select.rs:66
       current = CURRENT_PID (this CPU)
       runnable = get_runnable_pids(), else None if empty
       for band in [RealTime, High, Normal, Low, Idle]:
           if select_by_priority(runnable, band_last, current, band) is Some(pid):
-              record it as this band's last and the overall last, return pid
+              return (pid, band index)
       select_fallback(runnable, current)
 ```
 
@@ -47,11 +57,27 @@ The order is strict: `RealTime` before `High` before `Normal` before `Low` befor
 `Idle`. The walk takes the first band that has a runnable process and never looks at a
 lower band while a higher one has work, so a realtime process always preempts a normal
 one, and idle-priority work runs only when nothing else can. Each band remembers the
-last pid it scheduled in `LAST_PER_BAND[idx]`, and the overall last is `LAST_SCHEDULED_PID`.
+last pid it scheduled in `LAST_PER_BAND[idx]` (`select.rs:23`), and the overall last is
+`LAST_SCHEDULED_PID` (`select.rs:21`); crucially the band cursor is advanced only after a
+successful claim (`select.rs:38`), not inside `pick`, so a candidate that loses its claim
+never moves the rotation.
+
+## Claiming the candidate
+
+`claim` (`select.rs:50`) is what makes selection safe under more than one CPU. Picking
+only reads state, and a process is not marked `Running` until the arch switch, so without
+a claim two CPUs walking the same run queue could both pick the same pid and switch into
+one control block twice. `claim` takes the pid from `Ready` to `Running` under
+`pcb.state.lock()` and reports whether this caller made the transition; a lost claim means
+another CPU already took it, so `select_next_process` loops and picks again, bounded at
+`CLAIM_ATTEMPTS = 8` (`select.rs:34`) so a churn cannot spin here with interrupts off.
+On the shipping single-core build this is dormant, the claim always succeeds on the first
+try, but it is the real anti-double-schedule guarantee and it is why selection mutates
+state (`Ready -> Running`) rather than being a pure read.
 
 ## Round-robin within a band
 
-`select_by_priority` (`select.rs:48`) is the round-robin. Within a single band it picks
+`select_by_priority` (`select.rs:86`) is the round-robin. Within a single band it picks
 the next pid after the one the band scheduled last, wrapping to the lowest when it runs
 off the end:
 
@@ -74,7 +100,7 @@ to another process rather than immediately reselecting the one that just ran.
 
 ## The fallback
 
-If no band yields a candidate, `select_fallback` (`select.rs:70`) keeps the current
+If no band yields a candidate, `select_fallback` (`select.rs:108`) keeps the current
 process running, but only if it is genuinely still runnable:
 
 ```
@@ -105,13 +131,16 @@ Selection decides who runs next, so its properties are about liveness and fairne
 confidentiality: it must not let a process starve indefinitely, and it must not select something that is
 not genuinely runnable. Three hold.
 
-**Only a genuinely-ready process is selected.** `select_by_priority` (`select.rs:48`) skips any pid
-whose state is not `Ready` and whose band does not match, and `select_fallback` (`select.rs:70`) keeps
+**Only a genuinely-ready process is selected.** `select_by_priority` (`select.rs:86`) skips any pid
+whose state is not `Ready` and whose band does not match, and `select_fallback` (`select.rs:108`) keeps
 the current process only if it is still in the runnable set and still `Ready`, returning `None`
 otherwise so the caller idles. A pid that has exited, gone to sleep, or been preempted out of `Ready`
 cannot be dispatched, which is what keeps the scheduler from resuming a dead or blocked context. The run
 queue itself refuses duplicates on both insert paths (`run_queue.rs`), so a pid cannot appear runnable in
-two places and be double-counted.
+two places and be double-counted. Selection also claims what it picks: `claim` (`select.rs:50`) transitions
+the candidate `Ready -> Running` under `pcb.state.lock()` and a lost claim retries, bounded at eight
+attempts, so two CPUs cannot both switch into the same control block. On the single-core build this always
+succeeds first try, but it is why selection mutates state rather than being a pure read.
 
 **No process in a band starves its neighbours.** The round-robin picks `after`, the smallest runnable
 pid greater than the band's last-scheduled pid, and wraps to `lowest` when it runs off the end
@@ -121,7 +150,7 @@ FIFO by arrival (`run_queue.rs`), which the source notes is deliberate: a long-r
 starve newcomers the way a pid-sorted structure would.
 
 **Higher priority strictly precedes lower, deterministically.** The band walk is strict order,
-`RealTime` then `High` then `Normal` then `Low` then `Idle` (`select.rs:26`), and it takes the first
+`RealTime` then `High` then `Normal` then `Low` then `Idle` (`select.rs:66`, in `pick`), and it takes the first
 band with a runnable process and never looks lower while a higher band has work. So a realtime process
 always preempts a normal one and idle work runs only when nothing else can. The honest boundary: this
 strictness is exactly what makes cross-band starvation possible. A saturated `RealTime` or `High` band

@@ -22,7 +22,7 @@ describes.
 | Binary name | `setup_wizard` | `Capsule.mk:10` |
 | Kernel mirror | `src/userspace/capsule_setup_wizard` | `Capsule.mk:16` |
 
-The mask `0x1819` decomposes into five bits, checked against `src/capabilities/types.rs`:
+The mask `0x1819` decomposes into five bits, checked against `src/capabilities/types/defs.rs`:
 
 | Bit | Value | Grants | Source |
 |-----|-------|--------|--------|
@@ -41,7 +41,7 @@ The kernel spawn path requests exactly those five capabilities and no others
 (`src/userspace/capsule_setup_wizard/spawn.rs:50`). It is the same graphics-client mask the terminal and
 the other full-screen leaf renderers carry. There is no `GraphicsSurfaceMap` (`0x2000`), no
 `GraphicsPresent` (`0x4000`), no `Network` (`0x0004`), no `FileSystem` (`0x0040`), and no crypto,
-hardware, driver, MMIO, or DMA capability (`src/capabilities/types.rs:69`, `types.rs:70`, `types.rs:58`,
+hardware, driver, MMIO, or DMA capability (`src/capabilities/types/defs.rs`, `types.rs:70`, `types.rs:58`,
 `types.rs:62`). On the strength of its mask alone it can register one surface, ask the display for its
 size, and speak IPC, and nothing more.
 
@@ -105,12 +105,12 @@ stage in detail.
   userland/capsule_setup_wizard/src/clients/       compositor, display-info, input-router, policy clients
   userland/capsule_setup_wizard/src/protocol.rs    the input-router request and key-delivery wire
   userland/capsule_setup_wizard/Capsule.mk         slug, handle, ports, capability mask, kernel mirror
-  src/capabilities/types.rs                        the capability bits behind the mask
+  src/capabilities/types/defs.rs                        the capability bits behind the mask
   src/userspace/capsule_setup_wizard/spawn.rs      the kernel-side embed and verified spawn
 ```
 
 Everything here is drawn from `userland/capsule_setup_wizard/` (the capsule source and its `Capsule.mk`),
-`src/capabilities/types.rs` (the capability bits), and the kernel spawn mirror under
+`src/capabilities/types/defs.rs` (the capability bits), and the kernel spawn mirror under
 `src/userspace/capsule_setup_wizard/`. Every reference above is verified against those trees.
 </content>
 </invoke>

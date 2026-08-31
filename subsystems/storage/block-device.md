@@ -61,7 +61,7 @@ The **driver holds only its own device's grants.** Each driver capsule is spawne
 capability mask (`src/hardware/nvme_capsule/spawn.rs:51`, `ahci_capsule/spawn.rs`,
 `virtio_blk_capsule/spawn.rs`): IPC, Memory, Driver, DeviceEnum, Mmio, Irq, and Dma, which decodes to
 `0xF8018` for NVMe and AHCI, and `0x1F8018` for virtio-blk because it additionally holds Pio for the
-legacy virtio I/O ports (bits from `src/capabilities/types.rs:54`). Those capabilities let it claim a
+legacy virtio I/O ports (bits from `src/capabilities/types/bit.rs`). Those capabilities let it claim a
 device and mint MMIO, IRQ, and DMA grants, but the broker checks every grant against the claim epoch,
 so a driver can only map the BAR, bind the IRQ, and program the DMA of the one device it claimed. It
 cannot reach across to another controller's registers, and a second capsule that tried to claim an
@@ -153,7 +153,7 @@ fixed in what the firmware exposes.
   userland/capsule_driver_virtio_blk/    the virtio-blk driver: setup/dma.rs, queue/, io/, server/
   src/hardware/broker/dma/limits.rs      the BLOCK class DMA ceiling (1024 pages)
   src/hardware/broker/table/list.rs      list_by_class, the broker device table drivers enumerate
-  src/capabilities/types.rs              the capability bits the driver masks decode to
+  src/capabilities/types/bit.rs          the capability bit values the driver masks decode to
   src/userspace/init/spawn_plan/         drivers_storage.rs, drivers_virtio_io.rs (the spawn markers)
 ```
 

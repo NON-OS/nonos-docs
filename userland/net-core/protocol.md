@@ -14,7 +14,7 @@ layout is fixed (`src/protocol/header.rs:19`): a 4-byte magic, a 2-byte version 
 `HDR_LEN` is 20 (`src/protocol/ops.rs:20`, `src/server/parse_req.rs:19`).
 
 The magic selects which protocol the request belongs to, and the server dispatches on it
-(`src/server/runner.rs:52`):
+(`src/server/runner/mod.rs`):
 
 | Magic | Value | Protocol | Source |
 |---|---|---|---|
@@ -32,20 +32,21 @@ status field set to an errno (`src/server/respond.rs:21`).
 
 ## The services and their ports
 
-After setup succeeds, `register::all` registers four service names, each at its own port, and prints a
-marker (`src/register.rs:29`). These are the ports a client looks up to reach each protocol.
+After setup succeeds, `register::all` registers five service names, each at its own port, and prints a
+marker (`src/register.rs:41`). These are the ports a client looks up to reach each protocol.
 
 | Service | Port | Magic to use | Source |
 |---|---|---|---|
-| `net.tcp` | 4476 | `NTCP` | `src/register.rs:19`, `src/register.rs:24` |
-| `net.udp` | 4472 | `NUDP` | `src/register.rs:20`, `src/register.rs:25` |
-| `net.dhcp.client` | 4474 | `NDHC` | `src/register.rs:21`, `src/register.rs:26` |
-| `net.dns` | 4478 | `NDNS` | `src/register.rs:22`, `src/register.rs:27` |
+| `net.tcp` | 4476 | `NTCP` | `src/register.rs:19`, `src/register.rs:25` |
+| `net.udp` | 4472 | `NUDP` | `src/register.rs:20`, `src/register.rs:26` |
+| `net.dhcp.client` | 4474 | `NDHC` | `src/register.rs:21`, `src/register.rs:27` |
+| `net.dns` | 4478 | `NDNS` | `src/register.rs:22`, `src/register.rs:28` |
+| `net.ip` | 4479 | `NIP4` | `src/register.rs:23`, `src/register.rs:29` |
 
-If all four register the capsule logs `[NET-CORE] registered net.tcp net.udp net.dhcp.client net.dns`;
-otherwise it logs `[NET-CORE] registration partial failure` (`src/register.rs:35`). All four services are
+If all five register the capsule logs `[NET-CORE] registered net.tcp net.udp net.dhcp.client net.dns net.ip`;
+otherwise it logs `[NET-CORE] registration partial failure` (`src/register.rs:52`). All five services are
 served from the one service inbox in the request loop, so a client sends to the registered port and the
-capsule routes by magic (`src/server/runner.rs:39`).
+capsule routes by magic, `NDHC`, `NTCP`, `NUDP`, `NDNS`, or `NIP4` (`src/server/runner/dispatch.rs:30`).
 
 ## TCP (`NTCP`, service `net.tcp`)
 
@@ -104,7 +105,7 @@ This op shares the errno set of the base protocol (`src/protocol/errno.rs:17`): 
 ## Health (op 1, any magic)
 
 `OP_HEALTHCHECK` (1) is checked before the magic dispatch, so it answers regardless of protocol
-(`src/server/runner.rs:50`, `src/server/handlers/health.rs:21`). It takes no payload and replies `E_OK`
+(`src/server/runner/mod.rs`, `src/server/handlers/health.rs:21`). It takes no payload and replies `E_OK`
 with the request's own magic and op echoed back (`src/server/handlers/health.rs:23`).
 
 ## The driver-facing NNET protocol

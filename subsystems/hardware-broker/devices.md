@@ -77,7 +77,7 @@ memory.
 The `flags` field is worth an honest note. `DEVICE_FLAG_CLAIMED` and `DEVICE_FLAG_DISABLED` are
 defined and exported (`device/flags.rs:19`), and `record_from_pci` initializes `flags` to zero, but
 no path in the current broker sets or clears them. Claim state does not live on the record; it lives
-in the separate claim table (`claim.rs`), which is the single source of truth for who holds a device.
+in the separate claim table (`claim/state.rs`), which is the single source of truth for who holds a device.
 The flag bits are reserved ABI, not live state today.
 
 ## Classification

@@ -105,14 +105,27 @@ an auditor can compare against the manifests. The seventeen entries and their de
   input_router 0x19   wm 0x19
   compositor 0x7819   desktop_shell 0x1819   wallpaper 0x1819   about 0x1819
   calculator 0x1819   terminal 0x1819
-  driver.virtio_gpu0 0x1F9019
+  driver.virtio_gpu0 0x1F9119
 ```
 
 The value of the table is exactly the NO LOGS check. Every mask can be inspected for the `Debug` bit (256,
-`src/capabilities/types.rs:64`), and none of the seventeen carries it, so an auditor can confirm the NO
-LOGS posture programmatically without trusting a narrative. The table is authored, so it is a statement of
-what the system should ship, not a readout of what is running; the live enforcement is the kernel's, at
-every syscall, against the signed manifest.
+`src/capabilities/types/defs.rs:27`), and none of the seventeen entries in the authored table carries it,
+so an auditor can confirm the NO LOGS posture programmatically without trusting a narrative. The table is
+authored, so it is a statement of what the system should ship, not a readout of what is running; the live
+enforcement is the kernel's, at every syscall, against the signed manifest.
+
+One caveat the reader must not miss: this authored `KNOWN_CAPSULES` table has drifted from the shipped
+manifests, so an auditor who actually runs the comparison today finds mismatches. The current
+`CAPSULE_REQUIRED_CAPS` values are wider than the table records: `keyring`, `entropy`, `crypto`, and
+`market` are `0x39` (they carry `Crypto`), `input_router` is `0x200019` (it carries `InputSource`),
+`terminal` is `0x187d`, `desktop_shell` is `0x100191D`, and `compositor` is `0x7919`. That last pair
+matters for the NO LOGS claim specifically: the real `compositor` (`0x7919`) and `desktop_shell`
+(`0x100191D`) manifests both set the `Debug` bit (`0x100`), which the authored table's `compositor 0x7819`
+and `desktop_shell 0x1819` do not. So the NO LOGS check passes against this table but would flag those two
+against the live manifests. The table is the attest capsule's own expectation record
+(`userland/capsule_attest/src/server/handlers/proof_capsule_list.rs:20`); keeping it in sync with the
+manifests is a source-level task, and until it is done this page reports the table as it stands and the
+divergence alongside it.
 
 ## The honest boundary
 
@@ -135,7 +148,7 @@ attested at request time.
   src/state/invariants.rs                  the Invariant struct and the six {name, claim, mechanism}
   src/server/handlers/proof_capsule_list.rs   KNOWN_CAPSULES, the seventeen-entry mask table
   src/server/handlers/proof_boot.rs        the fixed boot label and the clamped clock read
-  src/capabilities/types.rs                the Debug bit (256) an auditor checks the table against
+  src/capabilities/types/defs.rs                the Debug bit (256) an auditor checks the table against
 ```
 
 Every reference above is verified against `userland/capsule_attest/` and the cited kernel trees.

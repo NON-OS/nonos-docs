@@ -105,9 +105,13 @@ This proof family exists to be a spawn-time gate, so its security is the combina
 above and how the kernel acts on a verification result.
 
 **A proof is runtime evidence, and a failed proof is fail-closed.** The attestation is checked at spawn by
-`verify_capsule_attestation` (`src/security/capsule_attest/verify.rs`), which hashes the capsule ELF, packs
-the granted caps and the policy epoch into a 48-byte context, and calls `verify_enrolled` against the
-committed policy root. The function is `#[must_use]` with the note that a capsule must not be spawned
+`verify_capsule_attestation` (`src/security/capsule_attest/verify.rs:33`), which dispatches to
+`against_root::verify` (`against_root.rs:27`). In the default build (without `nonos-stark-attest`) that
+function hashes the capsule ELF, packs the granted caps and the policy epoch into a 48-byte context
+(`against_root.rs:45`), and calls `verify_enrolled` against the root it was handed (`against_root.rs:50`);
+`verify_enrolled` is re-exported from `src/crypto/zk_kernel/` and defined as `verify` in
+`src/crypto/zk_kernel/attest/verify.rs:24`. `verify_capsule_attestation` is `#[must_use]` with the note
+that a capsule must not be spawned
 unless its attestation verifies, and the [attestation gate](../../security/attestation.md) enforces exactly
 that: a failure returns `SpawnError::AttestationRejected` and the capsule does not run. So the proof is not
 decoration; it is a precondition, and the default is refusal. The one honest caveat is the rollout flag:
@@ -161,7 +165,8 @@ thousands of adversarial proofs is in `userland/crypto_proofs/src/zk_tests.rs`.
   src/crypto/zk_kernel/equality.rs     the equality proof
   src/crypto/zk_kernel/verifier.rs     KernelZkVerifier and the ZkResult / ProofSystem enums
   src/crypto/zk_kernel/attest/verify.rs   verify_enrolled: the constant-time Schnorr + Merkle check
-  src/security/capsule_attest/verify.rs   verify_capsule_attestation, the #[must_use] spawn gate
+  src/security/capsule_attest/verify.rs   verify_capsule_attestation, the vendor-then-enrolled dispatch
+  src/security/capsule_attest/against_root.rs   the 48-byte context and the backend dispatch
   src/security/capsule_attest/error.rs    AttestError: Missing / Malformed / RootUnavailable / Rejected
   userland/crypto_proofs/src/zk_tests.rs   the adversarial soundness fuzzing
 ```

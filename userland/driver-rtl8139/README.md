@@ -39,17 +39,17 @@ inbox `endpoint.4294967309` (`src/hardware/rtl8139_capsule/client/transport.rs:2
 
 ### The capability mask
 
-The manifest mask `0x1D8019` decomposes bit by bit against `src/capabilities/types.rs`:
+The manifest mask `0x1D8019` decomposes bit by bit against `src/capabilities/types/bit.rs` (the enum is in `src/capabilities/types/defs.rs`):
 
 ```
-  0x000001  CoreExec     bit()        1   types.rs:56
-  0x000008  IPC          bit()        8   types.rs:59
-  0x000010  Memory       bit()       16   types.rs:60
-  0x008000  DeviceEnum   bit()    32768   types.rs:71
-  0x010000  Driver       bit()    65536   types.rs:72
-  0x040000  Irq          bit()   262144   types.rs:74
-  0x080000  Dma          bit()   524288   types.rs:75
-  0x100000  Pio          bit()  1048576   types.rs:76
+  0x000001  CoreExec     bit()        1   types/bit.rs:23
+  0x000008  IPC          bit()        8   types/bit.rs:26
+  0x000010  Memory       bit()       16   types/bit.rs:27
+  0x008000  DeviceEnum   bit()    32768   types/bit.rs:38
+  0x010000  Driver       bit()    65536   types/bit.rs:39
+  0x040000  Irq          bit()   262144   types/bit.rs:41
+  0x080000  Dma          bit()   524288   types/bit.rs:42
+  0x100000  Pio          bit()  1048576   types/bit.rs:43
   --------
   0x1D8019  = 1 + 8 + 16 + 32768 + 65536 + 262144 + 524288 + 1048576
 ```
@@ -67,7 +67,7 @@ the eight.
 
 Those seven are the hardware-broker authority profile minus `Mmio`. `DeviceEnum` enumerates devices,
 `Driver` claims and releases one, `Irq` binds a device interrupt, `Dma` maps DMA, and `Pio` mints a
-port-window grant, the set the broker checks before it hands out any grant (`src/capabilities/types.rs:34`).
+port-window grant, the set the broker checks before it hands out any grant (`src/capabilities/types/defs.rs`).
 It has no `Mmio` bit (this NIC is port-mapped, so there is nothing to map), no `Network` bit (4), and no
 `FileSystem` bit (64). `IPC` and `Memory` are the only bits it shares with an ordinary app. The security
 consequences of holding those bits are worked through on the [bring-up](bring-up.md) page; the
@@ -132,7 +132,7 @@ is built on, not the policy. The kernel does not route packets or retain network
   userland/capsule_driver_rtl8139/Capsule.mk         slug, handle, ports, capability mask, kernel mirror
   src/hardware/rtl8139_capsule/                       the kernel-side embed, spawn record, and client transport
   src/userspace/init/spawn_plan/drivers_nic.rs        the NIC spawn plan entry
-  src/capabilities/types.rs                           the capability bit values behind the mask
+  src/capabilities/types/bit.rs                       the capability bit values behind the mask
 ```
 
 Every reference above is verified against those trees.

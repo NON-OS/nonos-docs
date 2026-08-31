@@ -12,21 +12,23 @@ Every image the codec sees is attacker-influenced bytes, and the decoders are re
 exactly the class of code that carries parser bugs, which is the entire reason this work runs in its own
 capsule rather than inside the compositor or a caller.
 
-The installed mask `0x1819` is `CoreExec | IPC | Memory | GraphicsDisplayQuery | GraphicsSurfaceCreate`
-(`userland/capsule_image_codec/Capsule.mk:11`, decomposed against `src/capabilities/types.rs`). It has no
-`Network` (`0x0004`), no `FileSystem` (`0x0040`), no `Crypto` (`0x0020`), no `Hardware` (`0x0080`), no
-`Debug` (`0x0100`), and no driver, MMIO, IRQ, DMA, or PIO capability. A decoder subverted by a malformed
-image is trapped in a capsule that can receive IPC, allocate memory, query the display, create a surface,
-and reply, and nothing else. It cannot read a file, open a socket, or reach a device off the back of a
-parser exploit. It also holds neither `GraphicsSurfaceMap` (`0x2000`) nor `GraphicsPresent` (`0x4000`): it
-creates a surface and shares its handle, but it cannot map arbitrary surfaces or paint the screen.
+The installed mask `0x3819` is `CoreExec | IPC | Memory | GraphicsDisplayQuery | GraphicsSurfaceCreate |
+GraphicsSurfaceMap` (`userland/capsule_image_codec/Capsule.mk:11`, decomposed against
+`src/capabilities/types/defs.rs`). It has no `Network` (`0x0004`), no `FileSystem` (`0x0040`), no `Crypto`
+(`0x0020`), no `Hardware` (`0x0080`), no `Debug` (`0x0100`), and no driver, MMIO, IRQ, DMA, or PIO
+capability. A decoder subverted by a malformed image is trapped in a capsule that can receive IPC, allocate
+memory, query the display, create a surface, map that surface's backing to write the decoded pixels, and
+reply, and nothing else. It cannot read a file, open a socket, or reach a device off the back of a parser
+exploit. It holds `GraphicsSurfaceMap` (`0x2000`) to write into its own surface backing, but it does not
+hold `GraphicsPresent` (`0x4000`): it shares a handle for another capsule to present and cannot paint the
+screen itself.
 
 The mask on the running process is decided by the signed manifest, not by the number passed at the spawn
 site. `spawn_verified` treats `requested_caps` only as the upper bound for optional caps and installs the
 capabilities the verified manifest declares
 (`src/kernel_core/process_spawn/capsule_spawn/runner/verified.rs:24`,
 `src/security/capsule_manifest/verify/caps.rs:39`). With every cap declared required and none optional, that
-resolves to exactly `0x1819`, the number the `[SPAWN]` line reports at boot.
+resolves to exactly `0x3819`, the number the `[SPAWN]` line reports at boot.
 
 ## The wire parser is bounded end to end
 
@@ -99,7 +101,7 @@ binary that speaks only IPC and its own surfaces, verified and enrolled at spawn
 ## Source map
 
 This page is drawn from `userland/capsule_image_codec/` (`Capsule.mk`, `Cargo.toml`, the `src/protocol/`
-parser, the `src/server/` loop and handlers), `src/capabilities/types.rs` (the capability bits), the
+parser, the `src/server/` loop and handlers), `src/capabilities/types/defs.rs` (the capability bits), the
 kernel-side verification under `src/kernel_core/process_spawn/capsule_spawn/runner/` and
 `src/security/capsule_manifest/verify/`, and the shared decoders at `userland/toolkit/src/image/`. Every
 reference above is verified against those trees.

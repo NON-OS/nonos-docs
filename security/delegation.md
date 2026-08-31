@@ -36,7 +36,7 @@ authority is the `parent_nonce`.
 ## Creating a delegation
 
 The checked constructor is `create_delegation`
-(`src/capabilities/delegation/create_checked.rs:24`), and every guard in it is a
+(`src/capabilities/delegation/create_checked.rs:25`), and every guard in it is a
 rule of the delegation model:
 
 ```
@@ -183,7 +183,7 @@ The strict verifier is the one to reach for, because the primary
 `verify_delegation_strict` (`verify.rs:35`) returns the first failing variant
 instead.
 
-At creation, `create_delegation` (`create_checked.rs:24`) refuses an over-broad or
+At creation, `create_delegation` (`create_checked.rs:25`) refuses an over-broad or
 unauthorised grant. `NoCapabilities` means the requested set was empty.
 `CapabilityNotHeld` is the subset rule firing: the caller asked to delegate a
 capability its own parent token does not grant, which is the refusal that makes

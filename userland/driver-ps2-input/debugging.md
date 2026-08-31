@@ -21,8 +21,8 @@ a driver that logs neither the marker nor an event is stuck in that retry loop
 
 Once the driver marker is present, the kernel emits one-shot bench markers on the input path:
 `input_post_first` on the first successful post into the ring
-(`src/kernel_core/surface_registry/input_ring.rs:68`) and `input_drain_first` on the first router drain
-(`src/syscall/dispatch/router/input_ops.rs:79`). `input_post_first` present but `input_drain_first`
+(`src/kernel_core/surface_registry/input_ring/mod.rs`) and `input_drain_first` on the first router drain
+(`src/syscall/dispatch/router/input_ops/mod.rs`). `input_post_first` present but `input_drain_first`
 absent means the driver is decoding and posting but the router is not draining, so check that the input
 router capsule was spawned and holds IPC. Neither present means no driver ever posted; go back to the
 boot marker above.
@@ -101,8 +101,8 @@ short buffer, or a non-zero payload length) is answered `E_INVAL` rather than dr
   userland/capsule_driver_ps2_input/src/mouse/ring.rs             the mouse drop-newest drop
   userland/capsule_driver_ps2_input/src/mouse/parser.rs           the sync-error counting
   userland/capsule_driver_ps2_input/src/protocol/endpoint.rs      the fixed kernel reply endpoint
-  src/kernel_core/surface_registry/input_ring.rs                  the input_post_first bench marker
-  src/syscall/dispatch/router/input_ops.rs                        the input_drain_first bench marker
+  src/kernel_core/surface_registry/input_ring/mod.rs                  the input_post_first bench marker
+  src/syscall/dispatch/router/input_ops/mod.rs                        the input_drain_first bench marker
   src/hardware/ps2_kbd_capsule/client/transport.rs                the kernel-side reply inbox binding
 ```
 

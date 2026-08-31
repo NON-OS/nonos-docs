@@ -123,7 +123,7 @@ to reach `driver.rtl8139_0` and speak this protocol; it never gets a handle to t
   userland/capsule_driver_rtl8139/src/server/handlers/       one file per op: health, link_status, mac_address, tx_packet, rx_packet, stats
   userland/capsule_driver_rtl8139/src/constants/frame.rs     MIN/MAX_ETHERNET_FRAME and MAC_LEN
   userland/capsule_driver_rtl8139/Cargo.toml                 panic = "abort"
-  src/capabilities/types.rs                                  the capability bits the mask decodes into
+  src/capabilities/types/bit.rs                                the capability bit values the mask decodes into
 ```
 
 Every reference above is verified against those trees.

@@ -127,12 +127,12 @@ the anchor keys above are used.
 
 ## Debugging an anchor rejection
 
-Everything the anchor decides against a certificate is an `IdCertVerifyError`, and
-at the capsule loader it collapses to `[RUNTIME-LOAD] FAILED reason=id_cert`, so
-the reason string does not tell you which anchor rule fired. The variant does, and
-the order in `checks::run` (`nonos_id_cert/verify/checks.rs:22`) is the key to
-reading it, because these run before the signature and short-circuit on the first
-hit.
+Everything the anchor decides against a certificate is an `IdCertVerifyError`,
+surfaced through `SpawnError::NonosIdCertRejected(IdCertVerifyError)`
+(`capsule_spawn/spec.rs:48`), so the enclosing variant does not tell you which
+anchor rule fired. The inner `IdCertVerifyError` does, and the order in
+`checks::run` (`nonos_id_cert/verify/checks.rs:22`) is the key to reading it,
+because these run before the signature and short-circuit on the first hit.
 
 `EpochStale` is the anti-rollback rule: the certificate's `trust_anchor_epoch` is
 below the baked policy's `trust_anchor_epoch`, so it was issued under a retired
@@ -168,7 +168,7 @@ as a [manifest](manifest-schema.md) rejection, not a certificate one.
 ```
 
 The certificate schema these checks read is on the
-[certificate page](certificate-schema.md); the pipeline that maps these into the
-`[RUNTIME-LOAD] reason=id_cert` line is on the
+[certificate page](certificate-schema.md); the pipeline that wraps these into
+`SpawnError::NonosIdCertRejected` is on the
 [verified spawn](capsules-and-trust.md) page; the manifest-key revocation the
 anchor also carries is on the [revocation](revocation.md) page.

@@ -24,7 +24,7 @@ mirrors that structure one page per pillar so a page can be read beside the fold
 | Capability mask | `0x1819` | `Capsule.mk:11` |
 | Kernel mirror | `src/userspace/capsule_snake` | `Capsule.mk:12` |
 
-The mask decomposes into five bits, checked against `src/capabilities/types.rs`:
+The mask decomposes into five bits, checked against `src/capabilities/types/defs.rs`:
 
 | Bit | Value | Grants | Source |
 |---|---|---|---|
@@ -99,6 +99,6 @@ There is no VFS call, no clipboard call, no network call, and no installer call 
 ## Source map
 
 Everything here is drawn from `userland/capsule_snake/` (the capsule source, its `Capsule.mk`, and its
-`Cargo.toml`), `src/capabilities/types.rs` (the capability bits), the kernel spawn mirror under
+`Cargo.toml`), `src/capabilities/types/defs.rs` (the capability bits), the kernel spawn mirror under
 `src/userspace/capsule_snake/`, and the app skeleton under `userland/app_skeleton/`. Every reference above
 is verified against those trees.

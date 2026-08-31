@@ -48,7 +48,7 @@ honest label on each is preserved.
 Every capsule on this page shares one property and it is the reason the list reads the way it does: none
 of them holds a hardware capability. The GUI apps run with the app mask `0x1819`, which decodes to
 CoreExec, IPC, Memory, GraphicsDisplayQuery, and GraphicsSurfaceCreate (bits from
-`src/capabilities/types.rs`), and nothing else. There is no Mmio, no Irq, no Dma, no Pio, no
+`src/capabilities/types/defs.rs`), and nothing else. There is no Mmio, no Irq, no Dma, no Pio, no
 InputSource, and no DeviceEnum in that mask. So the calculator cannot touch a port, the file manager
 cannot map a device register, and the text editor cannot post a synthetic keystroke. An app draws into a
 surface the compositor owns and reaches the rest of the system only over IPC, where the service on the
@@ -107,7 +107,7 @@ and the kernel-side embed and spawn are under `src/userspace/capsule_<name>/`. T
 each capsule and its boot prefix is `src/userspace/init/spawn_plan/apps.rs` and `apps_tools.rs`, the
 shared spawn-and-log wrapper is `src/userspace/init/capsule_boot/run.rs`, the proof-capsule markers are
 in `src/userspace/init/entry.rs`, and the capability bits every mask above decodes against are in
-`src/capabilities/types.rs`. The interactive apps carry their own full references:
+`src/capabilities/types/defs.rs`. The interactive apps carry their own full references:
 [about](about/README.md), [calculator](calculator/README.md), [file manager](file-manager/README.md), [settings](settings/README.md),
 [text editor](text-editor/README.md), [snake](snake/README.md), [terminal](terminal/README.md), and
 [wallet](wallet-nonos/README.md). The proof and stub capsules on this page keep their spec inline and are

@@ -7,7 +7,7 @@ page.
 
 ## Boot marker and exit codes
 
-The catalog is spawned by the desktop fleet plan (`src/userspace/init/spawn_plan/desktop_fleet.rs:59`)
+The catalog is spawned by the desktop fleet plan (`src/userspace/init/spawn_plan/desktop_fleet/mod.rs`)
 with the prefix `WALLPAPER-CATALOG`. On a successful spawn the kernel logs
 `[WALLPAPER-CATALOG] capsule spawned` from the capsule boot path: the `Ok` arm calls
 `boot_log::ok(prefix, "capsule spawned")` (`src/userspace/init/capsule_boot/run.rs:29`). If that line is
@@ -78,7 +78,7 @@ a slug can look off by one against the disk filenames.
 ## Source map
 
 ```
-  src/userspace/init/spawn_plan/desktop_fleet.rs                       WALLPAPER-CATALOG prefix, spawn
+  src/userspace/init/spawn_plan/desktop_fleet/mod.rs                       WALLPAPER-CATALOG prefix, spawn
   src/userspace/init/capsule_boot/run.rs                               [WALLPAPER-CATALOG] capsule spawned / error
   userland/capsule_wallpaper_catalog/src/main.rs                       exit 1 heap, exit 2 register
   userland/capsule_wallpaper_catalog/src/bootstrap/                    service name, port 4110, register

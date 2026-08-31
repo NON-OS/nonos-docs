@@ -40,7 +40,7 @@ whose reply inbox is a numeric kernel constant, this capsule's reply inbox is a 
 `endpoint.net.ip.reply` (`spawn.rs:37`); at runtime the capsule sends every reply straight back to the
 attested sender pid with `mk_ipc_reply` (`src/server/respond.rs:58`).
 
-The mask `0x0001d` decomposes bit by bit against `src/capabilities/types.rs`:
+The mask `0x0001d` decomposes bit by bit against `src/capabilities/types/defs.rs`:
 
 ```
   0x00001  CoreExec     bit()   1   types.rs:56
@@ -54,7 +54,7 @@ The mask `0x0001d` decomposes bit by bit against `src/capabilities/types.rs`:
 This is a policy capsule, not a driver: it holds none of the hardware-broker authority bits. There is
 no `DeviceEnum` (32768), no `Driver` (65536), no `Mmio` (131072), `Irq` (262144), `Dma` (524288), or
 `Pio` (1048576), and no `FileSystem` (64), `Admin` (512), or `Debug` (256) authority
-(`src/capabilities/types.rs:54`). It cannot reach a NIC; it depends on `net.l2` for that. The `Network`
+(`src/capabilities/types/defs.rs`). It cannot reach a NIC; it depends on `net.l2` for that. The `Network`
 bit names it a participant in the stack, and `IPC` plus `Memory` are the two bits it shares with any
 ordinary capsule.
 
@@ -127,7 +127,7 @@ mechanism the IPv4 host is built on, not the transport or socket policy.
   userland/capsule_net_ip/Capsule.mk         slug, handle, ports, capability mask, kernel mirror
   src/userspace/capsule_net_ip/spawn.rs      the kernel-side verified spawn and requested caps
   src/userspace/init/spawn_plan/network/spawn_ip.rs  the NET-IP spawn entry and boot marker
-  src/capabilities/types.rs                  the capability bit values behind the mask
+  src/capabilities/types/defs.rs                  the capability bit values behind the mask
 ```
 
 Every reference above is verified against those trees.

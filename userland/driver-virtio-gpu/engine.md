@@ -76,8 +76,12 @@ device does not answer `RESP_OK_NODATA` (`:42`). `set_scanout` rejects a scanout
 or a zero-area rect and lays out its body as `rect(16), scanout_id(4), resource_id(4)` before the fixed
 header (`src/device/cmd/set_scanout.rs:29`, `:33`). `get_display_info` is the only command that decodes a
 body: it reads up to `VG_MAX_SCANOUTS` per-scanout entries out of the response (`src/device/cmd/get_display_info.rs:45`).
-These six are the entire device-facing vocabulary. There is no VirGL context command, no 3D submit, and no
-capset transfer anywhere under `cmd/`.
+These six are the 2D device-facing vocabulary, and they are the only commands the shipping desktop path
+issues. They are not, however, the entire command set under `cmd/`: the capsule also carries the VirGL 3D
+commands (`ctx_create.rs 0x0200`, `resource_create_3d/`, `transfer_3d/`, `submit_3d.rs 0x0207`,
+`get_capset_info.rs 0x0108`; opcodes in `src/constants/cmd_3d.rs:19`), which the boot-time `probe_3d`
+self-test exercises once and no compositor ever uses. See the [README](README.md) for the full 2D-proven /
+3D-implemented-but-unused split; this page documents the 2D path the desktop actually runs.
 
 ## The runtime tables
 

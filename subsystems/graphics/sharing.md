@@ -66,7 +66,7 @@ properties keep it honest, and the same IOMMU boundary as the rest of the DMA-ad
 **Share and attach are separately gated.** Marking a surface shareable goes through
 `MkSurfaceShare`, which the cap table routes to `can_surface_create` (`mk.rs:73`); mapping a shared
 surface into a receiver goes through `MkSurfaceAttach`, which routes to `can_surface_map`
-(`mk.rs:75`), requiring the `GraphicsSurfaceMap` grant (bit `8192`, `capabilities/types.rs:69`). The
+(`mk.rs:75`), requiring the `GraphicsSurfaceMap` grant (bit `8192`, `capabilities/types/bit.rs:36`). The
 producer of a surface and the consumer that maps it are therefore distinct capabilities: a
 compositor that only ever attaches other capsules' surfaces needs the map grant but not the create
 grant, and a client that only draws needs create but not map.
@@ -125,7 +125,7 @@ see whether attach reached `ok`.
   src/kernel_core/surface_registry/attach_map/               per-receiver VA record and cleanup
   src/kernel_core/surface_registry/release/                  release_surface, release_owned_by_pid
   src/syscall/contract/cap_table/mk.rs                       share -> GraphicsSurfaceCreate, attach -> GraphicsSurfaceMap
-  src/capabilities/types.rs                                  the graphics capability bits
+  src/capabilities/types/bit.rs                              the graphics capability bit values
 ```
 
 Every reference above is verified against those trees. The descriptor and epoch these operations

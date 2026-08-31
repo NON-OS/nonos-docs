@@ -160,7 +160,7 @@ handle to the NIC or to the hardware.
   userland/capsule_net_l2/src/setup/               first_available and the MAC read
   userland/capsule_net_l2/src/state.rs             the NIC port/pid, MAC, IPv4, and cache
   userland/capsule_net_l2/Cargo.toml               panic = "abort" and the binary name
-  src/capabilities/types.rs                        the capability bits the mask decodes into
+  src/capabilities/types/defs.rs                        the capability bits the mask decodes into
 ```
 
 Every reference above is verified against those trees.

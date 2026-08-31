@@ -24,9 +24,9 @@ The spawn planner groups work by dependency. Driver startup calls virtio, bus,
 input, NIC, USB, and storage groups in order
 (`src/userspace/init/spawn_plan/orchestrator.rs:29`). Network startup calls L2,
 IP, UDP, DHCP, TCP, DNS, Nym, and sockets in order
-(`src/userspace/init/spawn_plan/network.rs:17`). Desktop startup calls GUI core,
+(`src/userspace/init/spawn_plan/network/mod.rs`). Desktop startup calls GUI core,
 WM, wallpaper catalog, wallpaper, desktop shell, and desktop services
-(`src/userspace/init/spawn_plan/desktop_fleet.rs:17`). Desktop services are
+(`src/userspace/init/spawn_plan/desktop_fleet/mod.rs`). Desktop services are
 image codec, clipboard, attest, login, and toolkit
 (`src/userspace/init/spawn_plan/desktop_services.rs:17`).
 
@@ -484,15 +484,15 @@ ignores replies with a different request id
 ## 7. Network workflow
 
 Network services are layered by capsule. Init starts L2, IP, UDP, DHCP, TCP,
-DNS, Nym, and sockets in that order (`src/userspace/init/spawn_plan/network.rs:17`,
-`src/userspace/init/spawn_plan/network.rs:18`,
-`src/userspace/init/spawn_plan/network.rs:19`,
-`src/userspace/init/spawn_plan/network.rs:20`,
-`src/userspace/init/spawn_plan/network.rs:21`,
-`src/userspace/init/spawn_plan/network.rs:22`,
-`src/userspace/init/spawn_plan/network.rs:23`,
-`src/userspace/init/spawn_plan/network.rs:24`,
-`src/userspace/init/spawn_plan/network.rs:25`).
+DNS, Nym, and sockets in that order (`src/userspace/init/spawn_plan/network/mod.rs`,
+`src/userspace/init/spawn_plan/network/mod.rs`,
+`src/userspace/init/spawn_plan/network/mod.rs`,
+`src/userspace/init/spawn_plan/network/mod.rs`,
+`src/userspace/init/spawn_plan/network/mod.rs`,
+`src/userspace/init/spawn_plan/network/mod.rs`,
+`src/userspace/init/spawn_plan/network/mod.rs`,
+`src/userspace/init/spawn_plan/network/mod.rs`,
+`src/userspace/init/spawn_plan/network/mod.rs`).
 
 `net.l2` stores the resolved NIC port and pid, MAC address, local IPv4, and ARP
 cache. Its state file states that NIC claims and grants remain in the driver

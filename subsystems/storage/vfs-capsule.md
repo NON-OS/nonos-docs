@@ -71,7 +71,7 @@ images.
 The **filesystem capsules hold no hardware capability.** Both are spawned with a narrow mask
 (`src/fs/ramfs_capsule/spawn.rs:50`, `vfs_capsule/spawn.rs:51`): `ramfs_capsule` gets IPC, Memory, and
 Crypto (`0x38`), and `vfs_capsule` gets IPC and Memory (`0x18`), with no Driver, Mmio, Irq, Dma, or Pio
-bit in either (bits from `src/capabilities/types.rs:54`). So the capsule that parses hostile filesystem
+bit in either (bits from `src/capabilities/types/bit.rs`). So the capsule that parses hostile filesystem
 requests cannot map an MMIO region, take an interrupt, or program DMA. A bug in its request handling is
 contained to the filesystem service, and it has no path to a controller the way the block drivers do.
 The store lives entirely in the capsule's own memory and the kernel routes to it; the kernel does not
@@ -134,7 +134,7 @@ touching a live filesystem.
   src/fs/vfs_capsule/                                   the vfs_pool service (ports 4104/4105)
   userland/capsule_vfs/src/                             the store, server, path handlers, is_read_only
   src/userspace/init/spawn_plan/core.rs                the RAMFS/VFS spawn markers
-  src/capabilities/types.rs                            the capability bits the masks decode to
+  src/capabilities/types/bit.rs                        the capability bit values the masks decode to
   userland/fs_proofs/                                  the proofs (attestation, /capsules guard, fuzz)
 ```
 

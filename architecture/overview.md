@@ -157,10 +157,10 @@ sequence. Three phases: bring up the core CPU and interrupt machinery, bring up
 the microkernel services, then create the init process and drop to user mode.
 
 ```
-  kernel_entry                         src/nonos_main.rs:39
+  kernel_entry                         src/nonos_main.rs:52
         |
         v
-  init_core_systems                    src/boot/main/core_init.rs:21
+  init_core_systems                    src/boot/main/core_init/init_core_systems.rs:25
     serial, TSC, boot timer
     GDT                                arch/x86_64/gdt
     SYSCALL MSRs (STAR/LSTAR/CSTAR)    arch/x86_64/syscall
@@ -168,26 +168,26 @@ the microkernel services, then create the init process and drop to user mode.
     heap bootstrap allocator           memory/heap/manager
     ACPI tables (RSDP from handoff)
     LAPIC init
-    preemption timer @ 100 Hz          arch/.../apic/preemption/install.rs:25
+    preemption timer @ 100 Hz          arch/.../apic/preemption
     sti  (interrupts on)
     PCI enumeration, entropy, nonces
         |
         v
-  microkernel_init(handoff)            src/kernel_core/init/entry.rs:26
+  microkernel_init(handoff)            src/kernel_core/init/entry/microkernel_init.rs:30
     physical memory from EFI map       kernel_core/init/memory.rs
     framebuffer + boot log
-    RNG, IPC secret
+    RNG, IPC secret                    entry/init_core_services.rs
     SMP bring-up of the BSP
-    scheduler init                     process/scheduler/core.rs:36
+    scheduler init                     entry/init_core_services.rs:43
     clock init
-    init_unified_vm                    memory/unified/init/run.rs:35
-    IO-APIC routing from ACPI          arch/.../ioapic/init_from_acpi
-    process management, ELF loader
+    init_unified_vm                    entry/init_vm_and_protection.rs
+    IO-APIC routing                    entry/init_runtime.rs  (device routing)
+    process management, ELF loader     entry/init_runtime.rs:39
     kernel keys
     start secondary CPUs
         |
         v
-  microkernel_main                     src/kernel_core/init/entry.rs:112
+  microkernel_main                     src/kernel_core/init/entry/microkernel_main.rs:22
     create init process (pid 1)
     create init address space
     allocate init kernel stack
@@ -345,6 +345,8 @@ preflight, then install.
         |   hash the ELF, check it equals manifest.payload_hash
         |   check target triple
         |   check declared endpoints match what is being registered
+        |   attestation gate (enrolled tier): verify the capsule's STARK
+        |     membership trailer     runner/attest_gate.rs:38
         |   -> returns the verified capability bits to install
         |
         v
@@ -369,13 +371,23 @@ The signature verification itself lives at
 through the in-tree ed25519 implementation, ML-DSA-65 through the post-quantum
 module. Both must pass for a production capsule.
 
+For an enrolled capsule the innermost preflight check is attestation: the
+`attest_gate` (`runner/attest_gate.rs:38`) verifies the capsule's `NZKCAPS1`
+transparent-STARK membership trailer, bound to the ELF measurement and the caps
+being installed, against the policy root baked into the kernel
+(`security/capsule_attest/verify.rs:33`). By default the gate is fail-closed: a
+missing or invalid trailer refuses the spawn unless the `nonos-zk-rollout`
+feature is set. The kernel's own image was STARK-attested one layer earlier, by
+the [bootloader](../subsystems/boot/bootloader.md) before the jump; this is the
+same proof system applied to each capsule at spawn.
+
 ---
 
 ## 8. Capability model
 
 A capability is a single bit. There are 22 of them, defined as an enum whose
 discriminants are the bit values themselves
-(`src/capabilities/types.rs:18`):
+(`src/capabilities/types/defs.rs`):
 
 ```
   CoreExec              1          IPC                   8
@@ -748,11 +760,16 @@ what each primitive is actually used for, not just what exists
 ```
 
 The split worth remembering: capsule admission and capability tokens are the
-critical path and use Ed25519, ML-DSA-65, and BLAKE3. The secp256k1,
-Keccak256, and zero-knowledge machinery target the application layer and the
-chain-facing work; they are not in the boot or spawn trust path. BN254 is the
-same pairing-friendly curve used by Ethereum's alt_bn128 precompiles, so proofs
-built here verify in that ecosystem.
+critical path and use Ed25519, ML-DSA-65, and BLAKE3. The **transparent STARK**
+attestation (`nonos-stark`) is also on the trust path, not the application layer:
+the bootloader verifies the kernel's STARK self-attestation before the jump and
+the spawn gate verifies each capsule's STARK membership trailer (sections 7 and
+the [bootloader](../subsystems/boot/bootloader.md) page). The curve-based
+zero-knowledge machinery, by contrast, is application-facing: secp256k1,
+Keccak256, and the Groth16 / BN254 / Halo2 proof systems target the chain-facing
+work and are not in the boot or spawn trust path. BN254 is the same
+pairing-friendly curve used by Ethereum's alt_bn128 precompiles, so proofs built
+here verify in that ecosystem.
 
 ---
 

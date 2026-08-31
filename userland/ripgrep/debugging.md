@@ -59,7 +59,7 @@ capsule are laid out on the [contributing](contributing.md) page.
 Not everything is missing, and it is worth naming what is already sound so it is not mistaken for the
 problem. The identity and endpoints are fully defined in `Capsule.mk` (`Capsule.mk:16`..`Capsule.mk:27`).
 The capability mask `0x19` is defined and equals its own ceiling, granting only CoreExec, IPC, and Memory
-(`Capsule.mk:24`, `Capsule.mk:25`, checked against `src/capabilities/types.rs:56`, `types.rs:59`,
+(`Capsule.mk:24`, `Capsule.mk:25`, checked against `src/capabilities/types/defs.rs`, `types.rs:59`,
 `types.rs:60`). The kernel spawn mirror is written: it requests exactly those three capabilities
 (`src/userspace/capsule_ripgrep/spawn.rs:47`) and registers the service `tool.ripgrep` on port 4820 with a
 reply inbox on port 4821 (`spawn.rs:27`, `spawn.rs:28`, `spawn.rs:29`, `spawn.rs:30`), matching the
@@ -91,7 +91,7 @@ faithfully.
 ## Source map
 
 Everything here is drawn from `userland/capsule_ripgrep/` (the `README.md` and `Capsule.mk`; there is no
-`src/` or `Cargo.toml`), `src/capabilities/types.rs` (the capability bits), the kernel spawn mirror and
+`src/` or `Cargo.toml`), `src/capabilities/types/defs.rs` (the capability bits), the kernel spawn mirror and
 embed under `src/userspace/capsule_ripgrep/`, the feature wiring and boot marker in
 `src/userspace/init/entry.rs` and `Cargo.toml`, the upstream build recipe in the repository `Makefile`, and
 the prebuilt-install branch in `nonos-mk/capsule.mk`. Every reference above is verified against those trees.

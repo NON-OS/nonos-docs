@@ -71,7 +71,7 @@ calls `release` (which sends through `send_frame`) and then `clear_lease` (`src/
 ## Security posture at this boundary
 
 Both clients are pure IPC clients: they hold no device, no MMIO, and no DMA, only the `Network` and `IPC`
-rights the mask grants (`src/capabilities/types.rs`, decoded on the [README](README.md)). Every reply is
+rights the mask grants (`src/capabilities/types/defs.rs`, decoded on the [README](README.md)). Every reply is
 validated for magic, version, and op before its body is trusted, and a wrong op is a `BadResponse` rather than
 a silent accept (`src/l2_client/tx.rs:47`, `src/ip_client/set_config.rs:53`). The inbound `poll_frame` path
 bounds the wire-declared length against the received buffer before reading (`src/l2_client/rx.rs:64`). The lone
@@ -93,7 +93,7 @@ clients cannot reconfigure the interface on a rejected lease.
   userland/capsule_net_dhcp/src/ip_client/set_config.rs apply_lease / clear_lease: OP_SET_CONFIG
   userland/capsule_net_dhcp/src/dora/send_bootp.rs, wait_reply.rs, install.rs, acquire.rs   the ladder wiring
   userland/capsule_net_dhcp/src/server/handlers/lease_release.rs   the release wiring
-  src/capabilities/types.rs                            the Network and IPC bits behind the mask
+  src/capabilities/types/defs.rs                            the Network and IPC bits behind the mask
 ```
 
 Every reference above is verified against those trees.

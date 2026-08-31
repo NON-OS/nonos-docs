@@ -119,25 +119,39 @@ the count of guard pages, canaries, and allocations currently tracked.
 
 ## The CPU protection bits
 
-The software checks above are backed by hardware enforcement the manager turns on at init.
-`init_module_memory_protection` (`hardening/manager/verify/protection.rs:20`) sets three control-register
-bits and is called from `init_all_memory_subsystems` (`memory/unified/system.rs:32`):
+The software checks above are backed by hardware enforcement, and there is now a single owner of the
+control registers. `init_module_memory_protection`
+(`hardening/manager/verify/protection.rs:28`) no longer writes CR0/CR4 itself; it delegates to
+`mmu::init_mmu()` (`protection.rs:30`). The source records why: this path used to write the registers in
+parallel with `memory::mmu`, so two pieces of code owned the same bits and neither read back what stuck.
+There is one owner now.
+
+The real work is `MMU::initialize` (`mmu/mmu/init.rs:25`) calling `protect::apply`
+(`mmu/mmu/protect/apply.rs:26`), which probes the part's features and turns on what it offers:
 
 ```
-  init_module_memory_protection():
-      enable_write_protection()          set CR0.WP  (bit 16)
-      cr4 |= CR4_SMEP                    set CR4.SMEP (bit 20)
-      cr4 |= CR4_SMAP                    set CR4.SMAP (bit 21)
+  apply():                                        # mmu/mmu/protect/apply.rs:26
+      have = cpuid::supported()                   # actually probes CPUID
+      if not have.nx: return Err(NxNotSupported)  # NX has no fallback
+      live = cr4::enable(have)                     # SMEP/SMAP/UMIP, gated on CPUID
+      ProtectionFlags {
+          smep_enabled: live.smep, smap_enabled: live.smap, umip_enabled: live.umip,
+          nx_enabled: efer::enable_nx(), wp_enabled: cr0::enable(),   # every field a read-back
+      }
 ```
 
-`enable_write_protection` (`paging/tlb/write_protect.rs:18`) sets `CR0.WP`, so a read-only page is
-read-only even to ring 0: the kernel cannot accidentally write through a mapping it marked read-only,
-which is what makes the read-only mappings the manager installs actually enforced. `CR4.SMEP` stops
-the kernel from fetching instructions out of any user page, and `CR4.SMAP` stops it from reading or
-writing user pages except through an explicit `stac`/`clac` window. SMAP is why the [usercopy](usercopy.md)
-boundary reaches user bytes through the direct map rather than dereferencing the user pointer: with
-SMAP on, a direct kernel-mode load from a user address faults. The bits are set only if not already
-set, so re-init is safe.
+`cr0::enable` sets `CR0.WP`, so a read-only page is read-only even to ring 0: the kernel cannot
+accidentally write through a mapping it marked read-only. `CR4.SMEP` stops the kernel from fetching
+instructions out of any user page, and `CR4.SMAP` stops it from reading or writing user pages except
+through an explicit `stac`/`clac` window, which is why the [usercopy](usercopy.md) boundary reaches user
+bytes through the direct map rather than dereferencing the user pointer. `efer::enable_nx` turns on
+execute-never, and unlike the others it is mandatory: `apply` returns `NxNotSupported` and refuses to
+proceed if the part lacks it, because the directmap through which every user page is reached is built
+with NX set and a part that ignored it would leave that whole window executable. Every field of the
+returned `ProtectionFlags` is a read-back of what the hardware accepted, not what was requested, so
+`get_protection_flags` answers with the machine's truth (a part that silently dropped SMAP reads back
+`false`). `initialize` is idempotent (`init.rs:26`), so re-entry touches no register. On aarch64 and
+riscv64 the same two guarantees come from PAN and the PXN/UXN table bits (`apply.rs:51`).
 
 ## Security analysis
 
@@ -153,14 +167,17 @@ because no such PTE is ever written, not because a scan catches it after the fac
 booleans, and both feed the `wx_violations` counter. Combined with SMEP and NX on the device and DMA
 helpers, a writable page is never a code-injection target.
 
-**Kernel writes respect read-only, kernel fetches respect user.** `CR0.WP`, `CR4.SMEP`, and
-`CR4.SMAP` move three of these guarantees from convention into the hardware. Without WP the kernel
-could write through its own read-only mappings; without SMEP it could be tricked into executing a
-user page; without SMAP it could dereference an unvalidated user pointer. Turning all three on is
-what makes the W^X and usercopy boundaries enforced rather than merely intended. The honest boundary:
-the code assumes the CPU supports these bits and sets them unconditionally, it does not branch on a
-CPUID probe here, so on hardware lacking SMEP/SMAP the write to `CR4` is a no-op for those bits and
-the software checks are the only line left.
+**Kernel writes respect read-only, kernel fetches respect user.** `CR0.WP`, `CR4.SMEP`, `CR4.SMAP`,
+`CR4.UMIP`, and NX in EFER move these guarantees from convention into the hardware. Without WP the kernel
+could write through its own read-only mappings; without SMEP it could be tricked into executing a user
+page; without SMAP it could dereference an unvalidated user pointer. `apply` (`mmu/mmu/protect/apply.rs:26`)
+does branch on a real CPUID probe (`cpuid::supported()`, `apply.rs:29`) and enables SMEP/SMAP/UMIP only
+where the part reports them, then records the read-back so a caller gating on `smap_enabled` sees the
+truth on a part that dropped it. NX is the one property with no fallback: `apply` returns
+`NxNotSupported` and refuses to bring the MMU up at all rather than run with an executable directmap
+(`apply.rs:33`). The honest boundary is now SMEP/SMAP specifically: on a part that lacks them those flags
+read back `false` and the software W^X and usercopy checks are the only line left, but the kernel knows
+that from the read-back rather than assuming the write took.
 
 **Guard pages and canaries are overrun tripwires.** A guard page (`api.rs:50`) marks an address so
 that a fault on it is reported as a deliberate boundary crossing (`check_guard_page_access`,
@@ -172,9 +189,14 @@ fails if it changed. Both catch an off-the-end write that the mapping permission
 **Lifetime errors are detectable and counted.** `track_allocation` / `track_deallocation`
 (`api.rs:37`) let the manager name a double free (deallocating an untracked address) and a
 use-after-free (touching a retired one), and the frame allocator has its own hard `DoubleFree` check
-underneath. The honest limit throughout this subsystem is that the tracker and canaries are a
-best-effort layer the caller must actually invoke; they are not automatic on every allocation, so
-they catch the paths that opt in. The W^X gate and the CPU bits, by contrast, are unconditional.
+underneath. The honest limit is stronger than "opt-in" and worth stating plainly: as the tree stands,
+nothing outside the hardening module calls `add_guard_page`, `setup_stack_canary`, or `track_allocation`.
+The manager's guard-page map, canary table, and allocation tracker are implemented and their counters are
+wired to the snapshot, but no allocator or stack-carving path currently registers anything with them, so
+in practice these three tallies stay at zero. The one canary that does run is the sanitization module's
+own stack canary (`memory_sanitization/api.rs:117`), which is separate from this manager's table. The W^X
+gate and the CPU bits, by contrast, are unconditional and always in force. Closing this gap means having
+the page allocator and heap register their regions as they carve and free them.
 
 ## Debugging hardening
 
@@ -221,7 +243,9 @@ in the kernel isolation proofs.
   src/memory/paging/manager/mapping/map_in_asid.rs    the W^X enforcement gate
   src/memory/hardening/manager/validation.rs           validate_wx_permissions, guard test
   src/memory/hardening/manager/api.rs                  the hardening surface
-  src/memory/hardening/manager/verify/protection.rs    CR0.WP / SMEP / SMAP enablement
+  src/memory/hardening/manager/verify/protection.rs    delegates to mmu::init_mmu
+  src/memory/mmu/mmu/init.rs                           MMU::initialize, idempotent bring-up
+  src/memory/mmu/mmu/protect/apply.rs                  CPUID probe, CR0.WP/SMEP/SMAP/UMIP/NX, read-back
   src/memory/paging/tlb/write_protect.rs               enable_write_protection (CR0.WP)
   src/memory/hardening/types/                          GuardPage, StackCanary, snapshots
   src/memory/hardening/stats/record.rs                 the violation counters

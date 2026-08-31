@@ -139,7 +139,7 @@ never gets a handle to the NIC.
   userland/capsule_driver_rtl8169/src/constants/frame.rs     the Ethernet frame size bounds
   userland/capsule_driver_rtl8169/Cargo.toml                 panic = "abort"
   src/hardware/rtl8169_capsule/protocol/ops.rs               the kernel-side opcode mirror
-  src/capabilities/types.rs                                  the capability bits the mask decodes into
+  src/capabilities/types/bit.rs                                the capability bit values the mask decodes into
 ```
 
 Every reference above is verified against those trees.

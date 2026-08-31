@@ -9,7 +9,7 @@ look for each. For the shell model see the [README](README.md), the [surface](su
 The first thing to confirm is that the capsule ran. On a successful boot the kernel logs
 `[DESKTOP-SHELL] capsule spawned` from the capsule boot path: the `Ok` arm calls `boot_log::ok(prefix,
 "capsule spawned")` with the tag `DESKTOP-SHELL` (`src/userspace/init/capsule_boot/run.rs:29`,
-`src/userspace/init/spawn_plan/desktop_fleet.rs:118`). If that line is absent the capsule never started,
+`src/userspace/init/spawn_plan/desktop_fleet/mod.rs`). If that line is absent the capsule never started,
 and the `Err` arm logged an error line through `boot_log::error` instead
 (`src/userspace/init/capsule_boot/run.rs:32`), which is the usual signature, manifest, capability, or
 attestation failure.
@@ -73,7 +73,7 @@ the market is a best-effort peer (`src/market_client/mod.rs:51`).
 
 ```
   src/userspace/init/capsule_boot/run.rs           [DESKTOP-SHELL] capsule spawned / error path
-  src/userspace/init/spawn_plan/desktop_fleet.rs   the DESKTOP-SHELL fleet spawn entry
+  src/userspace/init/spawn_plan/desktop_fleet/mod.rs   the DESKTOP-SHELL fleet spawn entry
   src/wait_for_setup.rs                            retry setup::run until every peer is up
   src/setup/prime/peers.rs                         required vs best-effort peer resolution
   src/setup/discover/require_wallpaper.rs          the required wallpaper lookup

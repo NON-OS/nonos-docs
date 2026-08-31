@@ -9,9 +9,12 @@ the IPC that connects them and the broker that grants the driver its device.
 | Page | What it covers |
 |------|----------------|
 | [stack.md](stack.md) | The `net_core` capsule: a smoltcp 0.11 interface over a `NicDevice` bridge, the poll loop, and the consolidated-vs-decomposed forms. |
+| [layers.md](layers.md) | The decomposed per-layer capsules: L2/ARP, IPv4/ICMP, UDP, TCP, the sockets facade, DNS, and DHCP, each a capsule over IPC, with op sets and the parser proofs. |
 | [drivers.md](drivers.md) | The NIC driver capsules (e1000, RTL8139/8169, virtio-net), broker device access, and the frame path to the stack. |
 | [sockets.md](sockets.md) | The `net.sockets` service, the BSD socket op set, and how `nonos_std`'s `TcpStream` / `UdpSocket` bind to it. |
-| [services.md](services.md) | DHCP address acquisition (runtime-proven), the DNS resolver, and the optional `nym` anonymity overlay. |
+| [services.md](services.md) | DHCP address acquisition (runtime-proven), the DNS resolver, and the `nym` mixnet overlay in brief. |
+| [tls.md](tls.md) | The `nonos_tls` TLS 1.3 client the directory sync runs over: suites, X25519, certificate chain verification, and the crypto-pool IPC hand-off. |
+| [mixnet.md](mixnet.md) | The Nym mixnet in depth: the Sphinx packet, per-hop cryptography, the four-hop route, single-use reply blocks, the TLS directory sync with its retry hardening, and failure modes. |
 
 The layering, driver to stack to sockets to application, is the networking expression of the same
 principle as the [storage](../storage/README.md) and [input](../input/README.md) stacks: the kernel
@@ -27,6 +30,8 @@ boot.
 The stack is `userland/capsule_net_core/` (smoltcp interface, device bridge, DHCP, DNS, TCP/UDP), the
 sockets service is `userland/capsule_net_sockets/` with the kernel-side spawn in
 `src/userspace/capsule_net_sockets/`, the drivers are `src/hardware/*_capsule/` and
-`userland/capsule_driver_virtio_net/`, and the overlay is `src/userspace/capsule_net_nym/`. The spawn
-plan is `src/userspace/init/spawn_plan/network/` and `drivers_nic.rs`. Every page is verified against
-those trees with `file:line` references.
+`userland/capsule_driver_virtio_net/`, and the mixnet overlay is `userland/capsule_net_nym/`
+(kernel spawn mirror in `src/userspace/capsule_net_nym/`). The decomposed per-layer capsules are
+`userland/capsule_net_{l2,ip,udp,tcp,dns,dhcp}/`, and the TLS client the directory sync uses is
+`userland/nonos_tls/`. The spawn plan is `src/userspace/init/spawn_plan/network/` and
+`drivers_nic.rs`. Every page is verified against those trees with `file:line` references.

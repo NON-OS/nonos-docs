@@ -20,13 +20,13 @@ a page can be read beside the folder it describes.
 | Capability mask | `0x200019` | `Capsule.mk:15`, `spawn.rs:51` |
 | Kernel mirror | `src/userspace/capsule_driver_usb_hid` | `Capsule.mk:9` |
 
-The mask `0x200019` decomposes bit by bit against `src/capabilities/types.rs`:
+The mask `0x200019` decomposes bit by bit against `src/capabilities/types/bit.rs` (the enum is in `src/capabilities/types/defs.rs`):
 
 ```
-  0x000001  CoreExec      run as a process              1        types.rs:56
-  0x000008  IPC           send/recv on its endpoints    8        types.rs:59
-  0x000010  Memory        map its own heap and stack    16       types.rs:60
-  0x200000  InputSource   post into the input ring      2097152  types.rs:77
+  0x000001  CoreExec      run as a process              1        types/bit.rs:23
+  0x000008  IPC           send/recv on its endpoints    8        types/bit.rs:26
+  0x000010  Memory        map its own heap and stack    16       types/bit.rs:27
+  0x200000  InputSource   post into the input ring      2097152  types/bit.rs:44
   --------
   0x200019  = 1 + 8 + 16 + 2097152
 ```
@@ -42,7 +42,7 @@ what lets this capsule post into the shared input ring. The gate is explicit.
 
 There is no `Network` (4), no `FileSystem` (64), and, crucially, no `Driver` (65536), `DeviceEnum`
 (32768), `Mmio` (131072), `Irq` (262144), `Dma` (524288), or `Pio` (1048576) bit in the mask
-(`src/capabilities/types.rs:72`). The capsule cannot enumerate PCI devices, claim a controller
+(`src/capabilities/types/bit.rs:39`). The capsule cannot enumerate PCI devices, claim a controller
 through the [hardware broker](../../subsystems/hardware-broker/claim.md), map a register through
 [MMIO](../../subsystems/hardware-broker/mmio.md), bind an interrupt through
 [IRQ](../../subsystems/hardware-broker/irq.md), or allocate DMA. Every hardware effect it needs is an

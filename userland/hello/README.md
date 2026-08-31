@@ -30,7 +30,7 @@ scale, then `a signed, attested capsule`, `built from the quickstart`, and `pres
 | Reply endpoint | `reply:4811:endpoint.app.hello.reply` | `Capsule.mk:9` |
 | Capability mask | `0x1819` | `Capsule.mk:11` |
 
-The mask decomposes into five bits, each checked against `src/capabilities/types.rs`:
+The mask decomposes into five bits, each checked against `src/capabilities/types/defs.rs`:
 
 | Bit | Value | Grants |
 |-----|-------|--------|
@@ -41,7 +41,7 @@ The mask decomposes into five bits, each checked against `src/capabilities/types
 | GraphicsSurfaceCreate | `0x1000` | create the window surface it draws into |
 
 The five values sum to `0x1819` (`1 + 8 + 16 + 2048 + 4096`), and the bit values are the ones returned by
-`Capability::bit` (`src/capabilities/types.rs:56`, `:59`, `:60`, `:67`, `:68`). The kernel spawn mirror
+`Capability::bit` (`src/capabilities/types/defs.rs`, `:59`, `:60`, `:67`, `:68`). The kernel spawn mirror
 requests exactly these five and nothing else, assembled from the same `Capability` variants rather than the
 raw constant (`src/userspace/capsule_hello/spawn.rs:47`). The hello capsule holds no filesystem, network,
 driver, hardware, crypto, admin, DMA, PIO, IRQ, or debug capability of its own. It is the smallest authority
@@ -93,7 +93,7 @@ and run it. For the App trait and the runtime that drives it in depth, read [wri
   userland/capsule_hello/src/hello/          app, manifest, paint, event
   userland/capsule_hello/Capsule.mk          slug, handle, endpoints, mask, kernel mirror
   userland/capsule_hello/Cargo.toml          crate, panic=abort, AGPL license
-  src/capabilities/types.rs                  the capability bit values
+  src/capabilities/types/defs.rs                  the capability bit values
   src/userspace/capsule_hello/spawn.rs       the kernel spawn mirror and its requested caps
   src/userspace/init/spawn_plan/apps.rs      the feature-gated spawn and the [APP-HELLO] marker
 ```

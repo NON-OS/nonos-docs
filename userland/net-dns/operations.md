@@ -145,7 +145,7 @@ panic path: the crate is `panic = "abort"` and every handler returns an errno wo
   userland/capsule_net_dns/src/server/handlers/     one file per op, plus resolve_common
   userland/capsule_net_dns/src/state.rs             the entropy-backed xid and local port
   userland/capsule_net_dns/Cargo.toml               panic = "abort"
-  src/capabilities/types.rs                         the capability bits the mask decodes into
+  src/capabilities/types/defs.rs                         the capability bits the mask decodes into
 ```
 
 Every reference above is verified against those trees.

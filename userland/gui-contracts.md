@@ -12,8 +12,8 @@ focus, cursor state, and keyboard and pointer delivery. Read [Desktop](desktop.m
 
 The default desktop boot path starts GUI core, then WM, wallpaper catalog,
 wallpaper, desktop shell, and desktop services
-(`src/userspace/init/spawn_plan/desktop_fleet.rs:17`). GUI core is input router
-and compositor (`src/userspace/init/spawn_plan/desktop_fleet.rs:26`). The init
+(`src/userspace/init/spawn_plan/desktop_fleet/mod.rs`). GUI core is input router
+and compositor (`src/userspace/init/spawn_plan/desktop_fleet/mod.rs`). The init
 entry path calls desktop and market after network, then spawns the app fleet
 through `spawn_apps` (`src/userspace/init/entry.rs:31`,
 `src/userspace/init/entry.rs:32`, `src/userspace/init/entry.rs:33`). `spawn_apps`

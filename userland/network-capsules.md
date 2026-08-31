@@ -14,7 +14,7 @@ look when a packet path fails only for larger frames.
 ## 1. Boot order
 
 The network spawn plan starts L2, IP, UDP, DHCP, TCP, DNS, Nym, and sockets in
-that order (`src/userspace/init/spawn_plan/network.rs:17`). Each network
+that order (`src/userspace/init/spawn_plan/network/mod.rs`). Each network
 capsule is a no_std service with a `main.rs` entrypoint and a protocol ops
 table in `src/protocol/ops.rs`.
 

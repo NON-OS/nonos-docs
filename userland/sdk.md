@@ -154,3 +154,118 @@ four times (`userland/app_skeleton/src/setup/subscribe_input.rs:22`).
 | `App` implementation | App runner, peer discovery, window open, input subscribe | `userland/app_skeleton/src/runner/entry.rs:30` |
 | Manifest metadata | Window title, id, kind, position, size, input mask | `userland/app_skeleton/src/app/manifest.rs:19` |
 | Paint code | Mutable `PaintBuffer` passed to `paint` | `userland/app_skeleton/src/app/behavior.rs:21` |
+
+## 6. The Capsule.mk contract
+
+Source code alone does not make a capsule. A capsule is the signed, attested
+package the kernel will verify: an ELF, a NØNOS-ID certificate, a manifest, and a
+STARK attestation trailer. All four are produced by the shared build/sign macro,
+which a per-capsule `userland/<capsule>/Capsule.mk` drives by declaring the
+capsule's identity in `CAPSULE_*` variables and then including the macro
+(`nonos-mk/capsule.mk:1`). The macro errors out if any required variable is
+missing, so the declaration is the single source of truth for the capsule's
+identity and authority (`nonos-mk/capsule.mk:29`).
+
+`userland/capsule_hello/Capsule.mk` is the minimal example:
+
+```
+CAPSULE_SLUG             := hello
+CAPSULE_HANDLE           := app.hello
+CAPSULE_DOMAIN           := systems.nonos
+CAPSULE_NAMESPACE        := systems.nonos.app.hello
+CAPSULE_SERVICE_ENDPOINT := service:4810:app.hello
+CAPSULE_REPLY_ENDPOINT   := reply:4811:endpoint.app.hello.reply
+# CoreExec|IPC|Memory|GraphicsDisplayQuery|GraphicsSurfaceCreate
+CAPSULE_REQUIRED_CAPS    := 0x1819
+include nonos-mk/capsule.mk
+```
+
+| Variable | Meaning | Source |
+|----------|---------|--------|
+| `CAPSULE_SLUG` | Short name; namespaces the generated make targets and variables | `nonos-mk/capsule.mk:29` |
+| `CAPSULE_HANDLE` / `CAPSULE_DOMAIN` / `CAPSULE_RECOVERY` | Hashed to the `nonos_id` by `capsule-sign derive-id` | `nonos-mk/capsule.mk:201` |
+| `CAPSULE_NAMESPACE` | Reverse-domain namespace signed into the cert and manifest | `nonos-mk/capsule.mk:44` |
+| `CAPSULE_SERVICE_ENDPOINT` / `CAPSULE_REPLY_ENDPOINT` | `kind:port:name` triples declared in the signed manifest | `nonos-mk/capsule.mk:47` |
+| `CAPSULE_INSTANCE_ENDPOINTS` | Extra `kind:port:name` triples for runtime-spawned windows | `nonos-mk/capsule.mk:126` |
+| `CAPSULE_REQUIRED_CAPS` | Hex `u64` mask of caps the capsule needs | `nonos-mk/capsule.mk:56` |
+| `CAPSULE_OPTIONAL_CAPS` | Hex mask of caps taken only if the spawn grant offers them (default `0x0`) | `nonos-mk/capsule.mk:76` |
+| `CAPSULE_CAPS_CEILING` | Cert ceiling; defaults to `CAPSULE_REQUIRED_CAPS` | `nonos-mk/capsule.mk:77` |
+
+The `CAPSULE_REQUIRED_CAPS` mask is checked against the capsule's `.nonos.caps`
+ELF section before every manifest signature, so a mask that disagrees with the
+compiled caps fails the sign step rather than shipping (`mk/00-config.mk:59`).
+
+## 7. Build, sign, and verify
+
+Including the macro materializes a standard target set, each namespaced by slug
+(`nonos-mk/capsule.mk:6`). Before signing, the publisher key pair must exist:
+seeds live in `.keys/` (gitignored) and public keys in
+`nonos-data/trust/keys/`. Generate a pair with the host signing tool:
+
+```
+nonos-sign/target/release/capsule-sign keygen --alg ed25519 --out .keys/<bin>_publisher
+nonos-sign/target/release/capsule-sign keygen --alg mldsa65 --out .keys/<bin>_publisher
+```
+
+`nonos-mk-check-<slug>-keys` asserts all four key files are present and prints
+that exact keygen command if any is missing (`nonos-mk/capsule.mk:190`).
+
+| Target | Effect | Source |
+|--------|--------|--------|
+| `make nonos-mk-<slug>` | Build the userland ELF with `-Zbuild-std=core,alloc` against `x86_64-nonos-user.json` | `nonos-mk/capsule.mk:163` |
+| `make nonos-mk-<slug>-sign` | Produce the cert, manifest, and attestation trailer | `nonos-mk/capsule.mk:282` |
+| `make nonos-mk-<slug>-verify` | Re-verify the artifacts against the trust-anchor policy | `nonos-mk/capsule.mk:285` |
+| `make nonos-mk-check-<slug>-keys` | Assert the publisher seeds and pubs are present | `nonos-mk/capsule.mk:190` |
+
+The build is pinned to toolchain `nightly-2026-01-16` (`mk/00-config.mk`),
+compiles `no_std` against the `x86_64-nonos-user.json` target, and passes
+`-Zbuild-std` per capsule so `core` and `alloc` are rebuilt for the user target
+(`nonos-mk/capsule.mk:170`).
+
+Signing is three tool invocations, all driven by the macro so the values stay in
+sync:
+
+1. `capsule-sign sign-id-cert` writes the hybrid NØNOS-ID certificate: it binds
+   the derived `nonos_id`, the namespace glob, the caps ceiling, and the
+   Ed25519 + ML-DSA-65 publisher public keys, signed by the trust-anchor seeds
+   (`nonos-mk/capsule.mk:214`).
+2. `capsule-sign sign-manifest` writes the schema-v3 manifest: it hashes the ELF
+   into `payload_hash`, records the target triple, the required and optional cap
+   masks, and every declared endpoint, then dual-signs with the publisher seeds
+   (`nonos-mk/capsule.mk:230`). The manifest depends on the ELF, so rebuilding
+   the binary forces a re-sign and `payload_hash` can never drift from the bytes.
+3. The macro immediately calls `capsule-sign verify-manifest` against the cert
+   and the trust-anchor policy, failing the build if the freshly signed manifest
+   does not verify (`nonos-mk/capsule.mk:244`).
+
+The attestation trailer is not a per-capsule proof. The whole capsule set is
+enrolled at once by the transparent STARK enrollment, which writes the policy
+root and every trailer together so the root commits to the real capsule
+measurements; each trailer therefore depends only on that enrollment step
+(`nonos-mk/capsule.mk:252`). The retired curve-based per-capsule attestation is
+kept disabled in the same file for reference; it was not post-quantum and its
+trailer was incompatible with the STARK spawn gate (`nonos-mk/capsule.mk:258`).
+
+The signed artifacts land in the committed trust bundle: the cert and manifest
+under `nonos-data/trust/capsules/<bin>.nonos_id_cert.bin` and `.manifest.bin`,
+the trailer as `.zk_trailer.bin`, so a clean checkout already carries everything
+the kernel verifier needs (`nonos-mk/capsule.mk:110`).
+
+## 8. Install and run
+
+A signed capsule reaches the runqueue one of two ways. At build time the kernel
+mirror under `src/userspace/capsule_<name>` embeds the ELF, cert, and manifest
+with `include_bytes!` and exposes a spawn function that hands a
+`CapsuleSpecVerified` to `spawn_verified`; init spawns the fleet in order at boot
+(see [Userland Model](README.md), sections 1 and 4). At runtime the installer
+capsule marshals the same four blobs and hands them to the `mk_capsule_load`
+syscall, which runs the full trust chain before anything spawns
+(see [Installer](installer/README.md)). Either path ends at the same verified
+spawn gate: nothing runs that was not decoded, signature-checked, hash-matched,
+and cap-bounded first.
+
+| Status tag | Meaning for this SDK |
+|------------|----------------------|
+| IMPLEMENTED / ENFORCED | The `Capsule.mk` contract, the four generated targets, and the hybrid sign + verify flow are in-tree and run on every build. |
+| PROVEN | The manifest verifier's cap-grant rule (`required \| (optional & granted)`, ceiling check) and the signature path are the kernel gate; the STARK enrollment produces the attestation the spawn gate checks. |
+| PARTIAL | Runtime install through `mk_capsule_load` is wired for the installer; general third-party install-on-demand is not a general-user flow yet. |

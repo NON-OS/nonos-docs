@@ -30,7 +30,7 @@ Everything the kernel and the service registry need to name and reach the capsul
 | Binary name | `attest` | `Capsule.mk:5`, `Cargo.toml:18` |
 | Kernel mirror | `src/userspace/capsule_attest` | `Capsule.mk:14` |
 
-The mask `0x19` decomposes into three bits, checked against `src/capabilities/types.rs`:
+The mask `0x19` decomposes into three bits, checked against `src/capabilities/types/defs.rs`:
 
 | Bit | Value | Grants |
 |-----|-------|--------|
@@ -99,13 +99,13 @@ which never returns (`src/main.rs:29`). The [debugging](debugging.md) page cover
   src/server/                     the loop, router, and handlers -> operations.md
   src/state/                      the authored tables      -> attestation-data.md
   Capsule.mk                      slug, handle, ports, mask 0x19, kernel mirror
-  src/capabilities/types.rs       the capability-bit definitions the mask decomposes against
+  src/capabilities/types/defs.rs       the capability-bit definitions the mask decomposes against
   src/userspace/capsule_attest/   the kernel-side embed, verified spawn, lifecycle state
   nonos-mk/capsule.mk             the generated nonos-mk-attest[-sign|-verify] targets
 ```
 
 Everything here is drawn from `userland/capsule_attest/` (the capsule source and its `Capsule.mk`),
-`src/capabilities/types.rs` (the capability bits), and the kernel spawn mirror under
+`src/capabilities/types/defs.rs` (the capability bits), and the kernel spawn mirror under
 `src/userspace/capsule_attest/`. Every reference above is verified against those trees.
 </content>
 </invoke>

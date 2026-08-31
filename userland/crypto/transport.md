@@ -109,7 +109,7 @@ Honest gaps, none hidden:
   src/security/crypto_capsule/client/mod.rs        the fifteen in-tree clients and their re-exports
   src/security/crypto_capsule/client/transport.rs  REPLY_INBOX endpoint.4294967300, the transport lock
   src/security/crypto_capsule/client/hash_op.rs, aead_op/, prf_op.rs, verify_ed25519.rs, healthcheck.rs   the gated paths
-  src/capabilities/types.rs                        the capability bits and CAP_CRYPTO
+  src/capabilities/types/defs.rs                        the capability bits and CAP_CRYPTO
   src/userspace/init/spawn_plan/core.rs            the boot spawn entry for CRYPTO
   userland/libc/src/crypto/                        the nonos_libc crypto shims callers use
 ```

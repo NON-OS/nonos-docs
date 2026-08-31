@@ -28,7 +28,7 @@ its kernel-side spawn record.
 | Reply endpoint | `reply:4205:endpoint.4294967305` | `Capsule.mk:15`, `spawn.rs:41` |
 | Binary name | `driver_virtio_net` | `Capsule.mk:11` |
 | Feature gate | `nonos-capsule-driver-virtio-net` | `Capsule.mk:12`, `spawn_plan/drivers_virtio_display.rs:35` |
-| Capability mask | `0x1F8019` | `Capsule.mk:17` |
+| Capability mask | `0x1F8119` | `Capsule.mk:17` |
 | Kernel mirror | `src/hardware/virtio_net_capsule` | `Capsule.mk:18` |
 
 The reply endpoint id `4294967305` is `0x1_0000_0009`, slot 9 in the per-service reply numbering, which
@@ -40,24 +40,28 @@ endpoint constant at all: its server receives with `mk_ipc_recv_from`, which yie
 replies straight back to that pid with `mk_ipc_reply` (`src/server/runner.rs:44`, `src/server/error.rs:24`).
 The reply target is the caller, not a baked constant.
 
-The mask `0x1F8019` decomposes bit by bit against `src/capabilities/types.rs`:
+The mask `0x1F8119` decomposes bit by bit against `src/capabilities/types/bit.rs` (the enum is in
+`src/capabilities/types/defs.rs`):
 
 ```
-  0x000008  IPC          bit()       8   types.rs:59
-  0x000010  Memory       bit()      16   types.rs:60
-  0x008000  DeviceEnum   bit()   32768   types.rs:71
-  0x010000  Driver       bit()   65536   types.rs:72
-  0x020000  Mmio         bit()  131072   types.rs:73
-  0x040000  Irq          bit()  262144   types.rs:74
-  0x080000  Dma          bit()  524288   types.rs:75
-  0x100000  Pio          bit() 1048576   types.rs:76
+  0x000001  CoreExec     bit()       1   types/bit.rs:23
+  0x000008  IPC          bit()       8   types/bit.rs:26
+  0x000010  Memory       bit()      16   types/bit.rs:27
+  0x000100  Debug        bit()     256   types/bit.rs:31
+  0x008000  DeviceEnum   bit()   32768   types/bit.rs:38
+  0x010000  Driver       bit()   65536   types/bit.rs:39
+  0x020000  Mmio         bit()  131072   types/bit.rs:40
+  0x040000  Irq          bit()  262144   types/bit.rs:41
+  0x080000  Dma          bit()  524288   types/bit.rs:42
+  0x100000  Pio          bit() 1048576   types/bit.rs:43
   ------
-  0x1F8019  = 8 + 16 + 32768 + 65536 + 131072 + 262144 + 524288 + 1048576
+  0x1F8119  = 1 + 8 + 16 + 256 + 32768 + 65536 + 131072 + 262144 + 524288 + 1048576
 ```
 
-The kernel spawn path requests exactly those eight capabilities and no others, OR-ing the same bits
-(`src/hardware/virtio_net_capsule/spawn.rs:58`). There is no `CoreExec` bit (1), no `Network` bit (4),
-and no `FileSystem` bit (64). The `Network` absence is deliberate and called out in the source: a
+The kernel spawn path requests `IPC | Memory | Debug | Driver | DeviceEnum | Mmio | Irq | Dma | Pio`,
+with `Debug` coming through `serial_debug_cap()` (`src/hardware/virtio_net_capsule/spawn.rs:58`);
+`CoreExec` is granted to every executable process. There is no `Network` bit (4) and no `FileSystem`
+bit (64). The `Network` absence is deliberate and called out in the source: a
 frame-level transport over IPC is not a network-service authority, and that authority belongs to a
 future net-stack capsule layered on top (`Capsule.mk:1`, `spawn.rs:17`). The mask is the hardware-driver
 envelope: the capsule can enumerate devices, claim one, map its registers by MMIO or PIO, bind its
@@ -160,10 +164,10 @@ frame surface (`src/hardware/virtio_net_capsule/capability.rs:30`).
   Capsule.mk                          slug, handle, ports, capability mask, kernel mirror
   src/hardware/virtio_net_capsule/    the kernel-side embed, verified spawn, gate, and mirrored protocol
   src/userspace/init/spawn_plan/drivers_virtio_display.rs   the driver spawn entry and boot marker
-  src/capabilities/types.rs           the capability bit definitions the mask decomposes against
+  src/capabilities/types/bit.rs       the capability bit values the mask decomposes against
 ```
 
 Everything here is drawn from `userland/capsule_driver_virtio_net/` (the capsule source and its
-`Capsule.mk`), `userland/capsule_net_core/` (the frame consumer), `src/capabilities/types.rs`, and the
+`Capsule.mk`), `userland/capsule_net_core/` (the frame consumer), `src/capabilities/types/bit.rs`, and the
 kernel mirror under `src/hardware/virtio_net_capsule/`. Every reference above is verified against those
 trees.

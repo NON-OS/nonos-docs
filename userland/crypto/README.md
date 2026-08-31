@@ -22,7 +22,7 @@ structure one page per concern so a page can be read beside the folder it descri
 | Binary name | `crypto` | `Capsule.mk:10` |
 | Kernel mirror | `src/security/crypto_capsule` | `Capsule.mk:17` |
 
-The mask `0x39` decomposes into four bits, checked against `src/capabilities/types.rs`:
+The mask `0x39` decomposes into four bits, checked against `src/capabilities/types/defs.rs`:
 
 | Bit | Value | Grants |
 |-----|-------|--------|
@@ -94,5 +94,5 @@ gates and transports requests is a third. The [transport](transport.md) page cov
 ## Source map
 
 Everything here is drawn from `userland/capsule_crypto/` (the capsule source and its `Capsule.mk`),
-`src/capabilities/types.rs` (the capability bits), and the kernel spawn-and-client mirror under
+`src/capabilities/types/defs.rs` (the capability bits), and the kernel spawn-and-client mirror under
 `src/security/crypto_capsule/`. Every reference above is verified against those trees.

@@ -27,7 +27,7 @@ Everything the kernel and the service registry need to name and reach the market
 | Namespace | `systems.nonos.market` | `Capsule.mk:13` |
 | Service endpoint | `service:4106:market.index` | `Capsule.mk:14`, `src/security/market_capsule/spawn.rs:37`, `spawn.rs:38` |
 | Reply endpoint | `reply:4107:endpoint.4294967303` | `Capsule.mk:15`, `spawn.rs:39` |
-| Capability mask | `0x19` (manifest); `0x18` requested at spawn | `Capsule.mk:17`, `spawn.rs:56` |
+| Capability mask | `0x39` (manifest) | `Capsule.mk:17` |
 | Binary name | `market` | `Capsule.mk:11` |
 | Kernel mirror | `src/security/market_capsule` | `Capsule.mk:18` |
 
@@ -35,25 +35,27 @@ The reply endpoint number is not arbitrary. The capsule sends every reply to the
 `0x1_0000_0007` (`src/protocol/endpoint.rs:17`), which is decimal `4294967303`, exactly the number in the
 reply endpoint name.
 
-The capability mask decomposes against `src/capabilities/types.rs`:
+The capability mask decomposes against `src/capabilities/types/defs.rs`:
 
 ```
-  0x0001  CoreExec   bit()  1    types.rs:56
-  0x0008  IPC        bit()  8    types.rs:59
-  0x0010  Memory     bit() 16    types.rs:60
+  0x0001  CoreExec   = 1
+  0x0008  IPC        = 8
+  0x0010  Memory     = 16
+  0x0020  Crypto     = 32
   ------
-  0x0019  = 1 + 8 + 16
+  0x0039  = 1 + 8 + 16 + 32
 ```
 
-There is a real discrepancy here worth stating plainly rather than smoothing over. `Capsule.mk:17`
-declares `CAPSULE_REQUIRED_CAPS := 0x19` and its comment on `Capsule.mk:16` reads `IPC | Memory = 0x08 |
-0x10 = 0x19`, but `0x08 | 0x10` is `0x18`, not `0x19`; the extra bit is CoreExec (`0x01`). The kernel-side
-spawn requests exactly `Capability::IPC.bit() | Capability::Memory.bit()`, which is `0x18`, and requests
-nothing else (`src/security/market_capsule/spawn.rs:56`). So the value the manifest and attestation are
-built from (`0x19`) carries a CoreExec bit that the runtime spawn does not request, and CoreExec is not
-added implicitly anywhere in the spawn path. Either way the market holds no FileSystem, no Network, no
-Crypto, and no hardware capability; the extra bit is a manifest arithmetic slip, not a live authority the
-capsule uses.
+`Crypto` is in the mask because the release-signature check calls `crypto_ed25519_verify`, whose syscall
+is gated on `Capability::Crypto` at the contract layer; without it that verification is denied
+(`userland/capsule_market/Capsule.mk:3`). There is a subtlety worth stating plainly. The manifest declares
+`CAPSULE_REQUIRED_CAPS := 0x39` (CoreExec, IPC, Memory, Crypto), while the kernel-side spawn passes
+`requested_caps = IPC | Memory | Crypto`, which is `0x38` and omits CoreExec
+(`src/security/market_capsule/spawn.rs:56`). That difference does not attenuate the capsule: `requested_caps`
+bounds only optional caps, and the market declares no optional caps, so the installed set is the manifest's
+required `0x39`, CoreExec included (the install rule is `required | (optional & granted)`, see the
+[userland model](../README.md)). The market holds no FileSystem, Network, or hardware capability; `Crypto`
+is the only sensitive bit, and it exists solely for the Ed25519 index-signature check.
 
 ## The pillars
 
@@ -115,7 +117,7 @@ inbox performs no caller attestation and answers whoever reaches it.
   userland/capsule_market/Capsule.mk          slug, handle, ports, capability mask, kernel mirror
   userland/marketplace_abi/                   the shared index and release codec the capsule decodes
   src/security/market_capsule/                the kernel-side embed, verified spawn, and CAP_APPS client gate
-  src/capabilities/types.rs                   the capability bits behind the mask
+  src/capabilities/types/defs.rs              the capability bits behind the mask
 ```
 
 Every reference above is verified against those trees.

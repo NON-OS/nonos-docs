@@ -58,16 +58,16 @@ INIT, runtime, and paging sections into a brokered DMA window, and waits for the
 before higher Wi-Fi runtime work begins" reads as if the firmware is delivered to the device. It is not:
 the staging writes into RAM only. This documentation follows the code.
 
-The mask `0xF8019` decomposes bit by bit against `src/capabilities/types.rs`:
+The mask `0xF8019` decomposes bit by bit against `src/capabilities/types/bit.rs` (the enum is in `src/capabilities/types/defs.rs`):
 
 ```
-  0x00008  IPC          bit()      8   types.rs:59
-  0x00010  Memory       bit()     16   types.rs:60
-  0x08000  DeviceEnum   bit()  32768   types.rs:71
-  0x10000  Driver       bit()  65536   types.rs:72
-  0x20000  Mmio         bit() 131072   types.rs:73
-  0x40000  Irq          bit() 262144   types.rs:74
-  0x80000  Dma          bit() 524288   types.rs:75
+  0x00008  IPC          bit()      8   types/bit.rs:26
+  0x00010  Memory       bit()     16   types/bit.rs:27
+  0x08000  DeviceEnum   bit()  32768   types/bit.rs:38
+  0x10000  Driver       bit()  65536   types/bit.rs:39
+  0x20000  Mmio         bit() 131072   types/bit.rs:40
+  0x40000  Irq          bit() 262144   types/bit.rs:41
+  0x80000  Dma          bit() 524288   types/bit.rs:42
   -------
   0xF8019  = 8 + 16 + 32768 + 65536 + 131072 + 262144 + 524288
 ```
@@ -143,7 +143,7 @@ and that is the current boundary.
   userland/capsule_driver_iwlwifi/Capsule.mk         slug, handle, ports, capability mask, kernel mirror
   src/hardware/iwlwifi_capsule/                       the kernel-side embed and verified spawn
   src/userspace/init/spawn_plan/drivers_bus.rs        the DRIVER-IWLWIFI spawn entry
-  src/capabilities/types.rs                           the capability bit values behind the mask
+  src/capabilities/types/bit.rs                       the capability bit values behind the mask
 ```
 
 Every reference above is verified against those trees.

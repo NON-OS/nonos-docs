@@ -14,11 +14,11 @@ the server loop, per-operation logic, state, and honest gaps.
 |---------|------------------|----------------|------|-----------|
 | [compositor](compositor/README.md) | `compositor` :4310 | :4311 | `0x7919` | Owns the screen: scene layers, damage-driven compositing, vsync present. |
 | [wm](wm/README.md) | `wm` :4330 | :4331 | `0x19` | Window lifecycle, z-order, focus, and the hit-test/focus queries the input router uses. |
-| [input-router](input-router/README.md) | `input_router` :4320 | :4321 | `0x19` | Drains the kernel input ring and routes to windows by hit-test and focus, with trusted-only grabs. |
-| [desktop-shell](desktop-shell/README.md) | `desktop_shell` :4410 | :4411 | `0x1819` | The taskbar, tray, toasts, and spotlight; coordinates the desktop services. |
+| [input-router](input-router/README.md) | `input_router` :4320 | :4321 | `0x200019` | Drains the kernel input ring and routes to windows by hit-test and focus, with trusted-only grabs. Holds `InputSource`. |
+| [desktop-shell](desktop-shell/README.md) | `desktop_shell` :4410 | :4411 | `0x100191D` | The taskbar, tray, toasts, and spotlight; coordinates the desktop services. Holds `Network`, `SpawnWindow`, `Debug`. |
 | [wallpaper](wallpaper/README.md) | `wallpaper` :4340 | :4341 | `0x1819` | The background: color or catalog image, with a fade timeline. |
 | [wallpaper-catalog](wallpaper-catalog/README.md) | `wallpaper_catalog` :4110 | :4111 | `0x19` | Serves built-in wallpaper metadata and chunked image bytes. |
-| [image-codec](image-codec/README.md) | `image_codec` :4412 | :4413 | `0x1819` | Decodes PNG/BMP/JPEG/LZ4 to ARGB with real toolkit decoders; isolated because images are untrusted. |
+| [image-codec](image-codec/README.md) | `image_codec` :4412 | :4413 | `0x3819` | Decodes PNG/BMP/JPEG/LZ4 to ARGB with real toolkit decoders; isolated because images are untrusted. Holds `GraphicsSurfaceMap`. |
 | [clipboard](clipboard/README.md) | `clipboard` :4414 | :4415 | `0x19` | Bounded copy history that wipes itself on idle. |
 | [login](login/README.md) | `login` :4416 | :4417 | `0x19` | Session gate: unlocks the keyring (which is authoritative), owner-pid enforced. |
 | [toolkit](toolkit/README.md) | `toolkit` :4610 | :4611 | `0x19` | Stateless theme, animation, and component-render RPC. |
@@ -126,8 +126,8 @@ can reach a device, a file, or the network on its own, and only one capsule can 
   `CAP_IRQ`, `CAP_DMA`, `CAP_PIO`, `CAP_IO`, `CAP_NETWORK`, or `CAP_FILESYSTEM`. The GUI reaches hardware
   only through driver capsules that do.
 - Untrusted-data isolation. Images are attacker-controlled bytes, so decode is its own capsule
-  ([image-codec](image-codec/README.md)) with only `0x1819`. A decoder bug is contained to a capsule that cannot
-  touch input, the keyring, or a device.
+  ([image-codec](image-codec/README.md)) with only `0x3819`, the graphics-surface bits and nothing else.
+  A decoder bug is contained to a capsule that cannot touch input, the keyring, the network, or a device.
 - Secret handling. The [login](login/README.md) capsule is a gate, not a vault: it unlocks the
   [keyring](keyring/README.md) (`capsule_login/src/clients/keyring.rs`, `OP_UNLOCK = 5`), and the keyring stays
   authoritative. The [clipboard](clipboard/README.md) bounds its history and wipes on idle

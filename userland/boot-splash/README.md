@@ -27,7 +27,7 @@ its kernel-side spawn record.
 | Capability mask | `0x1819` | `Capsule.mk:17` |
 | Kernel mirror | `src/userspace/capsule_boot_splash` | `Capsule.mk:18` |
 
-The mask `0x1819` decomposes into five bits, checked against `src/capabilities/types.rs`:
+The mask `0x1819` decomposes into five bits, checked against `src/capabilities/types/defs.rs`:
 
 | Bit | Value | Grants | Source |
 |-----|-------|--------|--------|
@@ -89,7 +89,7 @@ Step by step:
 
 1. The kernel spawns the capsule at boot through the desktop-fleet plan, which brings up the display core
    early (input router, compositor, then the splash) and calls the idempotent `spawn_boot_splash` guarded
-   by an `is_alive` check (`src/userspace/init/spawn_plan/desktop_fleet.rs:27`, `:32`, `:34`, `:43`,
+   by an `is_alive` check (`src/userspace/init/spawn_plan/desktop_fleet/mod.rs`, `:32`, `:34`, `:43`,
    `:45`). The spawn is [verified spawn](../../security/capsules-and-trust.md): it checks the embedded ELF,
    id cert, manifest, and attestation trailer, holds the requested caps against the manifest ceiling, and
    registers `app.boot_splash` on port 4796 (`src/userspace/capsule_boot_splash/spawn.rs:37`, `:57`). On
@@ -205,9 +205,9 @@ presentation.
   userland/capsule_boot_splash/src/vignette.rs  the radial background fill and band redraw
   userland/capsule_boot_splash/Capsule.mk       slug, handle, reserved endpoint, capability mask
   userland/libc/src/attest.rs                   AttestStatus and mk_attest_status
-  src/capabilities/types.rs                     the capability bit values
+  src/capabilities/types/defs.rs                     the capability bit values
   src/userspace/capsule_boot_splash/spawn.rs    the kernel-side verified spawn and requested caps
-  src/userspace/init/spawn_plan/desktop_fleet.rs   the early-display fleet entry
+  src/userspace/init/spawn_plan/desktop_fleet/mod.rs   the early-display fleet entry
   userland/capsule_input_router/src/server/handlers/grab_request.rs   the three-name grab allowlist
   nonos-mk/capsule.mk                           the generated nonos-mk-boot-splash[-sign|-verify] targets
 ```

@@ -24,31 +24,35 @@ kernel-side spawn record.
 | Service endpoint | `service:4202:driver.virtio_blk0` | `Capsule.mk:13`, `spawn.rs:33` |
 | Reply endpoint | `reply:4203:endpoint.4294967304` | `Capsule.mk:14`, `spawn.rs:34` |
 | Binary name | `driver_virtio_blk` | `Capsule.mk:10` |
-| Capability mask | `0x1F8019` | `Capsule.mk:16` |
+| Capability mask | `0x1F8119` | `Capsule.mk:16` |
 | Kernel mirror | `src/hardware/virtio_blk_capsule` | `Capsule.mk:17` |
 
 The reply endpoint id `4294967304` is `0x1_0000_0008`, the same constant the driver hard-codes as its
 outbound `KERNEL_REPLY_ENDPOINT` for every reply it sends (`src/protocol/endpoint.rs:16`). The kernel
 receives on it; the driver never listens there.
 
-The mask `0x1F8019` decomposes bit by bit against `src/capabilities/types.rs`:
+The mask `0x1F8119` decomposes bit by bit against `src/capabilities/types/bit.rs` (the enum is in
+`src/capabilities/types/defs.rs`):
 
 ```
-  0x000008  IPC          bit()       8   types.rs:59
-  0x000010  Memory       bit()      16   types.rs:60
-  0x008000  DeviceEnum   bit()   32768   types.rs:71
-  0x010000  Driver       bit()   65536   types.rs:72
-  0x020000  Mmio         bit()  131072   types.rs:73
-  0x040000  Irq          bit()  262144   types.rs:74
-  0x080000  Dma          bit()  524288   types.rs:75
-  0x100000  Pio          bit() 1048576   types.rs:76
+  0x000001  CoreExec     bit()       1   types/bit.rs:23
+  0x000008  IPC          bit()       8   types/bit.rs:26
+  0x000010  Memory       bit()      16   types/bit.rs:27
+  0x000100  Debug        bit()     256   types/bit.rs:31
+  0x008000  DeviceEnum   bit()   32768   types/bit.rs:38
+  0x010000  Driver       bit()   65536   types/bit.rs:39
+  0x020000  Mmio         bit()  131072   types/bit.rs:40
+  0x040000  Irq          bit()  262144   types/bit.rs:41
+  0x080000  Dma          bit()  524288   types/bit.rs:42
+  0x100000  Pio          bit() 1048576   types/bit.rs:43
   ------
-  0x1F8019  = 8 + 16 + 32768 + 65536 + 131072 + 262144 + 524288 + 1048576
+  0x1F8119  = 1 + 8 + 16 + 256 + 32768 + 65536 + 131072 + 262144 + 524288 + 1048576
 ```
 
-The kernel spawn path requests exactly those eight capabilities and no others, OR-ing the same bits
-(`src/hardware/virtio_blk_capsule/spawn.rs:51`). There is no `CoreExec` bit (1), no `Network` bit (4), and
-no `FileSystem` bit (64). The mask is the hardware-driver envelope: the capsule can enumerate devices,
+The kernel spawn path requests the eight hardware and IPC bits `IPC | Memory | Driver | DeviceEnum |
+Mmio | Irq | Dma | Pio` (`src/hardware/virtio_blk_capsule/spawn.rs:51`); `CoreExec` is granted to every
+executable process, and `Debug` is the serial-log bit the manifest ceiling carries. There is no `Network`
+bit (4) and no `FileSystem` bit (64). The mask is the hardware-driver envelope: the capsule can enumerate devices,
 claim one, map its registers by MMIO or PIO, bind its interrupt, allocate DMA buffers, and speak IPC. It
 cannot spawn a process, open a socket, or reach a filesystem. `Mmio` and `Pio` are both present because the
 register BAR can be either memory-mapped or a port range, and the driver takes whichever the device
@@ -147,9 +151,9 @@ caller holding `CAP_DRIVER` may reach the block surface (`src/hardware/virtio_bl
   Capsule.mk                          slug, handle, ports, capability mask, kernel mirror
   src/hardware/virtio_blk_capsule/    the kernel-side embed, verified spawn, and mirrored protocol
   src/userspace/init/spawn_plan/drivers_virtio_io.rs   the driver spawn entry and boot marker
-  src/capabilities/types.rs           the capability bit definitions the mask decomposes against
+  src/capabilities/types/bit.rs       the capability bit values the mask decomposes against
 ```
 
 Everything here is drawn from `userland/capsule_driver_virtio_blk/` (the capsule source and its
-`Capsule.mk`), `src/capabilities/types.rs`, and the kernel mirror under
+`Capsule.mk`), `src/capabilities/types/bit.rs`, and the kernel mirror under
 `src/hardware/virtio_blk_capsule/`. Every reference above is verified against those trees.

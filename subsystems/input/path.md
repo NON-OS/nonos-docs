@@ -67,7 +67,7 @@ The userland wrappers `mk_input_event_post`, `mk_input_event_drain`, `mk_input_e
 `userland/libc/src/surface_registry/`, and the matching number constants are in
 `userland/libc/src/syscall/numbers/input.rs:18`.
 
-They are dispatched by `input_ops::handle` (`src/syscall/dispatch/router/input_ops.rs:36`):
+They are dispatched by `input_ops::handle` (`src/syscall/dispatch/router/input_ops/handle.rs:23`):
 
 ```
   MkInputEventPost(ev_ptr)                     a driver posts one event
@@ -75,12 +75,12 @@ They are dispatched by `input_ops::handle` (`src/syscall/dispatch/router/input_o
   MkInputEventWait(last_seq, timeout, out_ptr) block until the sequence advances or times out
 ```
 
-`do_post` (`input_ops.rs:53`) reads one `InputEvent` out of user memory with `read_user_value`,
+`do_post` (`input_ops/do_post.rs:23`) reads one `InputEvent` out of user memory with `read_user_value`,
 returning `EFAULT` (14) if that read faults, then calls `post_input`; on a full ring it returns
-`ENOMEM` (12). `do_drain` (`input_ops.rs:64`) rejects a null pointer or a zero count with `EINVAL`
-(22), clamps the request to `MAX_DRAIN` (64) events, drains into a kernel scratch buffer, copies
+`ENOMEM` (12). `do_drain` (`input_ops/do_drain.rs:23`) rejects a null pointer or a zero count with `EINVAL`
+(22), clamps the request to `MAX_DRAIN` (64, `input_ops/consts.rs:24`) events, drains into a kernel scratch buffer, copies
 the used bytes out with `copy_to_user` (the [usercopy](../memory/usercopy.md) checks), and returns
-the count; a copy fault is `EFAULT`. `do_wait` (`input_ops.rs:83`) validates the `u64` out-pointer
+the count; a copy fault is `EFAULT`. `do_wait` (`input_ops/do_wait.rs:24`) validates the `u64` out-pointer
 with `validate_user_write`, then loops: it arms the caller as the ring's waiter, reads the current
 sequence, and if the sequence differs from the `last_seq` the caller passed, or the timeout has
 elapsed, it clears the waiter, writes the new sequence back, and returns. Otherwise it sleeps to a
@@ -89,7 +89,8 @@ the three returns `success_audited`, so every input syscall is marked in the aud
 
 ## The kernel ring
 
-The ring is a single global MPSC queue in `src/kernel_core/surface_registry/input_ring.rs`. Many
+The ring is a single global MPSC queue in `src/kernel_core/surface_registry/input_ring/` (the queue in
+`ring.rs`, post in `post.rs`, drain in `drain.rs`, waiter in `arm_waiter.rs`/`clear_waiter.rs`). Many
 driver capsules post; exactly one router capsule drains. It is a fixed array of
 `INPUT_RING_CAP = 1024` events (`types.rs:18`) behind a `spin::Mutex`, plus four atomics:
 
@@ -100,16 +101,16 @@ driver capsules post; exactly one router capsule drains. It is a fixed array of
   DROPPED AtomicU64   count of posts that hit a full ring
 ```
 
-`post_input` (`input_ring.rs:55`) takes the mutex, computes `next = (head+1) % 1024`, and if that
+`post_input` (`input_ring/post.rs:22`) takes the mutex, computes `next = (head+1) % 1024`, and if that
 equals `tail` the ring is full: it bumps `DROPPED` and returns `RegistryError::OutOfSlots`, which
 `do_post` maps to `ENOMEM`. Otherwise it stores the event, advances `head`, releases the mutex,
 does a release-ordered `SEQ.fetch_add(1)`, and if a waiter pid is parked it swaps `WAITER` to zero
 and calls `sched::wake_process` on it. The first post ever also emits the one-shot bench marker
-`input_post_first` through `mark_once` (`input_ring.rs:68`, `src/sys/bench/mark_once.rs:19`).
+`input_post_first` through `mark_once` (`input_ring/post.rs:42`, `src/sys/bench/mark_once.rs:19`).
 
-`drain_input` (`input_ring.rs:95`) takes the mutex and copies from `tail` up to `head` into the
+`drain_input` (`input_ring/drain.rs:22`) takes the mutex and copies from `tail` up to `head` into the
 caller's slice, stopping at whichever runs out first, and returns the count. `arm_input_waiter`
-and `clear_input_waiter` (`input_ring.rs:80`) set and clear the parked pid. The design is
+(`input_ring/arm_waiter.rs:23`) and `clear_input_waiter` (`input_ring/clear_waiter.rs:21`) set and clear the parked pid. The design is
 deliberately thin: a bounded ring, a monotonic sequence, and one wakeup. There is no per-source
 queue and no priority in the kernel; per-source fanout happens in the router.
 
@@ -256,9 +257,9 @@ version 1, then reads `kind` at offset 8 and `x`/`y` at 16/20.
 ## Where an event can be dropped
 
 - Full kernel ring. `post_input` drops when `head+1 == tail`, bumps `DROPPED`, returns `ENOMEM`
-  (`input_ring.rs:59`). Nothing reads `DROPPED` back out, so this loss is silent to userland.
+  (`input_ring/post.rs`). Nothing reads `DROPPED` back out, so this loss is silent to userland.
 - Drain batch cap. The router drains at most 32 per iteration
-  (`sources/kernel_ring.rs:25`) and the syscall caps at 64 (`input_ops.rs:32`); a burst larger than
+  (`sources/kernel_ring.rs:25`) and the syscall caps at 64 (`input_ops/consts.rs:24`); a burst larger than
   the ring is what actually loses events, the batch cap only bounds latency.
 - No subscription. Keyboard and window pointer delivery are gated by `subscriptions.allows`; an
   unsubscribed target is skipped with zero delivered (`route/keyboard.rs:46`,
@@ -280,7 +281,7 @@ another capsule. The trust boundary is the capability model.
 Who can post. `MkInputEventPost` requires `can_input_source`, which grants only to a token holding
 `InputSource`, `Irq`, or `Admin` (`src/syscall/contract/cap_table/mk.rs:78`,
 `src/capabilities/token/types.rs:166`). `InputSource` is capability value `2097152`
-(`src/capabilities/types.rs:49`). In practice only the device driver capsules that already own the
+(`src/capabilities/types/bit.rs:44`). In practice only the device driver capsules that already own the
 hardware through an IRQ grant hold it, so an ordinary capsule cannot inject synthetic keystrokes or
 pointer motion into the shared ring.
 
@@ -311,7 +312,7 @@ broker claim, not in the input path. `find_ps2_kbd` returning nothing is reporte
 `ps2 keyboard not present in device list` (`setup/sequence.rs:27`).
 
 First-event markers. The kernel emits the one-shot bench markers `input_post_first` on the first
-successful post and `input_drain_first` on the first drain (`input_ring.rs:68`, `input_ops.rs:79`).
+successful post and `input_drain_first` on the first drain (`input_ring/post.rs:42`, `input_ops/do_drain.rs:41`).
 `input_post_first` present but `input_drain_first` absent means events are entering the ring but the
 router is not draining, so look at whether `capsule_input_router` was spawned and holds IPC.
 Neither present means no driver ever posted; go back to the boot markers above.
@@ -334,13 +335,13 @@ consistent with ring saturation even without a log line. The batch drain and the
 
 ```
   src/kernel_core/surface_registry/types.rs          InputEvent, INPUT_RING_CAP, kinds
-  src/kernel_core/surface_registry/input_ring.rs      the MPSC ring, SEQ, WAITER, DROPPED
-  src/syscall/dispatch/router/input_ops.rs            the three MkInputEvent* handlers
+  src/kernel_core/surface_registry/input_ring/        the MPSC ring, SEQ, WAITER, DROPPED (ring/post/drain/seq/arm_waiter/clear_waiter)
+  src/syscall/dispatch/router/input_ops/              the three MkInputEvent* handlers (handle/do_post/do_drain/do_wait/consts)
   src/syscall/numbers/defs.rs                         MIEP / MIED / MIEW tags
   src/syscall/abi/tag.rs                              tag4 FourCC packing
   src/syscall/contract/cap_table/mk.rs               capability gate per syscall
   src/capabilities/token/types.rs                    can_input_source
-  src/capabilities/types.rs                           InputSource capability
+  src/capabilities/types/bit.rs                       InputSource capability bit value
   userland/libc/src/surface_registry/                InputEvent mirror, kinds, wrappers
   userland/capsule_driver_ps2_input/                 PS/2 keyboard and mouse driver
   userland/capsule_driver_usb_hid/                   USB HID driver

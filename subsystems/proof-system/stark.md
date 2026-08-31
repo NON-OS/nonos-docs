@@ -3,12 +3,14 @@
 The kernel carries a transparent STARK: a proof system that lets a prover convince a verifier that a
 computation satisfies a set of algebraic constraints, with no trusted setup, resting only on the field
 and a hash. This page documents the prover, the verifier, and the low-degree test they share. The code
-is under `src/crypto/stark/air/` and `src/crypto/stark/fri/`.
+lives in the `nonos-stark` crate, shared with the bootloader and re-exported into the kernel as
+`crate::crypto::stark` (`src/crypto/mod.rs:36`, `pub use nonos_stark as stark`); the files are under
+`nonos-stark/src/air/` and `nonos-stark/src/fri/`.
 
 ## The AIR
 
 A computation is stated as an Algebraic Intermediate Representation, the `Air` trait
-(`src/crypto/stark/air/spec.rs:28`):
+(`nonos-stark/src/air/spec.rs:28`):
 
 ```
   trait Air:
@@ -19,6 +21,9 @@ A computation is stated as an Algebraic Intermediate Representation, the `Air` t
       constraint_degree()  -> usize   // the maximum constraint polynomial degree
 ```
 
+The trait also carries `window_size()` (how many consecutive rows a transition constraint reads) and
+`num_transition()` (`nonos-stark/src/air/spec.rs:37`, `:45`), and a companion `AirExt` trait
+(`spec.rs:75`) adds `transition_ext` over the quadratic extension `Fp2`, which the attestation AIRs use.
 The trace is a table: `trace_width` columns and `2^log_trace_len` rows, one row per step of the
 computation. The transition constraints are the rules that must hold between each row and the next
 (for example "the next value is this value cubed"), and the boundary constraints pin the public
@@ -27,7 +32,7 @@ inputs and outputs on the first and last rows. A specific computation is an `Air
 
 ## The prover
 
-`stark_prove` (`src/crypto/stark/air/prove.rs:54`) turns a satisfying trace into a proof:
+`stark_prove` (`nonos-stark/src/air/prove.rs:54`) turns a satisfying trace into a proof:
 
 ```
   stark_prove(air, trace):
@@ -51,7 +56,7 @@ technique); and FRI proves the resulting quotient really is low degree.
 
 ## The verifier
 
-`stark_verify` (`src/crypto/stark/air/verify.rs:40`) mirrors the prover exactly:
+`stark_verify` (`nonos-stark/src/air/verify.rs:40`) mirrors the prover exactly:
 
 ```
   stark_verify(air, proof):
@@ -71,11 +76,11 @@ the transcript so far, so a dishonest prover cannot choose a challenge to its ad
 ## FRI
 
 FRI is the low-degree test at the core, and the verifier's soundness rests on it
-(`src/crypto/stark/fri/verify.rs`). The prover commits a codeword, and repeatedly folds it in half under
+(`nonos-stark/src/fri/verify.rs`). The prover commits a codeword, and repeatedly folds it in half under
 a transcript challenge, committing each layer, until a constant remains; the verifier redraws the fold
-challenges, **checks the final layer is a single constant** (`fri/verify.rs:62`), and for each query
+challenges, **checks the final layer is a single constant** (`fri/verify.rs:63`), and for each query
 re-derives the fold from the openings and checks it matches the next layer's committed value
-(`fri/verify.rs:103`):
+(`fri/verify.rs:96`):
 
 ```
   fri_verify(proof):
@@ -90,11 +95,29 @@ low-degree guarantee.
 
 ## Two FRI variants
 
-There are two FRIs (`src/crypto/stark/fri/` and `fri_poseidon/`), differing only in their hash: the
+There are two FRIs (`nonos-stark/src/fri/` and `fri_poseidon/`), differing only in their hash: the
 default uses BLAKE3 for the Merkle commitments and the Fiat-Shamir transcript, while `fri_poseidon`
 uses the [Poseidon](field-and-poseidon.md) permutation for both. The Poseidon variant is slower per hash
 but algebraic, which means the verifier itself can be expressed as STARK constraints and proven inside
 another proof. That is the door to recursion, covered on the [AIR catalog](air-catalog.md) page.
+
+## The attestation parameters
+
+When this STARK is used for [attestation](../../security/attestation.md), its soundness is set by
+explicit constants in one place, `nonos-stark/src/attest_params.rs`, so that a prover and a verifier that
+link the same crate cannot drift and a downward change in any of them is a visible edit:
+
+```
+  N_QUERIES         = 32     (attest_params.rs:41)   FRI query count
+  GRIND_BITS        = 16     (attest_params.rs:45)   transcript proof-of-work bits
+  EXTRA_BLOWUP_BITS = 3      (attest_params.rs:48)   blowup beyond the AIR's own rate
+  LOG_ROUNDS        = 5      (attest_params.rs:37)   the attestation hash runs 2^5 = 32 full rounds
+```
+
+These are the real FRI soundness knobs, not a vibe: the query count and the grinding bits set the
+per-query and the grinding cost a forger must beat, and the extension-field challenges (drawn over `Fp2`)
+add to the soundness error's field size. They can be dialled up. The [attestation page](../../security/attestation.md)
+covers where the constants are read; this page is where the construction they parameterise is documented.
 
 ## Honest scope
 
@@ -120,7 +143,7 @@ polite: a proof is accepted only because the verifier reran the constraint algeb
 forged evaluation has to survive the recomputation, not just be asserted.
 
 **Every check is fail-closed, and the return is a bare `bool`.** `stark_verify` returns `false` the
-moment anything is off: the wrong shape (`air/verify.rs:52`, the root, frame, and query counts must match
+moment anything is off: the wrong shape (`air/verify.rs:61`, the root, frame, and query counts must match
 the AIR), a Merkle opening that does not reconstruct, or a FRI query that does not match. FRI itself
 requires the final layer to be a single constant (`fri/verify.rs:63`) and rejects otherwise, which is the
 low-degree conclusion, because a high-degree codeword folds to a non-constant with overwhelming
@@ -159,13 +182,13 @@ codeword dies, so a prover bug that produces a too-high-degree quotient surfaces
 ## Source map
 
 ```
-  src/crypto/stark/air/spec.rs         the Air trait
-  src/crypto/stark/air/prove.rs         stark_prove
-  src/crypto/stark/air/verify.rs        stark_verify
-  src/crypto/stark/air/composition.rs   the constraint composition
-  src/crypto/stark/fri/                  the BLAKE3 FRI (prove, fold, verify)
-  src/crypto/stark/fri_poseidon/         the recursion-friendly Poseidon FRI
-  src/crypto/stark/transcript.rs, poseidon_transcript.rs   the Fiat-Shamir transcripts
+  nonos-stark/src/air/spec.rs         the Air trait
+  nonos-stark/src/air/prove.rs         stark_prove
+  nonos-stark/src/air/verify.rs        stark_verify
+  nonos-stark/src/air/composition.rs   the constraint composition
+  nonos-stark/src/fri/                  the BLAKE3 FRI (prove, fold, verify)
+  nonos-stark/src/fri_poseidon/         the recursion-friendly Poseidon FRI
+  nonos-stark/src/transcript.rs, poseidon_transcript.rs   the Fiat-Shamir transcripts
   src/kernel_core/process_spawn/capsule_spawn/runner/attest_gate.rs   the [ZK-ATTEST] marker a rejection surfaces through
 ```
 

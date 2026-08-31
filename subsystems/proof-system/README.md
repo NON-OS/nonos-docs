@@ -38,9 +38,11 @@ verifiers to reject random proofs over thousands of adversarial inputs.
 
 ## Sources
 
-The STARK is `src/crypto/stark/`: `field/` (Goldilocks), `air/` (the AIR trait, the prove and verify,
-the composition, and the gadget catalog including `wired` and `fiat_shamir`), `fri/` and `fri_poseidon/`
-(the low-degree test), `merkle/`, and the transcripts. The attestation proofs are `src/crypto/zk_kernel/`
+The STARK is the `nonos-stark` crate, re-exported into the kernel as `crate::crypto::stark`
+(`src/crypto/mod.rs:36`) and linked directly by the bootloader: `nonos-stark/src/field/` (Goldilocks),
+`air/` (the AIR trait, the prove and verify, the composition, the gadget catalog including `wired` and
+`fiat_shamir`, and the attestation AIRs), `fri/` and `fri_poseidon/` (the low-degree test), `merkle/`,
+`poseidon/` and `poseidon_merkle/`, `attest_params.rs`, and the transcripts. The attestation proofs are `src/crypto/zk_kernel/`
 (`pedersen`, `membership`, `equality`, `verifier`). The adversarial tests are
 `userland/crypto_proofs/src/zk_tests.rs`. Every page is verified against those trees with `file:line`
 references, and states honestly where a claim is proven, well-founded, or merely well-structured.

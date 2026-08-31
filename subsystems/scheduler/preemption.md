@@ -13,30 +13,38 @@ The preemption timer fires at 100 Hz, one tick every 10 ms, and each tick runs `
 (`src/process/scheduler/preemption/tick.rs:22`):
 
 ```
-  tick():
-      charge a tick against the current process's accounting
+  tick():                                              # tick.rs:22
+      charge_tick(CURRENT_PID)
       scheduler tick_count += 1
-      decrement CURRENT_TIME_SLICE (floored at zero)
-      if the slice just reached zero:
+      if spend_time_slice() == 1:                       # this CPU's own slice
           record a time-slice exhaustion
-          if kernel_preempt() policy allows: NEED_RESCHEDULE = true
-      if any realtime task is runnable: NEED_RESCHEDULE = true
+          if kernel_preempt() policy allows: set_reschedule()
+      if has_realtime_tasks(): set_reschedule()
 ```
 
 Every tick charges the running process's per-process tick accounting, bumps the global
-tick count, and decrements the current time slice. The slice is a countdown of ticks;
-`fetch_update` floors it at zero so it never underflows. When the decrement takes the
-slice to zero, the tick records the exhaustion and, if the preemption policy permits,
-sets `NEED_RESCHEDULE`. Separately, if any realtime task is runnable, the tick sets
-`NEED_RESCHEDULE` regardless of the current slice, so a realtime task does not have to
-wait for the running process's slice to expire.
+tick count, and spends one tick of the current slice. Crucially the slice and the
+reschedule flag are per-CPU state, not machine globals: `spend_time_slice`
+(`state.rs:40`) decrements `smp::percpu::current().time_slice`, saturating at zero so it
+never underflows, and returns the value before the decrement so the tick that took the
+slice from one to zero is the one that exhausted it. This is a fix for a real bug (comment
+`state.rs:23`): as single globals every CPU's timer tick decayed the same counter, so N
+cores exhausted a slice N times too fast and a reschedule raised on any core was seen by
+all. When the slice reaches zero the tick records the exhaustion and, if
+`kernel_preempt()` permits, calls `set_reschedule()` (`state.rs:53`). Separately, if any
+realtime task is runnable, the tick sets the reschedule flag regardless of the current
+slice, so a realtime task does not have to wait for the running process's slice to expire.
+On the shipping single-core build there is one CPU, so this per-CPU state behaves like a
+global, but the wiring is per-CPU.
 
 ## The time slice
 
-`CURRENT_TIME_SLICE` is the running process's remaining ticks. It is reset to
-`DEFAULT_TIME_SLICE` when a process is dispatched, as the [context switch](../process/context-switch.md)
-does on first entry, and counts down one per tick. A slice of, for example, ten ticks at
-100 Hz gives a process up to 100 ms on the CPU before the timer considers preempting it.
+This CPU's `time_slice` (`smp::percpu::current().time_slice`) is the running process's
+remaining ticks. It is reset to `DEFAULT_TIME_SLICE` (10, `state.rs:20`) via
+`set_time_slice` (`state.rs:34`) when a process is dispatched, as the
+[context switch](../process/context-switch.md) does on first entry, and counts down one per
+tick. Ten ticks at 100 Hz gives a process up to 100 ms on the CPU before the timer considers
+preempting it.
 Because the slice is charged per tick rather than by wall-clock reading, a process that
 blocks and yields before its slice expires simply gives up the rest of it, and the next
 dispatch starts a fresh slice.
@@ -45,11 +53,12 @@ dispatch starts a fresh slice.
 
 The tick runs in the timer interrupt, and it deliberately does not perform a context
 switch there. Switching inside the ISR, in the middle of whatever the interrupted code
-was doing, would be unsafe. Instead the tick sets the `NEED_RESCHEDULE` flag and returns,
-and the actual switch happens later, at a safe return point where the kernel checks the
-flag and calls the scheduler. This split, decide-to-preempt in the tick, switch at a safe
-point, is what keeps preemption from corrupting the state of the code it interrupts. The
-flag is a release-ordered store so the CPU that later reads it sees the decision.
+was doing, would be unsafe. Instead the tick sets this CPU's `need_resched` flag through
+`set_reschedule` (`state.rs:53`) and returns, and the actual switch happens later, at a safe
+return point where the kernel checks the flag with `need_reschedule` (`state.rs:49`) and
+calls the scheduler. This split, decide-to-preempt in the tick, switch at a safe point, is
+what keeps preemption from corrupting the state of the code it interrupts. The flag is a
+`Release` store (`state.rs:54`) so the CPU that later reads it sees the decision.
 
 ## Voluntary yield
 
@@ -87,24 +96,24 @@ switching where a switch would corrupt state and on not letting one process hold
 Three properties hold.
 
 **The tick never switches inline.** `tick` (`tick.rs:22`) charges accounting, decrements the slice, and
-at most sets `NEED_RESCHEDULE` with a release-ordered store (`tick.rs:35`); it performs no context
-switch. Switching inside the ISR, in the middle of whatever the interrupted code was doing, would run the
+at most sets this CPU's `need_resched` with a release-ordered store via `set_reschedule` (`state.rs:54`);
+it performs no context switch. Switching inside the ISR, in the middle of whatever the interrupted code was doing, would run the
 scheduler over a half-updated kernel state, so the decision is deferred to a safe return point where the
 kernel checks the flag. This is the discipline that keeps preemption from corrupting the code it
 interrupts, and it is why the flag is a `Release` store: the CPU that later reads it sees a fully-formed
 decision.
 
-**A runaway process is always preempted.** The slice is a countdown of ticks reset to
-`DEFAULT_TIME_SLICE` (10, `state.rs:21`) on dispatch and floored at zero by `fetch_update`
-(`tick.rs:25`) so it never underflows. When it reaches zero the tick records a
+**A runaway process is always preempted.** The slice is a per-CPU countdown of ticks reset to
+`DEFAULT_TIME_SLICE` (10, `state.rs:20`) on dispatch and saturated at zero by `spend_time_slice`
+(`state.rs:40`) so it never underflows. When it reaches zero the tick records a
 `time_slice_exhaustion` and, if `kernel_preempt()` policy allows, flags a reschedule. So a process that
 never yields voluntarily still loses the CPU when its slice is spent: there is no way for a compute-bound
 capsule to hold a core forever, which is the liveness property a preemptive scheduler owes the rest of
 the system.
 
 **Realtime work is not held hostage by the current slice.** If any realtime task is runnable, the tick
-sets `NEED_RESCHEDULE` regardless of the running process's remaining slice
-(`tick.rs:38`), so a realtime task does not have to wait out a normal task's slice. The honest boundary:
+sets the reschedule flag regardless of the running process's remaining slice
+(`tick.rs:33`, `has_realtime_tasks`), so a realtime task does not have to wait out a normal task's slice. The honest boundary:
 whether an exhausted slice actually forces a switch is gated on `sys::policy::kernel_preempt()`, so the
 policy can decline to preempt a kernel-mode path, and the switch only happens once execution reaches a
 safe point that checks the flag, so a long non-preemptible kernel section defers the switch until it
@@ -119,7 +128,7 @@ be. A capsule that never yields the core is a `NEED_RESCHEDULE` that is set but 
 did its job (check that `time_slice_exhaustions` in `SCHEDULER_STATS` is climbing) but the safe-point
 check that consumes the flag is not being reached, which on a wedged kernel path means the code never
 returned to where the flag is read. If `time_slice_exhaustions` is not climbing, the timer is not
-ticking at all, or `CURRENT_TIME_SLICE` was never reset on dispatch and sits at zero doing nothing. A
+ticking at all, or this CPU's `time_slice` was never reset on dispatch and sits at zero doing nothing. A
 realtime task that starts late despite being runnable is `has_realtime_tasks()` not reporting it, or the
 reschedule flag being set but not consumed, the same safe-point question. The `voluntary_switches`
 versus `involuntary_switches` counters on the PCB distinguish the two paths: a process accumulating only
@@ -130,9 +139,11 @@ wait point and being timer-preempted out of a spin instead.
 ## Source map
 
 ```
-  src/process/scheduler/preemption/tick.rs        the timer tick and the slice
+  src/process/scheduler/preemption/tick.rs        the timer tick and the slice spend
   src/process/scheduler/preemption/yield_impl.rs   the voluntary yield
-  src/process/scheduler/preemption/state.rs        CURRENT_TIME_SLICE, NEED_RESCHEDULE
+  src/process/scheduler/preemption/state.rs        per-CPU time_slice / need_resched accessors,
+                                                   DEFAULT_TIME_SLICE, SCHEDULER_STATS
+  src/smp/percpu/types.rs                          the per-CPU time_slice and need_resched fields
   src/process/scheduler/contract/                  the switch contract and SwitchIntent
 ```
 

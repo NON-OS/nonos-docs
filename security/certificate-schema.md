@@ -155,10 +155,10 @@ schema](manifest-schema.md).
 ## Debugging a certificate rejection
 
 Every certificate failure is an `IdCertVerifyError`
-(`src/security/nonos_id_cert/error.rs:44`), and at the loader it collapses to the
-single reason `id_cert` on the `[RUNTIME-LOAD] FAILED` line, so the reason string
-alone does not tell you which check fired. The variant does, and the two decode
-paths are worth separating.
+(`src/security/nonos_id_cert/error.rs:45`), surfaced through
+`SpawnError::NonosIdCertRejected(IdCertVerifyError)` (`capsule_spawn/spec.rs:48`),
+so the enclosing variant does not tell you which check fired. The inner
+`IdCertVerifyError` does, and the two decode paths are worth separating.
 
 A structural rejection is an `IdCertDecodeError` wrapped in `Decode` and comes from
 the bounded decoder refusing a malformed certificate: `SchemaVersion` when the
@@ -198,5 +198,5 @@ is the genuine "wrong key or tampered bytes" case.
 ```
 
 The anchor these signatures reduce to is the [trust anchor](trust-anchor.md); the
-pipeline that maps these errors onto the `[RUNTIME-LOAD] reason=id_cert` line is on
+pipeline that wraps these errors into `SpawnError::NonosIdCertRejected` is on
 the [verified spawn](capsules-and-trust.md) page.
